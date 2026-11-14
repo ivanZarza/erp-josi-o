@@ -8,7 +8,7 @@ import { db } from "@/kernel/db";
 import { centrosFiltro, type Contexto } from "@/kernel/contexto";
 import { auditar } from "@/kernel/eventos";
 import { siguienteNumero } from "@/kernel/numeracion";
-import { fecha as fechaEs } from "@/kernel/formato";
+import { fecha as fechaEs, euros, numero as numeroEs } from "@/kernel/formato";
 import type { Prisma, GrupoCategoriaContable } from "@/generated/prisma/client";
 import {
   FacturaRecibidaEsquema,
@@ -290,6 +290,137 @@ export async function anularFacturaRecibida(ctx: Contexto, id: string) {
     await tx.facturaRecibida.update({ where: { id }, data: { estado: "ANULADA" } });
     await auditar(tx, { tenantId: ctx.tenant.id, usuarioId: ctx.usuario.id, entidad: "FacturaRecibida", entidadId: id, accion: "anular", antes: { estado: f.estado }, despues: { estado: "ANULADA" } });
   });
+}
+
+// ---------- revisión de facturas recibidas: cruce con los albaranes y duplicadas ----------
+
+export interface AvisoFactura {
+  tono: "aviso" | "error";
+  texto: string;
+}
+
+type FacturaParaRevisar = {
+  id: string;
+  numero: string;
+  numeroProveedor: string;
+  proveedorId: string | null;
+  proveedorNombre: string;
+  sociedadId: string;
+  centroId: string | null;
+  fecha: Date;
+  total: Prisma.Decimal | number;
+  estado: string;
+  pedidoCompraId: string | null;
+  lineas: { concepto: string; cantidad: Prisma.Decimal | number; precio: Prisma.Decimal | number; productoId: string | null }[];
+};
+
+/** Número de factura sin guiones, barras ni espacios, para comparar «FHL-26/00395» con «FHL2600395». */
+const numeroLimpio = (n: string) => n.toUpperCase().replace(/[^A-Z0-9]/g, "");
+const DIA_MS = 86_400_000;
+
+/**
+ * Avisos de revisión de las facturas recibidas (idea aceptada «La factura no cuadra», catalogo.md §11):
+ * - Cada línea con producto se compara con las compras recibidas (núcleo) del mismo proveedor y centro desde su
+ *   factura anterior (sin contar abonos) hasta la fecha de la factura; si no hay anterior, 40 días; si la factura
+ *   está enlazada a una compra, solo ese albarán. Avisa de precio distinto (más de 0,5 %), producto que no está en
+ *   ningún albarán y cantidad facturada distinta de la recibida (sumando todas las entregas del periodo).
+ * - Posible duplicada: otra factura no anulada del mismo proveedor y sociedad con el mismo número (sin signos)
+ *   o con el mismo total y fecha a menos de 3 días.
+ * Devuelve los avisos por id de factura (solo las que tienen alguno).
+ */
+export async function revisarFacturasRecibidas(tenantId: string, facturas: FacturaParaRevisar[]): Promise<Map<string, AvisoFactura[]>> {
+  const avisos = new Map<string, AvisoFactura[]>();
+  const activas = facturas.filter((f) => f.estado !== "ANULADA");
+  if (activas.length === 0) return avisos;
+  const prisma = await db();
+  const tiempos = activas.map((f) => f.fecha.getTime());
+  const minF = Math.min(...tiempos);
+  const maxF = Math.max(...tiempos);
+  const anadir = (id: string, a: AvisoFactura) => avisos.set(id, [...(avisos.get(id) ?? []), a]);
+
+  // 1) Posibles duplicadas
+  const otras = await prisma.facturaRecibida.findMany({
+    where: { tenantId, estado: { not: "ANULADA" }, proveedorNombre: { in: Array.from(new Set(activas.map((f) => f.proveedorNombre))) }, fecha: { gte: new Date(minF - 5 * DIA_MS), lte: new Date(maxF + 5 * DIA_MS) } },
+    select: { id: true, numero: true, numeroProveedor: true, proveedorNombre: true, sociedadId: true, fecha: true, total: true },
+  });
+  for (const f of activas) {
+    const igual = otras.find(
+      (o) =>
+        o.id !== f.id &&
+        o.sociedadId === f.sociedadId &&
+        o.proveedorNombre === f.proveedorNombre &&
+        (numeroLimpio(o.numeroProveedor) === numeroLimpio(f.numeroProveedor) || (Number(o.total) === Number(f.total) && Math.abs(o.fecha.getTime() - f.fecha.getTime()) <= 3 * DIA_MS)),
+    );
+    if (igual) anadir(f.id, { tono: "error", texto: `Posible duplicada de ${igual.numero} (nº del proveedor ${igual.numeroProveedor}, ${fechaEs(igual.fecha)}, ${euros(igual.total)}). Si es la misma, anula una de las dos.` });
+  }
+
+  // 2) Cruce con las compras recibidas del núcleo. Cada factura cubre los albaranes recibidos desde la factura
+  //    anterior del mismo proveedor y centro hasta su fecha (o su albarán, si está enlazada a una compra).
+  const conCompras = activas.filter((f) => f.proveedorId && f.centroId && f.lineas.some((l) => l.productoId));
+  if (conCompras.length) {
+    const proveedorIds = Array.from(new Set(conCompras.map((f) => f.proveedorId!)));
+    const centroIds = Array.from(new Set(conCompras.map((f) => f.centroId!)));
+    const [compras, anteriores] = await Promise.all([
+      prisma.pedidoCompraLinea.findMany({
+        where: {
+          productoId: { in: Array.from(new Set(conCompras.flatMap((f) => f.lineas.map((l) => l.productoId).filter((x): x is string => !!x)))) },
+          pedido: { tenantId, proveedorId: { in: proveedorIds }, centroId: { in: centroIds }, estado: { in: ["RECIBIDO", "RECIBIDO_PARCIAL"] }, recibidoEn: { gte: new Date(minF - 45 * DIA_MS), lte: new Date(maxF + DIA_MS) } },
+        },
+        select: { productoId: true, precio: true, cantidad: true, recibida: true, pedidoId: true, pedido: { select: { proveedorId: true, centroId: true, recibidoEn: true, albaran: true, numero: true } } },
+      }),
+      // facturas anteriores (sin abonos) para saber desde cuándo cuenta cada factura
+      prisma.facturaRecibida.findMany({
+        where: { tenantId, proveedorId: { in: proveedorIds }, centroId: { in: centroIds }, estado: { not: "ANULADA" }, total: { gt: 0 }, fecha: { gte: new Date(minF - 60 * DIA_MS), lt: new Date(maxF) } },
+        select: { proveedorId: true, centroId: true, fecha: true },
+      }),
+    ]);
+    for (const f of conCompras) {
+      const previa = anteriores.filter((a) => a.proveedorId === f.proveedorId && a.centroId === f.centroId && a.fecha < f.fecha).reduce<number | null>((m, a) => Math.max(m ?? 0, a.fecha.getTime()), null);
+      const desde = previa !== null ? previa + DIA_MS : f.fecha.getTime() - 40 * DIA_MS;
+      const hasta = f.fecha.getTime() + DIA_MS;
+      const suyas = compras.filter(
+        (c) =>
+          c.pedido.proveedorId === f.proveedorId &&
+          c.pedido.centroId === f.centroId &&
+          (f.pedidoCompraId ? c.pedidoId === f.pedidoCompraId : c.pedido.recibidoEn!.getTime() >= desde && c.pedido.recibidoEn!.getTime() < hasta),
+      );
+      let diferencia = 0;
+      const lineas: AvisoFactura[] = [];
+      const facturadoPorProducto = new Map<string, { concepto: string; cantidad: number; precio: number }>();
+      for (const l of f.lineas) {
+        const cantidad = Number(l.cantidad);
+        const precio = Number(l.precio);
+        if (!l.productoId || cantidad <= 0) continue; // los abonos no se cruzan
+        const mismas = suyas.filter((c) => c.productoId === l.productoId);
+        if (mismas.length === 0) {
+          lineas.push({ tono: "aviso", texto: `${l.concepto}: no aparece en los albaranes de compra de este proveedor desde su factura anterior.` });
+          continue;
+        }
+        const x = facturadoPorProducto.get(l.productoId) ?? { concepto: l.concepto, cantidad: 0, precio };
+        x.cantidad += cantidad;
+        facturadoPorProducto.set(l.productoId, x);
+        if (!mismas.some((c) => Math.abs(Number(c.precio) - precio) <= Math.max(0.01, Number(c.precio) * 0.005))) {
+          const ref = mismas.reduce((m, c) => (c.pedido.recibidoEn! > m.pedido.recibidoEn! ? c : m));
+          const d = redondear((precio - Number(ref.precio)) * cantidad);
+          diferencia += d;
+          lineas.push({ tono: "aviso", texto: `${l.concepto}: facturado a ${euros(precio, 4)} y en el albarán ${ref.pedido.albaran ?? ref.pedido.numero} a ${euros(ref.precio, 4)} (${d > 0 ? "+" : ""}${euros(d)}).` });
+        }
+      }
+      for (const [productoId, x] of facturadoPorProducto) {
+        const recibido = suyas.filter((c) => c.productoId === productoId).reduce((s, c) => s + Number(c.recibida ?? c.cantidad), 0);
+        if (Math.abs(x.cantidad - recibido) > 0.0005) {
+          const d = redondear((x.cantidad - recibido) * x.precio);
+          diferencia += d;
+          lineas.push({ tono: "aviso", texto: `${x.concepto}: facturado ${numeroEs(x.cantidad, 3)} y recibido ${numeroEs(recibido, 3)} (${d > 0 ? "+" : ""}${euros(d)}).` });
+        }
+      }
+      if (lineas.length) {
+        anadir(f.id, { tono: "error", texto: `La factura no cuadra con los albaranes${diferencia ? `: ${euros(redondear(Math.abs(diferencia)))} sin IVA ${diferencia > 0 ? "de más (para reclamar un abono)" : "de menos"}` : ""}.` });
+        for (const a of lineas) anadir(f.id, a);
+      }
+    }
+  }
+  return avisos;
 }
 
 // ---------- facturas emitidas (solo preparadas: NO certificadas) ----------
@@ -576,15 +707,17 @@ export async function resumenPorSociedad(ctx: Contexto, mes: string) {
 // ---------- para el Cuadro de mando (exportado) ----------
 
 /**
- * Gastos (base sin IVA) por centro y día: gastos registrados + facturas recibidas de categorías
- * de gasto fijo o variable. La mercancía NO entra aquí (el Cuadro la lee de las compras del núcleo).
+ * Gastos (base sin IVA) por centro y día: gastos registrados + facturas recibidas, SOLO de categorías
+ * de gasto fijo o variable. La mercancía NO entra aquí (el Cuadro la lee de las compras del núcleo) ni el
+ * personal (el Cuadro lo lee de Personal): si entraran, se contarían dos veces. Un gasto enlazado a una
+ * factura recibida tampoco suma (ya suma la factura).
  */
 export async function gastosPorCentroYDia(tenantId: string, centroIds: string[], desde: Date, hasta: Date) {
   const prisma = await db();
   const categoriasGasto = await prisma.categoriaContable.findMany({ where: { tenantId, grupo: { in: ["GASTO_FIJO", "GASTO_VARIABLE"] } }, select: { id: true } });
   const ids = categoriasGasto.map((c) => c.id);
   const [gastos, facturas] = await Promise.all([
-    prisma.gastoContable.groupBy({ by: ["centroId", "fecha"], where: { tenantId, centroId: { in: centroIds }, estado: { not: "ANULADO" }, fecha: { gte: desde, lt: hasta } }, _sum: { base: true } }),
+    prisma.gastoContable.groupBy({ by: ["centroId", "fecha"], where: { tenantId, centroId: { in: centroIds }, estado: { not: "ANULADO" }, categoriaId: { in: ids }, facturaRecibidaId: null, fecha: { gte: desde, lt: hasta } }, _sum: { base: true } }),
     prisma.facturaRecibida.groupBy({ by: ["centroId", "fecha"], where: { tenantId, centroId: { in: centroIds }, estado: { not: "ANULADA" }, categoriaId: { in: ids }, fecha: { gte: desde, lt: hasta } }, _sum: { base: true } }),
   ]);
   return [...gastos, ...facturas].map((g) => ({ centroId: g.centroId as string, fecha: g.fecha, importe: Number(g._sum.base ?? 0) }));
@@ -596,7 +729,7 @@ export async function detalleGastosCentro(tenantId: string, centroId: string, de
   const categoriasGasto = await prisma.categoriaContable.findMany({ where: { tenantId, grupo: { in: ["GASTO_FIJO", "GASTO_VARIABLE"] } } });
   const nombres = new Map(categoriasGasto.map((c) => [c.id, c.nombre]));
   const [gastos, facturas] = await Promise.all([
-    prisma.gastoContable.findMany({ where: { tenantId, centroId, estado: { not: "ANULADO" }, fecha: { gte: desde, lt: hasta } }, orderBy: { fecha: "asc" } }),
+    prisma.gastoContable.findMany({ where: { tenantId, centroId, estado: { not: "ANULADO" }, categoriaId: { in: Array.from(nombres.keys()) }, facturaRecibidaId: null, fecha: { gte: desde, lt: hasta } }, orderBy: { fecha: "asc" } }),
     prisma.facturaRecibida.findMany({ where: { tenantId, centroId, estado: { not: "ANULADA" }, categoriaId: { in: Array.from(nombres.keys()) }, fecha: { gte: desde, lt: hasta } }, orderBy: { fecha: "asc" } }),
   ]);
   return [

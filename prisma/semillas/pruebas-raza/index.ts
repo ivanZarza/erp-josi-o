@@ -20,8 +20,8 @@ export const PARTES: Record<string, SembrarParte> = {
   bebidas, // ola 1: vinos de la carta + resto de bebidas
   personal, // ola 1: plantilla, cuadrantes, fichajes, nóminas
   sala, // ola 1: reservas, clientes, eventos, calidad
-  caja, // ola 2: ventas y cierres (usa platos y bebidas), cuadro de mando
   contabilidad, // ola 2: facturas, gastos, nóminas en contabilidad
+  caja, // ola 2: ventas y cierres (usa platos y bebidas) y cuadro de mando; va la última para que los indicadores incluyan los gastos
 };
 
 const MODULOS_LOCAL = ["bebidas", "comidas", "caja", "personal", "contabilidad", "cuadro", "calidad", "reservas", "eventos", "clientes", "webs"];

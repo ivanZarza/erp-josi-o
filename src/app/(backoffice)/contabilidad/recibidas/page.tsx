@@ -1,8 +1,8 @@
 import { exigir } from "@/kernel/contexto";
 import { euros, fecha, numero } from "@/kernel/formato";
-import { Cabecera, BotonEnlace, Campo, Selector, Etiqueta, HuecoIntegracion, Tabla } from "@/ui";
+import { Cabecera, BotonEnlace, Campo, Selector, Etiqueta, HuecoIntegracion, Tabla, Aviso } from "@/ui";
 import { TablaDesplegable, DatosDetalle } from "@/ui/tabla-desplegable";
-import { listarFacturasRecibidas, sociedadesVisibles, diccionarios, hoyISO, redondear } from "@/modulos/contabilidad/servicio";
+import { listarFacturasRecibidas, revisarFacturasRecibidas, sociedadesVisibles, diccionarios, hoyISO, redondear } from "@/modulos/contabilidad/servicio";
 import { accionValidarFacturaRecibida, accionPagarFacturaRecibida, accionAnularFacturaRecibida } from "@/modulos/contabilidad/acciones";
 import { Avisos, Filtros, FiltroSociedad, FiltroMes, FormularioPago, BotonAccion, ESTADO_RECIBIDA, param, type ParametrosBusqueda } from "../_comun";
 
@@ -15,6 +15,8 @@ export default async function FacturasRecibidas({ searchParams }: { searchParams
   const hoy = hoyISO();
   const volver = `/contabilidad/recibidas?${new URLSearchParams(Object.entries(filtro).filter(([, v]) => v) as [string, string][]).toString()}`;
   const sumaTotal = redondear(facturas.filter((f) => f.estado !== "ANULADA").reduce((s, f) => s + Number(f.total), 0));
+  // «La factura no cuadra» con los albaranes y posibles duplicadas (solo se revisan las que no están pagadas)
+  const revision = await revisarFacturasRecibidas(ctx.tenant.id, facturas.filter((f) => f.estado === "PENDIENTE" || f.estado === "VALIDADA"));
 
   return (
     <>
@@ -45,7 +47,7 @@ export default async function FacturasRecibidas({ searchParams }: { searchParams
       </Filtros>
 
       <TablaDesplegable
-        total={`${numero(facturas.length)} facturas · ${euros(sumaTotal)} con IVA (sin anuladas)`}
+        total={`${numero(facturas.length)} facturas · ${euros(sumaTotal)} con IVA (sin anuladas)${revision.size ? ` · ${numero(revision.size)} con avisos de revisión` : ""}`}
         vacio="No hay facturas con estos filtros. Registra la primera con «Registrar factura»."
         columnas={[
           { titulo: "Fecha" },
@@ -59,9 +61,10 @@ export default async function FacturasRecibidas({ searchParams }: { searchParams
         filas={facturas.map((f) => {
           const centro = f.centroId ? d.centros.get(f.centroId) : null;
           const vencida = f.vencimiento && f.estado !== "PAGADA" && f.estado !== "ANULADA" && f.vencimiento.toISOString().slice(0, 10) < hoy;
+          const avisos = revision.get(f.id) ?? [];
           return {
             id: f.id,
-            tono: vencida ? ("error" as const) : f.estado === "PENDIENTE" ? ("aviso" as const) : undefined,
+            tono: vencida ? ("error" as const) : f.estado === "PENDIENTE" || avisos.length ? ("aviso" as const) : undefined,
             celdas: [
               fecha(f.fecha),
               f.proveedorNombre,
@@ -69,12 +72,24 @@ export default async function FacturasRecibidas({ searchParams }: { searchParams
               d.sociedades.get(f.sociedadId)?.razonSocial ?? "—",
               fecha(f.vencimiento),
               euros(f.total),
-              <Etiqueta key="e" tono={ESTADO_RECIBIDA[f.estado].tono}>
-                {ESTADO_RECIBIDA[f.estado].texto}
-              </Etiqueta>,
+              <span key="e" className="flex flex-wrap gap-1">
+                <Etiqueta tono={ESTADO_RECIBIDA[f.estado].tono}>{ESTADO_RECIBIDA[f.estado].texto}</Etiqueta>
+                {avisos.length > 0 && <Etiqueta tono="error">{avisos.some((a) => a.texto.startsWith("Posible duplicada")) ? "¿Duplicada?" : "No cuadra"}</Etiqueta>}
+              </span>,
             ],
             detalle: (
               <div className="space-y-4">
+                {avisos.length > 0 && (
+                  <Aviso tono="aviso" titulo="Revisar antes de validar o pagar">
+                    <ul className="list-disc space-y-1 pl-5">
+                      {avisos.map((a, i) => (
+                        <li key={i} className={a.tono === "error" ? "font-medium" : undefined}>
+                          {a.texto}
+                        </li>
+                      ))}
+                    </ul>
+                  </Aviso>
+                )}
                 <DatosDetalle
                   datos={[
                     { etiqueta: "Número interno", valor: f.numero },
