@@ -14,15 +14,15 @@ enum TipoListaCalidad {
 
 /// Plantilla de lista de comprobación APPCC. centroId vacío = vale para todos los centros.
 model CalidadPlantilla {
-  id        String           @id @default(cuid())
-  tenantId  String
-  centroId  String?
-  nombre    String
-  tipo      TipoListaCalidad
-  orden     Int              @default(0)
-  activo    Boolean          @default(true)
-  createdAt DateTime         @default(now())
-  updatedAt DateTime         @updatedAt
+  id          String                  @id @default(cuid())
+  tenantId    String
+  centroId    String?
+  nombre      String
+  tipo        TipoListaCalidad
+  orden       Int                     @default(0)
+  activo      Boolean                 @default(true)
+  createdAt   DateTime                @default(now())
+  updatedAt   DateTime                @updatedAt
   puntos      CalidadPlantillaPunto[]
   ejecuciones CalidadEjecucion[]
 
@@ -41,17 +41,17 @@ model CalidadPlantillaPunto {
 
 /// Lista hecha un día en un centro
 model CalidadEjecucion {
-  id              String           @id @default(cuid())
+  id              String             @id @default(cuid())
   tenantId        String
   centroId        String
   plantillaId     String
-  plantilla       CalidadPlantilla @relation(fields: [plantillaId], references: [id])
-  fecha           DateTime         @db.Date // jornada
+  plantilla       CalidadPlantilla   @relation(fields: [plantillaId], references: [id])
+  fecha           DateTime           @db.Date // jornada
   todoCorrecto    Boolean
   observaciones   String?
   realizadoPor    String?
   realizadoNombre String?
-  createdAt       DateTime         @default(now())
+  createdAt       DateTime           @default(now())
   respuestas      CalidadRespuesta[]
 
   @@unique([plantillaId, centroId, fecha])
@@ -78,16 +78,16 @@ enum TipoEquipoFrio {
 }
 
 model CalidadEquipo {
-  id        String         @id @default(cuid())
+  id        String               @id @default(cuid())
   tenantId  String
   centroId  String
   nombre    String
   tipo      TipoEquipoFrio
-  minimo    Decimal        @db.Decimal(5, 1)
-  maximo    Decimal        @db.Decimal(5, 1)
+  minimo    Decimal              @db.Decimal(5, 1)
+  maximo    Decimal              @db.Decimal(5, 1)
   sondaId   String? // hueco: identificador de la sonda conectada (fase posterior)
-  activo    Boolean        @default(true)
-  createdAt DateTime       @default(now())
+  activo    Boolean              @default(true)
+  createdAt DateTime             @default(now())
   registros CalidadTemperatura[]
 
   @@index([tenantId, centroId])
@@ -156,7 +156,7 @@ model CalidadIncidencia {
 
 /// Mantenimiento preventivo: tarea que se repite cada N días
 model CalidadMantenimiento {
-  id          String    @id @default(cuid())
+  id          String                      @id @default(cuid())
   tenantId    String
   centroId    String
   nombre      String // Limpieza de campana extractora
@@ -164,12 +164,12 @@ model CalidadMantenimiento {
   empresa     String? // proveedor que lo hace (texto libre o nombre del proveedor del núcleo)
   proveedorId String?
   cadaDias    Int
-  ultimaVez   DateTime? @db.Date
-  proximaVez  DateTime  @db.Date
+  ultimaVez   DateTime?                   @db.Date
+  proximaVez  DateTime                    @db.Date
   notas       String?
-  activo      Boolean   @default(true)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  activo      Boolean                     @default(true)
+  createdAt   DateTime                    @default(now())
+  updatedAt   DateTime                    @updatedAt
   hechos      CalidadMantenimientoHecho[]
 
   @@index([tenantId, centroId, proximaVez])

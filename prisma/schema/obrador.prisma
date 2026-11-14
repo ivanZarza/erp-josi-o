@@ -6,20 +6,20 @@
 
 /// Receta de producción: de qué ingredientes sale un elaborado del obrador
 model ObradorReceta {
-  id            String   @id @default(cuid())
-  tenantId      String
-  centroId      String // obrador que la produce
-  productoId    String // elaborado de salida (Producto del núcleo, área COMIDAS)
-  nombre        String
-  rendimiento   Decimal  @db.Decimal(12, 3) // cantidad de elaborado que sale de una tanda (en la unidad del producto)
-  vidaUtilDias  Int      @default(3)
-  conservacion  String? // «Refrigerado 0–4 °C»
-  pasos         String?
-  tiempoMinutos Int?
+  id               String   @id @default(cuid())
+  tenantId         String
+  centroId         String // obrador que la produce
+  productoId       String // elaborado de salida (Producto del núcleo, área COMIDAS)
+  nombre           String
+  rendimiento      Decimal  @db.Decimal(12, 3) // cantidad de elaborado que sale de una tanda (en la unidad del producto)
+  vidaUtilDias     Int      @default(3)
+  conservacion     String? // «Refrigerado 0–4 °C»
+  pasos            String?
+  tiempoMinutos    Int?
   alergenosPropios String[] // los que añade la receta además de los heredados de los ingredientes
-  activo        Boolean  @default(true)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  activo           Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   lineas  ObradorRecetaLinea[]
   ordenes ObradorOrden[]
@@ -74,24 +74,24 @@ model ObradorOrden {
 
 /// Lote producido: trazabilidad hacia atrás (ingredientes) y etiqueta
 model ObradorLote {
-  id            String   @id @default(cuid())
-  tenantId      String
-  centroId      String
-  codigo        String // LOTE-000001
-  ordenId       String   @unique
-  orden         ObradorOrden @relation(fields: [ordenId], references: [id])
-  productoId    String
-  cantidad      Decimal  @db.Decimal(12, 3)
-  costeUnitario Decimal  @db.Decimal(12, 4)
-  elaboradoEn   DateTime
-  caducaEn      DateTime
-  alergenos     String[]
-  conservacion  String?
-  estado        String   @default("ACTIVO") // ACTIVO | RETIRADO
+  id             String                   @id @default(cuid())
+  tenantId       String
+  centroId       String
+  codigo         String // LOTE-000001
+  ordenId        String                   @unique
+  orden          ObradorOrden             @relation(fields: [ordenId], references: [id])
+  productoId     String
+  cantidad       Decimal                  @db.Decimal(12, 3)
+  costeUnitario  Decimal                  @db.Decimal(12, 4)
+  elaboradoEn    DateTime
+  caducaEn       DateTime
+  alergenos      String[]
+  conservacion   String?
+  estado         String                   @default("ACTIVO") // ACTIVO | RETIRADO
   retiradoMotivo String?
-  retiradoEn    DateTime?
-  createdAt     DateTime @default(now())
-  ingredientes  ObradorLoteIngrediente[]
+  retiradoEn     DateTime?
+  createdAt      DateTime                 @default(now())
+  ingredientes   ObradorLoteIngrediente[]
 
   @@unique([tenantId, codigo])
   @@index([tenantId, centroId, caducaEn])
@@ -115,17 +115,17 @@ enum ModoTarifaObrador {
 /// Cómo se calcula el precio de un artículo del obrador para un local. El precio resultante
 /// se escribe en ProductoCentro.precioVenta (núcleo), que es lo que usa el pedido interno.
 model ObradorTarifa {
-  id          String            @id @default(cuid())
-  tenantId    String
-  obradorId   String
-  productoId  String
-  centroId    String // local destino
-  modo        ModoTarifaObrador @default(COSTE_MAS_PORCENTAJE)
-  porcentaje  Decimal?          @db.Decimal(6, 2)
-  precioFijo  Decimal?          @db.Decimal(12, 4)
+  id             String            @id @default(cuid())
+  tenantId       String
+  obradorId      String
+  productoId     String
+  centroId       String // local destino
+  modo           ModoTarifaObrador @default(COSTE_MAS_PORCENTAJE)
+  porcentaje     Decimal?          @db.Decimal(6, 2)
+  precioFijo     Decimal?          @db.Decimal(12, 4)
   actualizadoPor String?
-  createdAt   DateTime          @default(now())
-  updatedAt   DateTime          @updatedAt
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
 
   @@unique([tenantId, productoId, centroId])
   @@index([tenantId, obradorId])

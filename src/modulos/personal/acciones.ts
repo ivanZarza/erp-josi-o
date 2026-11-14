@@ -304,3 +304,24 @@ export async function contratarCandidatoAccion(form: FormData) {
     return { ir: `/personal/empleados/${nuevo}?pestana=contratos`, ok: "Candidato contratado: completa su ficha y su contrato." };
   });
 }
+
+// ---------- Nóminas ----------
+
+export async function calcularNominasAccion(form: FormData) {
+  await ejecutar(form, "personal:nominas:gestionar", async (ctx, d) => {
+    const { mes, centroId } = e.esquemaNominasMes.parse(d);
+    const r = await s.calcularNominasMes(ctx, mes, centroId);
+    const partes = [`${r.guardadas} nóminas calculadas en borrador`];
+    if (r.bloqueadas) partes.push(`${r.bloqueadas} ya cerradas o pagadas (no se tocan)`);
+    if (r.sinContrato) partes.push(`${r.sinContrato} personas sin contrato con salario (sin nómina)`);
+    return partes.join(" · ") + ".";
+  });
+}
+
+export async function estadoNominasAccion(form: FormData) {
+  await ejecutar(form, "personal:nominas:gestionar", async (ctx, d) => {
+    const datos = e.esquemaEstadoNominas.parse(d);
+    const n = await s.cambiarEstadoNominas(ctx, datos);
+    return datos.a === "CERRADA" ? `${n} nóminas cerradas.` : `${n} nóminas marcadas como pagadas.`;
+  });
+}

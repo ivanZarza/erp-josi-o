@@ -102,6 +102,9 @@ export const esquemaContrato = z
     salarioBrutoAnual: numeroOpc,
     porcentajeCotizacion: numeroOpc,
     costeHora: numeroOpc,
+    pagasAnuales: numeroOpc.refine((v) => v === undefined || (Number.isInteger(v) && v >= 12 && v <= 16), "Las pagas al año van de 12 a 16"),
+    pagasProrrateadas: z.preprocess((v) => (v === undefined || v === "" ? undefined : v === "si" || v === "on" || v === true), z.boolean().optional()),
+    irpfPorcentaje: numeroOpc.refine((v) => v === undefined || v <= 50, "El IRPF no puede pasar del 50 %"),
     fechaInicio: dia("Inicio del contrato"),
     fechaFin: diaOpc,
     finPeriodoPrueba: diaOpc,
@@ -321,6 +324,22 @@ export const esquemaContratarCandidato = z.object({
 export const esquemaMes = z.object({
   mes: texto.pipe(z.string().regex(/^\d{4}-\d{2}$/, "Mes no válido")),
   sociedadId: textoOpc,
+});
+
+// ---------- Nóminas ----------
+
+export const ESTADOS_NOMINA = ["BORRADOR", "CERRADA", "PAGADA"] as const;
+export const NOMBRE_ESTADO_NOMINA: Record<(typeof ESTADOS_NOMINA)[number], string> = { BORRADOR: "Borrador", CERRADA: "Cerrada", PAGADA: "Pagada" };
+
+export const esquemaNominasMes = z.object({
+  mes: texto.pipe(z.string().regex(/^\d{4}-\d{2}$/, "Mes no válido")),
+  centroId: textoOpc,
+});
+
+export const esquemaEstadoNominas = esquemaNominasMes.extend({
+  a: z.enum(["CERRADA", "PAGADA"], { error: "Estado no válido" }),
+  fechaPago: diaOpc,
+  ids: lista,
 });
 
 /** Convierte un FormData en objeto (los campos repetidos, en lista). */

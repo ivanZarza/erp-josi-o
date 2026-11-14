@@ -33,6 +33,7 @@ export default async function FichaEmpleado({ params, searchParams }: { params: 
     ...(ctx.puede("personal:ausencias:ver") ? [{ clave: "ausencias", titulo: "Ausencias" }] : []),
     ...(ctx.puede("personal:formacion:ver") ? [{ clave: "formacion", titulo: "Formación" }] : []),
     ...(ctx.puede("personal:documentos:ver") ? [{ clave: "documentos", titulo: "Documentos" }] : []),
+    ...(ctx.puede("personal:nominas:ver") ? [{ clave: "nominas", titulo: "Nóminas" }] : []),
   ];
 
   return (
@@ -230,6 +231,7 @@ export default async function FichaEmpleado({ params, searchParams }: { params: 
           )}
         </div>
       )}
+      {pestana === "nominas" && ctx.puede("personal:nominas:ver") && <PestanaNominas empleadoId={e.id} />}
       {pestana === "documentos" && ctx.puede("personal:documentos:ver") && (
         <div className="space-y-4">
           <Aviso>Por ahora solo se guardan los datos del documento. Los archivos se subirán al almacén de archivos (R2) cuando esté conectado.</Aviso>
@@ -490,5 +492,29 @@ async function PestanaAusencias({ e, volver }: { e: s.EmpleadoFicha; volver: str
         </Tarjeta>
       )}
     </div>
+  );
+}
+
+/** Nóminas del empleado (las últimas 24), con enlace al mes en la pantalla de Nóminas. */
+async function PestanaNominas({ empleadoId }: { empleadoId: string }) {
+  const ctx = await exigir("personal", "personal:nominas:ver");
+  const nominas = await s.nominasEmpleado(ctx, empleadoId);
+  const estado = { BORRADOR: "Borrador", CERRADA: "Cerrada", PAGADA: "Pagada" } as Record<string, string>;
+  return (
+    <Tabla
+      filas={nominas}
+      clave={(n) => n.id}
+      vacio="Todavía no tiene nóminas calculadas."
+      columnas={[
+        { titulo: "Mes", celda: (n) => <BotonEnlace href={`/personal/nominas?mes=${n.periodo}&centroId=${n.centroId}`} variante="secundario">{n.periodo.split("-").reverse().join("/")}</BotonEnlace> },
+        { titulo: "Días", celda: (n) => `${n.diasCotizados}${n.diasIT ? ` (${n.diasIT} IT)` : ""}`, alinear: "derecha" },
+        { titulo: "Horas extra", celda: (n) => (Number(n.horasExtra) ? horasTexto(Number(n.horasExtra)) : "—"), alinear: "derecha" },
+        { titulo: "Bruto", celda: (n) => euros(n.devengado), alinear: "derecha" },
+        { titulo: "Neto", celda: (n) => euros(n.neto), alinear: "derecha" },
+        { titulo: "Coste empresa", celda: (n) => euros(n.costeEmpresa), alinear: "derecha" },
+        { titulo: "Estado", celda: (n) => <Etiqueta tono={n.estado === "PAGADA" ? "ok" : n.estado === "CERRADA" ? "info" : "aviso"}>{estado[n.estado] ?? n.estado}</Etiqueta> },
+        { titulo: "Pagada", celda: (n) => (n.fechaPago ? fecha(n.fechaPago) : "—") },
+      ]}
+    />
   );
 }

@@ -34,6 +34,9 @@ import {
 } from "./fechas";
 import type { DatosAlta, DatosContrato, DatosEmpleado, DatosAsignacion } from "./esquemas";
 import { NOMBRE_AUSENCIA, NOMBRE_CERTIFICADO } from "./esquemas";
+import { calcularJornadas, type Jornada } from "./jornadas";
+import { prepararNominasMes, guardarNominas } from "./nominas";
+export { calcularJornadas, type Jornada };
 
 /** Error con mensaje para enseñar al usuario. */
 export class ErrorPersonal extends Error {}
@@ -398,6 +401,9 @@ async function crearContratoTx(tx: Tx, ctx: Contexto, empleadoId: string, d: Dat
       salarioBrutoAnual: d.salarioBrutoAnual ?? null,
       porcentajeCotizacion: d.porcentajeCotizacion ?? 32,
       costeHora: d.costeHora ?? null,
+      pagasAnuales: d.pagasAnuales ?? 14,
+      pagasProrrateadas: d.pagasProrrateadas ?? true,
+      irpfPorcentaje: d.irpfPorcentaje ?? null,
       fechaInicio: aDia(d.fechaInicio),
       fechaFin: d.fechaFin ? aDia(d.fechaFin) : null,
       finPeriodoPrueba: d.finPeriodoPrueba ? aDia(d.finPeriodoPrueba) : null,
@@ -405,6 +411,11 @@ async function crearContratoTx(tx: Tx, ctx: Contexto, empleadoId: string, d: Dat
       creadoPor: ctx.usuario.id,
     },
   });
+  // los complementos fijos (pluses) pasan del contrato anterior al nuevo
+  const complementosPrevios = await tx.complementoSalarial.findMany({ where: { contratoId: { in: previos.map((p) => p.id) }, activo: true } });
+  if (complementosPrevios.length) {
+    await tx.complementoSalarial.createMany({ data: complementosPrevios.map((k) => ({ tenantId: k.tenantId, contratoId: c.id, concepto: k.concepto, nombre: k.nombre, importeMensual: k.importeMensual, cotiza: k.cotiza, tributa: k.tributa })) });
+  }
   if (d.categoriaId) await tx.empleado.update({ where: { id: empleadoId }, data: { categoriaId: d.categoriaId } });
   if (d.sociedadId) await tx.empleado.update({ where: { id: empleadoId }, data: { sociedadId: d.sociedadId } });
   await auditar(tx, { tenantId: ctx.tenant.id, usuarioId: ctx.usuario.id, entidad: "Contrato", entidadId: c.id, accion: "CREAR", despues: { empleadoId, tipo: d.tipo, jornadaSemanal: d.jornadaSemanal, salarioBrutoAnual: d.salarioBrutoAnual ?? null, costeHora: d.costeHora ?? null, fechaInicio: d.fechaInicio, fechaFin: d.fechaFin ?? null } });
@@ -832,61 +843,7 @@ export async function anularFichaje(ctx: Contexto, d: { fichajeId: string; motiv
   });
 }
 
-export interface Jornada {
-  empleadoId: string;
-  centroId: string;
-  dia: string;
-  entrada: Date | null;
-  salida: Date | null;
-  minutosPausa: number;
-  horas: number;
-  incompleta: boolean;
-  fichajes: { id: string; centroId: string; tipo: string; momento: Date; origen: string; anulado: boolean; motivoCorreccion: string | null; corregidoPor: string | null; corregidoEn: Date | null; corrigeAId: string | null }[];
-}
-
-/** Agrupa fichajes en jornadas (persona + día de jornada), calcula horas y pausas. */
-export function calcularJornadas(fichajes: { id: string; empleadoId: string; centroId: string; tipo: string; momento: Date; origen: string; anulado: boolean; motivoCorreccion: string | null; corregidoPor: string | null; corregidoEn: Date | null; corrigeAId: string | null }[]): Jornada[] {
-  const grupos = new Map<string, Jornada>();
-  const orden = [...fichajes].sort((a, b) => a.momento.getTime() - b.momento.getTime());
-  for (const f of orden) {
-    const dia = jornadaDe(f.momento);
-    const clave = `${f.empleadoId}|${dia}`;
-    let j = grupos.get(clave);
-    if (!j) {
-      j = { empleadoId: f.empleadoId, centroId: f.centroId, dia, entrada: null, salida: null, minutosPausa: 0, horas: 0, incompleta: false, fichajes: [] };
-      grupos.set(clave, j);
-    }
-    j.fichajes.push(f);
-  }
-  for (const j of grupos.values()) {
-    const validos = j.fichajes.filter((f) => !f.anulado);
-    let dentroDesde: Date | null = null;
-    let pausaDesde: Date | null = null;
-    let minutos = 0;
-    for (const f of validos) {
-      if (f.tipo === "ENTRADA") {
-        if (!j.entrada) j.entrada = f.momento;
-        dentroDesde = f.momento;
-        j.centroId = f.centroId;
-      } else if (f.tipo === "INICIO_PAUSA" && dentroDesde) {
-        minutos += (f.momento.getTime() - dentroDesde.getTime()) / 60_000;
-        dentroDesde = null;
-        pausaDesde = f.momento;
-      } else if (f.tipo === "FIN_PAUSA") {
-        if (pausaDesde) j.minutosPausa += (f.momento.getTime() - pausaDesde.getTime()) / 60_000;
-        pausaDesde = null;
-        dentroDesde = f.momento;
-      } else if (f.tipo === "SALIDA") {
-        if (dentroDesde) minutos += (f.momento.getTime() - dentroDesde.getTime()) / 60_000;
-        dentroDesde = null;
-        j.salida = f.momento;
-      }
-    }
-    j.incompleta = !j.entrada || !!dentroDesde || !!pausaDesde || !j.salida;
-    j.horas = minutos / 60;
-  }
-  return Array.from(grupos.values());
-}
+// calcularJornadas y Jornada viven en jornadas.ts (puro: lo usa también el cálculo de nóminas de la semilla)
 
 /** Jornadas fichadas entre dos días (de jornada) en los centros que ve el usuario. */
 export async function jornadasRango(ctx: Contexto, desde: string, hasta: string, empleadoId?: string) {
@@ -1461,6 +1418,122 @@ export function csvNomina(filas: FilaNomina[]): string {
       .join(";"),
   );
   return "﻿" + [cab.map(celdaCSV).join(";"), ...lineas].join("\r\n") + "\r\n";
+}
+
+// =====================================================================
+// Nóminas (cálculo de ejemplo en nominas.ts; la oficial la hace la gestoría)
+// =====================================================================
+
+/** Nóminas de un mes en los centros visibles (o en uno), con empleado y conceptos. */
+export async function listarNominas(ctx: Contexto, f: { mes: string; centroId?: string }) {
+  const prisma = await db();
+  const centros = f.centroId ? centrosFiltro(ctx).filter((c) => c === f.centroId) : centrosFiltro(ctx);
+  return prisma.nomina.findMany({
+    where: { tenantId: ctx.tenant.id, periodo: f.mes, centroId: { in: centros } },
+    include: { empleado: { select: { id: true, codigo: true, nombre: true, apellidos: true, dni: true, nss: true, iban: true } }, lineas: { orderBy: { orden: "asc" } } },
+    orderBy: [{ centroId: "asc" }, { empleado: { apellidos: "asc" } }],
+  });
+}
+export type NominaListado = Awaited<ReturnType<typeof listarNominas>>[number];
+
+/** Nóminas de un empleado (las 24 últimas), sin conceptos. */
+export async function nominasEmpleado(ctx: Contexto, empleadoId: string) {
+  const prisma = await db();
+  await empleadoAccesible(prisma, ctx, empleadoId);
+  return prisma.nomina.findMany({ where: { tenantId: ctx.tenant.id, empleadoId, centroId: { in: centrosFiltro(ctx) } }, orderBy: { periodo: "desc" }, take: 24 });
+}
+
+/** Meses que ya tienen nóminas (para el selector), del más reciente al más antiguo. */
+export async function mesesConNominas(ctx: Contexto): Promise<string[]> {
+  const prisma = await db();
+  const filas = await prisma.nomina.findMany({ where: { tenantId: ctx.tenant.id, centroId: { in: centrosFiltro(ctx) } }, distinct: ["periodo"], select: { periodo: true }, orderBy: { periodo: "desc" } });
+  return filas.map((f) => f.periodo);
+}
+
+/**
+ * Calcula (o recalcula) las nóminas de un mes en BORRADOR para un centro o todos los visibles.
+ * Las cerradas o pagadas no se tocan. Devuelve cuántas se han calculado, bloqueadas y sin contrato.
+ */
+export async function calcularNominasMes(ctx: Contexto, mes: string, centroId?: string) {
+  if (centroId) exigirCentro(ctx, centroId);
+  const centros = centroId ? [centroId] : centrosFiltro(ctx);
+  const prisma = await db();
+  return prisma.$transaction(async (tx) => {
+    const { nominas, sinContrato } = await prepararNominasMes(tx, ctx.tenant.id, centros, mes);
+    const r = await guardarNominas(tx, ctx.tenant.id, nominas, { estado: "BORRADOR", usuarioId: ctx.usuario.id });
+    await auditar(tx, { tenantId: ctx.tenant.id, usuarioId: ctx.usuario.id, entidad: "Nomina", entidadId: mes, accion: "CALCULAR", despues: { mes, centros, ...r, sinContrato: sinContrato.length } });
+    return { ...r, sinContrato: sinContrato.length };
+  }, { timeout: 60_000 });
+}
+
+/** Cambia de estado las nóminas de un mes: BORRADOR → CERRADA, o CERRADA → PAGADA (con fecha de pago). */
+export async function cambiarEstadoNominas(ctx: Contexto, d: { mes: string; centroId?: string; ids?: string[]; a: "CERRADA" | "PAGADA"; fechaPago?: string }) {
+  const prisma = await db();
+  const centros = d.centroId ? centrosFiltro(ctx).filter((c) => c === d.centroId) : centrosFiltro(ctx);
+  const desde = d.a === "CERRADA" ? "BORRADOR" : "CERRADA";
+  return prisma.$transaction(async (tx) => {
+    const where = { tenantId: ctx.tenant.id, periodo: d.mes, centroId: { in: centros }, estado: desde as "BORRADOR" | "CERRADA", ...(d.ids?.length ? { id: { in: d.ids } } : {}) };
+    const afectadas = await tx.nomina.findMany({ where, select: { id: true, costeEmpresa: true, neto: true, centroId: true } });
+    if (afectadas.length === 0) throw new ErrorPersonal(d.a === "CERRADA" ? "No hay nóminas en borrador que cerrar." : "No hay nóminas cerradas pendientes de pago.");
+    await tx.nomina.updateMany({
+      where: { id: { in: afectadas.map((n) => n.id) } },
+      data: d.a === "CERRADA" ? { estado: "CERRADA", cerradaEn: new Date(), cerradaPor: ctx.usuario.id } : { estado: "PAGADA", fechaPago: aDia(d.fechaPago ?? hoyMadrid()) },
+    });
+    const total = afectadas.reduce((t, n) => ({ coste: t.coste + aNumero(n.costeEmpresa), neto: t.neto + aNumero(n.neto) }), { coste: 0, neto: 0 });
+    await auditar(tx, { tenantId: ctx.tenant.id, usuarioId: ctx.usuario.id, entidad: "Nomina", entidadId: d.mes, accion: d.a === "CERRADA" ? "CERRAR" : "PAGAR", despues: { mes: d.mes, nominas: afectadas.length, ...total, fechaPago: d.fechaPago ?? null } });
+    if (d.a === "CERRADA") {
+      for (const centroId of Array.from(new Set(afectadas.map((n) => n.centroId)))) {
+        const delCentro = afectadas.filter((n) => n.centroId === centroId);
+        await emitir(tx, ctx.tenant.id, "personal.nominas.cerradas", { mes: d.mes, centroId, nominas: delCentro.length, costeEmpresa: Math.round(delCentro.reduce((t, n) => t + aNumero(n.costeEmpresa), 0) * 100) / 100 });
+      }
+    }
+    return afectadas.length;
+  });
+}
+
+export interface CosteNominasCentroMes {
+  centroId: string;
+  mes: string; // "2026-10"
+  empleados: number;
+  devengado: number; // bruto
+  ssEmpresa: number;
+  ssTrabajador: number;
+  irpf: number;
+  neto: number;
+  costeEmpresa: number; // devengado + SS empresa − pago delegado de IT
+  borradores: number; // nóminas aún en borrador (el coste puede cambiar)
+}
+
+/**
+ * Para otros módulos (Contabilidad, Cuadro de mando): coste de las nóminas por centro y mes.
+ * `desdeMes` y `hastaMes` en "AAAA-MM", ambos incluidos. Incluye borradores (se indica cuántos).
+ * Sin sesión: quien llama ya ha comprobado permisos y centros.
+ */
+export async function costeNominasPorCentroYMes(tenantId: string, centroIds: string[], desdeMes: string, hastaMes: string): Promise<CosteNominasCentroMes[]> {
+  if (centroIds.length === 0) return [];
+  const prisma = await db();
+  const filas = await prisma.nomina.findMany({
+    where: { tenantId, centroId: { in: centroIds }, periodo: { gte: desdeMes, lte: hastaMes } },
+    select: { centroId: true, periodo: true, devengado: true, ssEmpresa: true, ssTrabajador: true, irpf: true, neto: true, costeEmpresa: true, estado: true },
+  });
+  const mapa = new Map<string, CosteNominasCentroMes>();
+  for (const n of filas) {
+    const k = `${n.centroId}|${n.periodo}`;
+    const x = mapa.get(k) ?? { centroId: n.centroId, mes: n.periodo, empleados: 0, devengado: 0, ssEmpresa: 0, ssTrabajador: 0, irpf: 0, neto: 0, costeEmpresa: 0, borradores: 0 };
+    x.empleados++;
+    x.devengado += aNumero(n.devengado);
+    x.ssEmpresa += aNumero(n.ssEmpresa);
+    x.ssTrabajador += aNumero(n.ssTrabajador);
+    x.irpf += aNumero(n.irpf);
+    x.neto += aNumero(n.neto);
+    x.costeEmpresa += aNumero(n.costeEmpresa);
+    if (n.estado === "BORRADOR") x.borradores++;
+    mapa.set(k, x);
+  }
+  const r2 = (v: number) => Math.round(v * 100) / 100;
+  return Array.from(mapa.values())
+    .map((x) => ({ ...x, devengado: r2(x.devengado), ssEmpresa: r2(x.ssEmpresa), ssTrabajador: r2(x.ssTrabajador), irpf: r2(x.irpf), neto: r2(x.neto), costeEmpresa: r2(x.costeEmpresa) }))
+    .sort((a, b) => a.mes.localeCompare(b.mes) || a.centroId.localeCompare(b.centroId));
 }
 
 export { partesMadrid };

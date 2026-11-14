@@ -78,21 +78,21 @@ model Sociedad {
 }
 
 model Marca {
-  id            String   @id @default(cuid())
-  tenantId      String
-  tenant        Tenant   @relation(fields: [tenantId], references: [id])
-  nombre        String
-  concepto      String?
-  web           String?
-  instagram     String?
+  id             String   @id @default(cuid())
+  tenantId       String
+  tenant         Tenant   @relation(fields: [tenantId], references: [id])
+  nombre         String
+  concepto       String?
+  web            String?
+  instagram      String?
   colorPrincipal String?
-  colorFondo    String?
-  lema          String?
-  activo        Boolean  @default(true)
-  plantilla     Json? // plantilla de marca para abrir locales (specs/modulos/organizacion.md)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  centros       Centro[]
+  colorFondo     String?
+  lema           String?
+  activo         Boolean  @default(true)
+  plantilla      Json? // plantilla de marca para abrir locales (specs/modulos/organizacion.md)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  centros        Centro[]
 
   @@unique([tenantId, nombre])
 }
@@ -125,36 +125,36 @@ enum EstadoCentro {
 }
 
 model Centro {
-  id          String       @id @default(cuid())
-  tenantId    String
-  tenant      Tenant       @relation(fields: [tenantId], references: [id])
-  codigo      String // VA-AYA, OB…
-  nombre      String
-  tipo        TipoCentro   @default(LOCAL)
-  estado      EstadoCentro @default(ABIERTO)
-  sociedadId  String?
-  sociedad    Sociedad?    @relation(fields: [sociedadId], references: [id])
-  marcaId     String?
-  marca       Marca?       @relation(fields: [marcaId], references: [id])
-  edificioId  String?
-  edificio    Edificio?    @relation(fields: [edificioId], references: [id])
-  telefono    String?
-  email       String?
-  horaCorte   String       @default("05:00") // la jornada termina a esta hora
-  aperturaEn  DateTime?
-  datos       Json? // horario, espacios, servicios (se irán sacando a tablas)
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  id         String       @id @default(cuid())
+  tenantId   String
+  tenant     Tenant       @relation(fields: [tenantId], references: [id])
+  codigo     String // VA-AYA, OB…
+  nombre     String
+  tipo       TipoCentro   @default(LOCAL)
+  estado     EstadoCentro @default(ABIERTO)
+  sociedadId String?
+  sociedad   Sociedad?    @relation(fields: [sociedadId], references: [id])
+  marcaId    String?
+  marca      Marca?       @relation(fields: [marcaId], references: [id])
+  edificioId String?
+  edificio   Edificio?    @relation(fields: [edificioId], references: [id])
+  telefono   String?
+  email      String?
+  horaCorte  String       @default("05:00") // la jornada termina a esta hora
+  aperturaEn DateTime?
+  datos      Json? // horario, espacios, servicios (se irán sacando a tablas)
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
 
-  modulos          CentroModulo[]
-  ambitos          UsuarioCentro[]
-  almacenes        Almacen[]
-  movimientos      MovimientoStock[]
-  pedidosOrigen    PedidoInterno[]   @relation("PedidoOrigen")
-  pedidosDestino   PedidoInterno[]   @relation("PedidoDestino")
-  pedidosCompra    PedidoCompra[]
-  inventarios      Inventario[]
-  ajustesProducto  ProductoCentro[]
+  modulos         CentroModulo[]
+  ambitos         UsuarioCentro[]
+  almacenes       Almacen[]
+  movimientos     MovimientoStock[]
+  pedidosOrigen   PedidoInterno[]   @relation("PedidoOrigen")
+  pedidosDestino  PedidoInterno[]   @relation("PedidoDestino")
+  pedidosCompra   PedidoCompra[]
+  inventarios     Inventario[]
+  ajustesProducto ProductoCentro[]
 
   @@unique([tenantId, codigo])
 }
@@ -204,44 +204,44 @@ model UsuarioCentro {
 
 /// Historial de cambios (dinero, stock, precios, permisos, personal)
 model Auditoria {
-  id         String   @id @default(cuid())
-  tenantId   String
-  usuarioId  String?
-  entidad    String
-  entidadId  String
-  accion     String
-  antes      Json?
-  despues    Json?
-  createdAt  DateTime @default(now())
+  id        String   @id @default(cuid())
+  tenantId  String
+  usuarioId String?
+  entidad   String
+  entidadId String
+  accion    String
+  antes     Json?
+  despues   Json?
+  createdAt DateTime @default(now())
 
   @@index([tenantId, entidad, entidadId])
 }
 
 /// Eventos internos entre módulos (specs/03 §5.2 regla 3)
 model EventoInterno {
-  id         String    @id @default(cuid())
-  tenantId   String
-  tipo       String // p. ej. "almacen.pedido.servido"
-  datos      Json
-  procesado  Boolean   @default(false)
-  createdAt  DateTime  @default(now())
+  id        String   @id @default(cuid())
+  tenantId  String
+  tipo      String // p. ej. "almacen.pedido.servido"
+  datos     Json
+  procesado Boolean  @default(false)
+  createdAt DateTime @default(now())
 
   @@index([tenantId, tipo])
 }
 
 /// Huecos de integración: estado de cada conexión externa por cadena (TPV, CoverManager…)
 model Integracion {
-  id         String    @id @default(cuid())
-  tenantId   String
-  tipo       String // "tpv", "reservas", "contabilidad", "rrhh", "correo", "whatsapp"
-  proveedor  String? // "revo", "covermanager", "a3"…
-  centroId   String?
-  estado     String    @default("NO_CONECTADA") // NO_CONECTADA | CONFIGURADA | ACTIVA | ERROR
-  config     Json? // sin secretos: los secretos van cifrados aparte o en variables de entorno
-  ultimaSync DateTime?
+  id          String    @id @default(cuid())
+  tenantId    String
+  tipo        String // "tpv", "reservas", "contabilidad", "rrhh", "correo", "whatsapp"
+  proveedor   String? // "revo", "covermanager", "a3"…
+  centroId    String?
+  estado      String    @default("NO_CONECTADA") // NO_CONECTADA | CONFIGURADA | ACTIVA | ERROR
+  config      Json? // sin secretos: los secretos van cifrados aparte o en variables de entorno
+  ultimaSync  DateTime?
   ultimoError String?
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   @@index([tenantId, tipo])
 }
@@ -269,31 +269,31 @@ model FamiliaProducto {
 }
 
 model Producto {
-  id            String          @id @default(cuid())
-  tenantId      String
-  tenant        Tenant          @relation(fields: [tenantId], references: [id])
-  area          AreaProducto
-  familiaId     String?
-  familia       FamiliaProducto? @relation(fields: [familiaId], references: [id])
-  referencia    String
-  nombre        String
-  unidad        String          @default("UD") // UD, BOTELLA, KG, L, CAJA
-  unidadesCompra Decimal        @default(1) @db.Decimal(12, 3) // unidades por formato de compra
-  costeUnitario Decimal         @default(0) @db.Decimal(12, 4) // € por unidad (precio medio)
-  sinCoste      Boolean         @default(false) // permitido coste 0 con motivo
-  iva           Decimal         @default(21) @db.Decimal(5, 2)
-  stockMinimo   Decimal         @default(0) @db.Decimal(12, 3) // por defecto; cada centro puede cambiarlo
-  proveedorId   String?
-  proveedor     Proveedor?      @relation(fields: [proveedorId], references: [id])
-  codigoBarras  String?
-  activo        Boolean         @default(true)
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
+  id             String           @id @default(cuid())
+  tenantId       String
+  tenant         Tenant           @relation(fields: [tenantId], references: [id])
+  area           AreaProducto
+  familiaId      String?
+  familia        FamiliaProducto? @relation(fields: [familiaId], references: [id])
+  referencia     String
+  nombre         String
+  unidad         String           @default("UD") // UD, BOTELLA, KG, L, CAJA
+  unidadesCompra Decimal          @default(1) @db.Decimal(12, 3) // unidades por formato de compra
+  costeUnitario  Decimal          @default(0) @db.Decimal(12, 4) // € por unidad (precio medio)
+  sinCoste       Boolean          @default(false) // permitido coste 0 con motivo
+  iva            Decimal          @default(21) @db.Decimal(5, 2)
+  stockMinimo    Decimal          @default(0) @db.Decimal(12, 3) // por defecto; cada centro puede cambiarlo
+  proveedorId    String?
+  proveedor      Proveedor?       @relation(fields: [proveedorId], references: [id])
+  codigoBarras   String?
+  activo         Boolean          @default(true)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
 
-  centros       ProductoCentro[]
-  movimientos   MovimientoStock[]
-  lineasPedido  PedidoInternoLinea[]
-  lineasCompra  PedidoCompraLinea[]
+  centros          ProductoCentro[]
+  movimientos      MovimientoStock[]
+  lineasPedido     PedidoInternoLinea[]
+  lineasCompra     PedidoCompraLinea[]
   lineasInventario InventarioLinea[]
 
   @@unique([tenantId, referencia])
@@ -316,24 +316,24 @@ model ProductoCentro {
 }
 
 model Proveedor {
-  id          String   @id @default(cuid())
-  tenantId    String
-  tenant      Tenant   @relation(fields: [tenantId], references: [id])
-  nombre      String
-  cif         String?
-  contacto    String?
-  telefono    String? // SIEMPRE internacional: +34…
-  email       String?
-  areas       AreaProducto[]
-  diasReparto String?
-  pedidoMinimo Decimal? @db.Decimal(12, 2)
-  notas       String?
-  activo      Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id           String         @id @default(cuid())
+  tenantId     String
+  tenant       Tenant         @relation(fields: [tenantId], references: [id])
+  nombre       String
+  cif          String?
+  contacto     String?
+  telefono     String? // SIEMPRE internacional: +34…
+  email        String?
+  areas        AreaProducto[]
+  diasReparto  String?
+  pedidoMinimo Decimal?       @db.Decimal(12, 2)
+  notas        String?
+  activo       Boolean        @default(true)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
 
-  productos   Producto[]
-  pedidos     PedidoCompra[]
+  productos Producto[]
+  pedidos   PedidoCompra[]
 
   @@unique([tenantId, nombre])
 }
@@ -341,23 +341,23 @@ model Proveedor {
 // ---------- Motores comunes: stock ----------
 
 model Almacen {
-  id        String @id @default(cuid())
-  centroId  String
-  centro    Centro @relation(fields: [centroId], references: [id])
-  nombre    String // Bodega, Cámara, Seco…
-  activo    Boolean @default(true)
+  id       String  @id @default(cuid())
+  centroId String
+  centro   Centro  @relation(fields: [centroId], references: [id])
+  nombre   String // Bodega, Cámara, Seco…
+  activo   Boolean @default(true)
 }
 
 enum TipoMovimiento {
-  ENTRADA_COMPRA      // recepción de compra (+)
-  SALIDA_PEDIDO       // servir pedido interno, en origen (−)
-  ENTRADA_PEDIDO      // recibir pedido interno, en destino (+)
-  PRODUCCION_CONSUMO  // ingredientes usados en el obrador (−)
-  PRODUCCION_ENTRADA  // elaborado producido (+)
-  MERMA               // rotura, caducidad, desperdicio (−)
-  AJUSTE_INVENTARIO   // cierre de inventario (±)
-  CONSUMO             // consumo del local (−)
-  CARGA_INICIAL       // importación inicial (+)
+  ENTRADA_COMPRA // recepción de compra (+)
+  SALIDA_PEDIDO // servir pedido interno, en origen (−)
+  ENTRADA_PEDIDO // recibir pedido interno, en destino (+)
+  PRODUCCION_CONSUMO // ingredientes usados en el obrador (−)
+  PRODUCCION_ENTRADA // elaborado producido (+)
+  MERMA // rotura, caducidad, desperdicio (−)
+  AJUSTE_INVENTARIO // cierre de inventario (±)
+  CONSUMO // consumo del local (−)
+  CARGA_INICIAL // importación inicial (+)
 }
 
 /// El stock es SIEMPRE la suma de movimientos (regla de oro 3)
@@ -393,37 +393,37 @@ enum EstadoPedidoInterno {
 }
 
 model PedidoInterno {
-  id          String               @id @default(cuid())
-  tenantId    String
-  numero      String // PL-000047
-  area        AreaProducto
-  origenId    String // quien sirve (obrador)
-  origen      Centro               @relation("PedidoOrigen", fields: [origenId], references: [id])
-  destinoId   String // quien pide (local)
-  destino     Centro               @relation("PedidoDestino", fields: [destinoId], references: [id])
-  estado      EstadoPedidoInterno  @default(PENDIENTE)
-  notas       String?
-  creadoPor   String?
-  servidoPor  String?
-  servidoEn   DateTime?
-  albaran     String? // ALB-S-…
-  createdAt   DateTime             @default(now())
-  updatedAt   DateTime             @updatedAt
-  lineas      PedidoInternoLinea[]
+  id         String               @id @default(cuid())
+  tenantId   String
+  numero     String // PL-000047
+  area       AreaProducto
+  origenId   String // quien sirve (obrador)
+  origen     Centro               @relation("PedidoOrigen", fields: [origenId], references: [id])
+  destinoId  String // quien pide (local)
+  destino    Centro               @relation("PedidoDestino", fields: [destinoId], references: [id])
+  estado     EstadoPedidoInterno  @default(PENDIENTE)
+  notas      String?
+  creadoPor  String?
+  servidoPor String?
+  servidoEn  DateTime?
+  albaran    String? // ALB-S-…
+  createdAt  DateTime             @default(now())
+  updatedAt  DateTime             @updatedAt
+  lineas     PedidoInternoLinea[]
 
   @@unique([tenantId, numero])
 }
 
 model PedidoInternoLinea {
-  id          String        @id @default(cuid())
-  pedidoId    String
-  pedido      PedidoInterno @relation(fields: [pedidoId], references: [id], onDelete: Cascade)
-  productoId  String
-  producto    Producto      @relation(fields: [productoId], references: [id])
-  pedida      Decimal       @db.Decimal(12, 3)
-  servida     Decimal?      @db.Decimal(12, 3)
-  recibida    Decimal?      @db.Decimal(12, 3)
-  precio      Decimal?      @db.Decimal(12, 4) // tarifa aplicada (coste si no hay tarifa)
+  id         String        @id @default(cuid())
+  pedidoId   String
+  pedido     PedidoInterno @relation(fields: [pedidoId], references: [id], onDelete: Cascade)
+  productoId String
+  producto   Producto      @relation(fields: [productoId], references: [id])
+  pedida     Decimal       @db.Decimal(12, 3)
+  servida    Decimal?      @db.Decimal(12, 3)
+  recibida   Decimal?      @db.Decimal(12, 3)
+  precio     Decimal?      @db.Decimal(12, 4) // tarifa aplicada (coste si no hay tarifa)
 }
 
 // ---------- Motores comunes: compras a proveedor ----------

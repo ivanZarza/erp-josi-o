@@ -7,10 +7,10 @@
 
 /// Objetivo de coste de mercancía de cada marca (% sobre precio sin IVA)
 model CartaObjetivoMarca {
-  id                String  @id @default(cuid())
-  tenantId          String
-  marcaId           String
-  objetivoCostePct  Decimal @default(30) @db.Decimal(5, 2)
+  id               String  @id @default(cuid())
+  tenantId         String
+  marcaId          String
+  objetivoCostePct Decimal @default(30) @db.Decimal(5, 2)
 
   @@unique([tenantId, marcaId])
 }
@@ -34,28 +34,28 @@ enum TipoCarta {
 }
 
 model Carta {
-  id        String    @id @default(cuid())
+  id        String         @id @default(cuid())
   tenantId  String
   marcaId   String
   nombre    String
-  tipo      TipoCarta @default(PERMANENTE)
-  desde     DateTime? @db.Date
-  hasta     DateTime? @db.Date
-  activo    Boolean   @default(true)
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  tipo      TipoCarta      @default(PERMANENTE)
+  desde     DateTime?      @db.Date
+  hasta     DateTime?      @db.Date
+  activo    Boolean        @default(true)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
   secciones CartaSeccion[]
 
   @@index([tenantId, marcaId])
 }
 
 model CartaSeccion {
-  id       String  @id @default(cuid())
+  id       String       @id @default(cuid())
   cartaId  String
-  carta    Carta   @relation(fields: [cartaId], references: [id], onDelete: Cascade)
+  carta    Carta        @relation(fields: [cartaId], references: [id], onDelete: Cascade)
   nombre   String
   nombreEn String?
-  orden    Int     @default(0)
+  orden    Int          @default(0)
   lineas   CartaLinea[]
 }
 

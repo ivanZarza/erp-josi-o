@@ -22,7 +22,7 @@ export type Rol = keyof typeof ROLES;
 export const PERMISOS_ROL: Record<Rol, string[]> = {
   admin: ["*"],
   direccion: ["*"],
-  finanzas: ["cuadro:*", "contabilidad:*", "caja:*", "bebidas:stock:ver", "comidas:stock:ver", "proveedores:ver", "personal:costes:ver", "personal:nomina:exportar", "organizacion:ver"],
+  finanzas: ["cuadro:*", "contabilidad:*", "caja:*", "bebidas:stock:ver", "comidas:stock:ver", "proveedores:ver", "personal:costes:ver", "personal:nomina:exportar", "personal:nominas:ver", "organizacion:ver"],
   operaciones: ["bebidas:*", "comidas:*", "obrador:*", "proveedores:*", "calidad:*", "personal:cuadrantes:*", "personal:plantilla:ver", "organizacion:ver", "organizacion:centros:editar", "organizacion:centros:cerrar", "cuadro:ver"],
   economato: ["bebidas:*", "comidas:*", "obrador:*", "proveedores:*", "calidad:*", "organizacion:ver"],
   gerente: ["bebidas:stock:ver", "bebidas:pedidos:*", "bebidas:inventarios:*", "bebidas:mermas:crear", "comidas:stock:ver", "comidas:pedidos:*", "comidas:inventarios:*", "comidas:mermas:crear", "comidas:carta:ver", "personal:plantilla:ver", "personal:cuadrantes:*", "personal:fichajes:*", "personal:ausencias:*", "personal:formacion:ver", "personal:portal:*", "reservas:*", "eventos:ver", "calidad:*", "caja:*", "cuadro:ver", "organizacion:ver"],

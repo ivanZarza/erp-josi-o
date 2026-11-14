@@ -39,25 +39,25 @@ enum FormaMesa {
 }
 
 model ReservaMesa {
-  id                 String         @id @default(cuid())
+  id                 String                @id @default(cuid())
   tenantId           String
   centroId           String
   espacioId          String
-  espacio            ReservaEspacio @relation(fields: [espacioId], references: [id])
+  espacio            ReservaEspacio        @relation(fields: [espacioId], references: [id])
   nombre             String // «12», «R1»
-  capacidadMin       Int            @default(1)
-  capacidadMax       Int            @default(4)
-  x                  Int            @default(0) // posición en el plano (esquina superior izquierda)
-  y                  Int            @default(0)
-  ancho              Int            @default(60)
-  alto               Int            @default(60)
-  forma              FormaMesa      @default(CUADRADA)
-  combinable         Boolean        @default(false) // se puede juntar con otra combinable del mismo espacio
-  reservableInternet Boolean        @default(true)
+  capacidadMin       Int                   @default(1)
+  capacidadMax       Int                   @default(4)
+  x                  Int                   @default(0) // posición en el plano (esquina superior izquierda)
+  y                  Int                   @default(0)
+  ancho              Int                   @default(60)
+  alto               Int                   @default(60)
+  forma              FormaMesa             @default(CUADRADA)
+  combinable         Boolean               @default(false) // se puede juntar con otra combinable del mismo espacio
+  reservableInternet Boolean               @default(true)
   especial           String? // «Ventana», «Chimenea»: condición o suplemento
-  activo             Boolean        @default(true)
-  createdAt          DateTime       @default(now())
-  updatedAt          DateTime       @updatedAt
+  activo             Boolean               @default(true)
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
   asignaciones       ReservaMesaAsignada[]
 
   @@index([tenantId, centroId])
@@ -84,14 +84,14 @@ model ReservaTurno {
 
 /// Reglas de reserva de un local (una fila por local)
 model ReservaAjustes {
-  id                 String   @id @default(cuid())
-  tenantId           String
-  centroId           String   @unique
-  grupoMaximo        Int      @default(10) // más de esto → solicitud de evento
-  antelacionMinutos  Int      @default(60) // antelación mínima para reservas por internet
-  elegirMesaInternet Boolean  @default(false) // el cliente puede elegir mesa en la web (fase R3)
+  id                  String   @id @default(cuid())
+  tenantId            String
+  centroId            String   @unique
+  grupoMaximo         Int      @default(10) // más de esto → solicitud de evento
+  antelacionMinutos   Int      @default(60) // antelación mínima para reservas por internet
+  elegirMesaInternet  Boolean  @default(false) // el cliente puede elegir mesa en la web (fase R3)
   duracionPorPersonas Json? // { "2": 90, "4": 105, "8": 120 } minutos según personas (opcional)
-  updatedAt          DateTime @updatedAt
+  updatedAt           DateTime @updatedAt
 }
 
 enum EstadoReserva {
@@ -112,29 +112,29 @@ enum OrigenReserva {
 }
 
 model Reserva {
-  id            String        @id @default(cuid())
-  tenantId      String
-  centroId      String
-  clienteId     String? // módulo Clientes (si está contratado)
-  nombre        String
-  telefono      String? // internacional: +34…
-  email         String?
-  personas      Int
-  fecha         DateTime      @db.Date // día de la reserva (jornada)
-  hora          String // «21:15»
-  duracionMin   Int           @default(90)
-  espacioId     String? // zona pedida (ReservaEspacio)
-  estado        EstadoReserva @default(CONFIRMADA)
-  origen        OrigenReserva @default(MANUAL)
-  notas         String?
-  alergias      String?
-  externoId     String? // id en CoverManager u otro
+  id                String                @id @default(cuid())
+  tenantId          String
+  centroId          String
+  clienteId         String? // módulo Clientes (si está contratado)
+  nombre            String
+  telefono          String? // internacional: +34…
+  email             String?
+  personas          Int
+  fecha             DateTime              @db.Date // día de la reserva (jornada)
+  hora              String // «21:15»
+  duracionMin       Int                   @default(90)
+  espacioId         String? // zona pedida (ReservaEspacio)
+  estado            EstadoReserva         @default(CONFIRMADA)
+  origen            OrigenReserva         @default(MANUAL)
+  notas             String?
+  alergias          String?
+  externoId         String? // id en CoverManager u otro
   solicitudEventoId String? // si se convirtió en evento
-  creadoPor     String?
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
-  mesas         ReservaMesaAsignada[]
-  historial     ReservaHistorial[]
+  creadoPor         String?
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+  mesas             ReservaMesaAsignada[]
+  historial         ReservaHistorial[]
 
   @@index([tenantId, centroId, fecha])
   @@index([tenantId, clienteId])

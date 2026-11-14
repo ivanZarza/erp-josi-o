@@ -31,7 +31,9 @@ export interface VinoCarta {
 export interface MenuCarta {
   nombre: string;
   precio: number | null;
-  contenido: string[];
+  notas?: string | null;
+  /** Por secciones (forma del JSON); se admite también una lista de textos. */
+  contenido: ({ seccion: string; platos: string[] } | string)[];
 }
 export interface CartaRaza {
   marca: string;

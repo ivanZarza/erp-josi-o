@@ -23,33 +23,33 @@ enum EstadoEvento {
 }
 
 model EventoSolicitud {
-  id               String       @id @default(cuid())
-  tenantId         String
-  numero           String // EV-000001
-  tipo             TipoEvento   @default(CELEBRACION)
-  estado           EstadoEvento @default(NUEVA)
-  motivoPerdida    String?
-  nombreContacto   String
-  empresa          String?
-  telefono         String?
-  email            String?
-  clienteId        String? // módulo Clientes
-  personas         Int
-  fecha            DateTime?    @db.Date
-  hora             String?
-  presupuestoCliente Decimal?   @db.Decimal(12, 2) // lo que el cliente dice que quiere gastar
-  marcaId          String? // marca preferida (núcleo)
-  centroId         String? // local preferido o asignado (núcleo)
-  espacioId        String? // espacio de Reservas (ReservaEspacio)
-  recomiendame     Boolean      @default(false) // el cliente pide que le propongamos local
-  origen           String       @default("MANUAL") // MANUAL, WEB, RESERVA, CORREO, TELEFONO
-  reservaId        String? // si viene de una reserva grande
-  responsableId    String? // usuario comercial
-  notas            String?
-  createdAt        DateTime     @default(now())
-  updatedAt        DateTime     @updatedAt
-  presupuestos     EventoPresupuesto[]
-  historial        EventoHistorial[]
+  id                 String              @id @default(cuid())
+  tenantId           String
+  numero             String // EV-000001
+  tipo               TipoEvento          @default(CELEBRACION)
+  estado             EstadoEvento        @default(NUEVA)
+  motivoPerdida      String?
+  nombreContacto     String
+  empresa            String?
+  telefono           String?
+  email              String?
+  clienteId          String? // módulo Clientes
+  personas           Int
+  fecha              DateTime?           @db.Date
+  hora               String?
+  presupuestoCliente Decimal?            @db.Decimal(12, 2) // lo que el cliente dice que quiere gastar
+  marcaId            String? // marca preferida (núcleo)
+  centroId           String? // local preferido o asignado (núcleo)
+  espacioId          String? // espacio de Reservas (ReservaEspacio)
+  recomiendame       Boolean             @default(false) // el cliente pide que le propongamos local
+  origen             String              @default("MANUAL") // MANUAL, WEB, RESERVA, CORREO, TELEFONO
+  reservaId          String? // si viene de una reserva grande
+  responsableId      String? // usuario comercial
+  notas              String?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  presupuestos       EventoPresupuesto[]
+  historial          EventoHistorial[]
 
   @@unique([tenantId, numero])
   @@index([tenantId, estado])
@@ -92,22 +92,22 @@ enum EstadoPresupuestoEvento {
 }
 
 model EventoPresupuesto {
-  id           String                  @id @default(cuid())
-  tenantId     String
-  solicitudId  String
-  solicitud    EventoSolicitud         @relation(fields: [solicitudId], references: [id])
-  numero       String // PRE-000001
-  version      Int                     @default(1)
-  estado       EstadoPresupuestoEvento @default(BORRADOR)
-  condiciones  String?
-  senal        Decimal?                @db.Decimal(12, 2) // señal pedida
-  total        Decimal                 @default(0) @db.Decimal(12, 2) // IVA incluido
-  enviadoEn    DateTime?
-  aceptadoEn   DateTime?
-  creadoPor    String?
-  createdAt    DateTime                @default(now())
-  updatedAt    DateTime                @updatedAt
-  lineas       EventoPresupuestoLinea[]
+  id          String                   @id @default(cuid())
+  tenantId    String
+  solicitudId String
+  solicitud   EventoSolicitud          @relation(fields: [solicitudId], references: [id])
+  numero      String // PRE-000001
+  version     Int                      @default(1)
+  estado      EstadoPresupuestoEvento  @default(BORRADOR)
+  condiciones String?
+  senal       Decimal?                 @db.Decimal(12, 2) // señal pedida
+  total       Decimal                  @default(0) @db.Decimal(12, 2) // IVA incluido
+  enviadoEn   DateTime?
+  aceptadoEn  DateTime?
+  creadoPor   String?
+  createdAt   DateTime                 @default(now())
+  updatedAt   DateTime                 @updatedAt
+  lineas      EventoPresupuestoLinea[]
 
   @@unique([tenantId, numero])
 }

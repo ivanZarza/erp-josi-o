@@ -81,22 +81,22 @@ enum EstadoEncuesta {
 }
 
 model ClienteEncuesta {
-  id               String         @id @default(cuid())
-  tenantId         String
-  clienteId        String?
-  cliente          Cliente?       @relation(fields: [clienteId], references: [id])
-  centroId         String
-  visitaId         String?
-  reservaId        String?
-  estado           EstadoEncuesta @default(PENDIENTE)
-  nota             Int? // 1 a 5
-  comentario       String?
-  invitadoResena   Boolean        @default(false) // nota alta → invitación a reseña de Google
-  avisoGerencia    Boolean        @default(false) // nota baja → aviso a gerencia
-  seguimiento      String?
-  enviadaEn        DateTime       @default(now())
-  respondidaEn     DateTime?
-  createdAt        DateTime       @default(now())
+  id             String         @id @default(cuid())
+  tenantId       String
+  clienteId      String?
+  cliente        Cliente?       @relation(fields: [clienteId], references: [id])
+  centroId       String
+  visitaId       String?
+  reservaId      String?
+  estado         EstadoEncuesta @default(PENDIENTE)
+  nota           Int? // 1 a 5
+  comentario     String?
+  invitadoResena Boolean        @default(false) // nota alta → invitación a reseña de Google
+  avisoGerencia  Boolean        @default(false) // nota baja → aviso a gerencia
+  seguimiento    String?
+  enviadaEn      DateTime       @default(now())
+  respondidaEn   DateTime?
+  createdAt      DateTime       @default(now())
 
   @@index([tenantId, centroId, estado])
 }
@@ -109,22 +109,22 @@ enum EstadoTarjetaRegalo {
 }
 
 model TarjetaRegalo {
-  id              String              @id @default(cuid())
+  id              String                    @id @default(cuid())
   tenantId        String
   codigo          String // único por cadena, p. ej. RZ-7K3M-9QX2
-  importeInicial  Decimal             @db.Decimal(12, 2)
-  saldo           Decimal             @db.Decimal(12, 2)
-  caducidad       DateTime            @db.Date
+  importeInicial  Decimal                   @db.Decimal(12, 2)
+  saldo           Decimal                   @db.Decimal(12, 2)
+  caducidad       DateTime                  @db.Date
   marcaId         String? // null = válida en todo el grupo
-  estado          EstadoTarjetaRegalo @default(ACTIVA)
+  estado          EstadoTarjetaRegalo       @default(ACTIVA)
   compradorNombre String?
   compradorEmail  String?
   destinatario    String?
   mensaje         String?
   clienteId       String?
-  origen          String              @default("MANUAL") // MANUAL, WEB
-  createdAt       DateTime            @default(now())
-  updatedAt       DateTime            @updatedAt
+  origen          String                    @default("MANUAL") // MANUAL, WEB
+  createdAt       DateTime                  @default(now())
+  updatedAt       DateTime                  @updatedAt
   movimientos     TarjetaRegaloMovimiento[]
 
   @@unique([tenantId, codigo])

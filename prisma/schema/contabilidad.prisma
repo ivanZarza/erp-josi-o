@@ -17,15 +17,15 @@ enum GrupoCategoriaContable {
 
 /// Plan de cuentas sencillo por categorías (mercancía de bebidas, alquiler…)
 model CategoriaContable {
-  id           String                 @id @default(cuid())
-  tenantId     String
-  codigo       String // MERC-BEB, ALQ…
-  nombre       String
-  grupo        GrupoCategoriaContable
+  id             String                 @id @default(cuid())
+  tenantId       String
+  codigo         String // MERC-BEB, ALQ…
+  nombre         String
+  grupo          GrupoCategoriaContable
   cuentaGestoria String? // cuenta en el programa de la gestoría (600, 621…) cuando se sepa (P-04)
-  orden        Int                    @default(0)
-  activo       Boolean                @default(true)
-  createdAt    DateTime               @default(now())
+  orden          Int                    @default(0)
+  activo         Boolean                @default(true)
+  createdAt      DateTime               @default(now())
 
   @@unique([tenantId, codigo])
 }
@@ -44,7 +44,7 @@ enum OrigenFacturaRecibida {
 }
 
 model FacturaRecibida {
-  id              String                @id @default(cuid())
+  id              String                 @id @default(cuid())
   tenantId        String
   numero          String // número interno FR-000001
   numeroProveedor String // número de la factura del proveedor
@@ -54,13 +54,13 @@ model FacturaRecibida {
   sociedadId      String // sociedad que recibe la factura (lo fiscal)
   centroId        String? // centro al que se imputa (lo de gestión); vacío = de la sociedad
   categoriaId     String? // categoría principal (cada línea puede tener la suya)
-  fecha           DateTime              @db.Date
-  vencimiento     DateTime?             @db.Date
-  base            Decimal               @db.Decimal(12, 2)
-  cuotaIva        Decimal               @db.Decimal(12, 2)
-  total           Decimal               @db.Decimal(12, 2)
-  estado          EstadoFacturaRecibida @default(PENDIENTE)
-  origen          OrigenFacturaRecibida @default(MANUAL)
+  fecha           DateTime               @db.Date
+  vencimiento     DateTime?              @db.Date
+  base            Decimal                @db.Decimal(12, 2)
+  cuotaIva        Decimal                @db.Decimal(12, 2)
+  total           Decimal                @db.Decimal(12, 2)
+  estado          EstadoFacturaRecibida  @default(PENDIENTE)
+  origen          OrigenFacturaRecibida  @default(MANUAL)
   pedidoCompraId  String? // cruce con PedidoCompra del núcleo
   archivo         String? // ruta del PDF o foto (cuando haya almacenamiento)
   notas           String?
@@ -68,8 +68,8 @@ model FacturaRecibida {
   validadaPor     String?
   validadaEn      DateTime?
   pagadaEn        DateTime?
-  createdAt       DateTime              @default(now())
-  updatedAt       DateTime              @updatedAt
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
   lineas          FacturaRecibidaLinea[]
 
   @@unique([tenantId, numero])
@@ -110,29 +110,29 @@ enum OrigenFacturaEmitida {
 }
 
 model FacturaEmitida {
-  id              String               @id @default(cuid())
-  tenantId        String
-  referencia      String // referencia interna del borrador PRE-000001 (NO es número de factura)
-  numeroOficial   String? // número que da el programa certificado al emitirla
-  programaEmisor  String? // programa certificado donde se emitió
-  sociedadId      String
-  centroId        String?
-  origen          OrigenFacturaEmitida @default(OTRO)
-  clienteNombre   String
-  clienteCif      String?
+  id                String                @id @default(cuid())
+  tenantId          String
+  referencia        String // referencia interna del borrador PRE-000001 (NO es número de factura)
+  numeroOficial     String? // número que da el programa certificado al emitirla
+  programaEmisor    String? // programa certificado donde se emitió
+  sociedadId        String
+  centroId          String?
+  origen            OrigenFacturaEmitida  @default(OTRO)
+  clienteNombre     String
+  clienteCif        String?
   sociedadDestinoId String? // si es entre sociedades del grupo
-  fecha           DateTime             @db.Date
-  vencimiento     DateTime?            @db.Date
-  base            Decimal              @db.Decimal(12, 2)
-  cuotaIva        Decimal              @db.Decimal(12, 2)
-  total           Decimal              @db.Decimal(12, 2)
-  estado          EstadoFacturaEmitida @default(BORRADOR)
-  notas           String?
-  creadoPor       String?
-  cobradaEn       DateTime?
-  createdAt       DateTime             @default(now())
-  updatedAt       DateTime             @updatedAt
-  lineas          FacturaEmitidaLinea[]
+  fecha             DateTime              @db.Date
+  vencimiento       DateTime?             @db.Date
+  base              Decimal               @db.Decimal(12, 2)
+  cuotaIva          Decimal               @db.Decimal(12, 2)
+  total             Decimal               @db.Decimal(12, 2)
+  estado            EstadoFacturaEmitida  @default(BORRADOR)
+  notas             String?
+  creadoPor         String?
+  cobradaEn         DateTime?
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+  lineas            FacturaEmitidaLinea[]
 
   @@unique([tenantId, referencia])
   @@index([tenantId, sociedadId, fecha])

@@ -3,7 +3,7 @@ import type { ManifiestoModulo } from "@/kernel/tipos-modulo";
 export const modulo: ManifiestoModulo = {
   id: "personal",
   nombre: "Personal",
-  descripcion: "Plantilla, contratos, cuadrantes, fichajes, ausencias, formación y portal del empleado",
+  descripcion: "Plantilla, contratos, cuadrantes, fichajes, ausencias, formación, nóminas y portal del empleado",
   icono: "personas",
   orden: 14,
   menu: [
@@ -14,6 +14,7 @@ export const modulo: ManifiestoModulo = {
     { ruta: "/personal/ausencias", titulo: "Ausencias", permiso: "personal:ausencias:ver" },
     { ruta: "/personal/formacion", titulo: "Formación", permiso: "personal:formacion:ver" },
     { ruta: "/personal/seleccion", titulo: "Selección", permiso: "personal:seleccion:ver" },
+    { ruta: "/personal/nominas", titulo: "Nóminas", permiso: "personal:nominas:ver" },
     { ruta: "/personal/nomina", titulo: "Costes y nómina", permiso: "personal:costes:ver" },
     { ruta: "/personal/ajustes", titulo: "Puestos y convenios", permiso: "personal:plantilla:editar" },
     { ruta: "/personal/fichar", titulo: "Fichar (mi portal)", permiso: "personal:portal:usar" },
@@ -35,6 +36,8 @@ export const modulo: ManifiestoModulo = {
     { clave: "personal:seleccion:editar", descripcion: "Publicar ofertas, gestionar y contratar candidatos" },
     { clave: "personal:costes:ver", descripcion: "Ver coste de personal" },
     { clave: "personal:nomina:exportar", descripcion: "Exportar las variables de nómina a la gestoría" },
+    { clave: "personal:nominas:ver", descripcion: "Ver las nóminas (importes por persona)" },
+    { clave: "personal:nominas:gestionar", descripcion: "Calcular, cerrar y marcar pagadas las nóminas" },
     { clave: "personal:portal:usar", descripcion: "Usar el portal del empleado" },
   ],
   integraciones: [

@@ -187,6 +187,18 @@ export function CamposContrato({ convenios, sociedades, verSalarios, fechaInicio
           <Campo etiqueta="Coste empresa por hora (€)" ayuda="Vacío: se calcula del salario">
             <Entrada name="costeHora" inputMode="decimal" />
           </Campo>
+          <Campo etiqueta="Pagas al año" ayuda="12 mensualidades + extra (14 por defecto)">
+            <Entrada name="pagasAnuales" inputMode="numeric" placeholder="14" />
+          </Campo>
+          <Campo etiqueta="Pagas extra">
+            <Selector name="pagasProrrateadas" defaultValue="si">
+              <option value="si">Prorrateadas cada mes</option>
+              <option value="no">En junio y diciembre</option>
+            </Selector>
+          </Campo>
+          <Campo etiqueta="Retención IRPF (%)" ayuda="La que diga la gestoría. Vacío: orientativa">
+            <Entrada name="irpfPorcentaje" inputMode="decimal" />
+          </Campo>
         </>
       )}
       <Campo etiqueta="Notas del contrato">
