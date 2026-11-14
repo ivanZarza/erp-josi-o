@@ -10,8 +10,10 @@
  *  4. Obrador (OB): 31 elaborados RZO-… con receta, tarifa a RZ-PRU (coste + 12 %), órdenes y lotes.
  *  5. Ocho semanas de historia hacia atrás desde ctx.hoy, simuladas día a día:
  *     compras recibidas en RZ-PRU y en el obrador, pedidos internos RZ-PRU → OB (lunes, miércoles y
- *     viernes) con su producción previa, consumo diario del local según las ventas estimadas y los
- *     escandallos, mermas con motivo, caducidades de lotes en el obrador y un inventario semanal.
+ *     viernes) con su producción previa, mermas con motivo, caducidades de lotes en el obrador y un
+ *     inventario semanal. Las compras se planifican con una previsión de ventas (cubiertos por día de la
+ *     semana × escandallos), pero NO se escribe consumo: el stock del local baja con los tickets que crea la
+ *     parte «caja» (una línea = su escandallo, src/nucleo/consumo-ventas.ts).
  *
  * El stock se escribe solo con movimientos (como hace el motor del núcleo), pero en lotes con
  * createMany para que la carga en la nube sea rápida. Los números de documento se reservan en el
@@ -21,6 +23,7 @@
 import type { Prisma, PrismaClient, TipoMovimiento } from "../../../src/generated/prisma/client";
 import { cantidadBruta, unirAlergenos } from "../../../src/modulos/comidas/carta-alergenos";
 import { PREFIJO, type ContextoPruebas, type PlatoCarta } from "./contexto";
+import { CUBIERTOS, previsionPorComensal } from "./mezcla-ventas";
 
 // ===========================================================================
 // 1. Proveedores de comida (inventados)
@@ -380,7 +383,10 @@ const RECETAS: FilaReceta[] = [
 // 4. Platos de la carta: descripción propia, ventas por cada 100 cubiertos y escandallo por ración
 // ===========================================================================
 
-// clave = nombre de la carta (los dos «Lomo alto» se distinguen por sección)
+// clave = nombre de la carta (los dos «Lomo alto» se distinguen por sección).
+// El número es el peso del plato dentro de su grupo de la carta (raciones por 100 cubiertos de la sección):
+// lo usan la previsión de compras de esta parte y la elección de platos de los tickets (caja.ts), a través
+// de mezcla-ventas.ts, que reparte con él las raciones por comensal de cada grupo.
 const PLATOS: Record<string, [string | null, number, Linea[]]> = {
   // De la huerta
   "Berenjena japonesa a la brasa": ["Abierta a la brasa, glaseada con teriyaki, sésamo y cebollino.", 4, [["VF01", 0.35, 10], ["@TERIYAKI", 0.04, 0], ["DE16", 0.005, 0], ["VF26", 0.003, 0], ["AC01", 0.02, 0], ["DE04", 0.002, 0]]],
@@ -456,6 +462,11 @@ const PLATOS: Record<string, [string | null, number, Linea[]]> = {
   "Pan y aperitivo": ["Pan de masa madre, aceitunas y AOVE. Por persona.", 100, [["PA01", 0.12, 0], ["DE23", 0.03, 0], ["AC01", 0.01, 0]]],
 };
 
+/** Peso de venta de cada plato de comida dentro de su grupo, por su nombre en la carta del ERP. */
+export function pesosComida(carta: PlatoCarta[]): Map<string, number> {
+  return new Map(carta.filter((p) => PLATOS[clavePlato(p)]).map((p) => [nombrePlato(p), PLATOS[clavePlato(p)][1]]));
+}
+
 function clavePlato(p: PlatoCarta): string {
   if (p.nombre !== "Lomo alto") return p.nombre;
   return p.seccion.includes("nacionales") ? "Lomo alto|nacionales" : "Lomo alto|europeos";
@@ -477,7 +488,6 @@ const DIA_MS = 86_400_000;
 const SEMANAS = 8;
 const DIAS_PEDIDO_OBRADOR = [1, 3, 5]; // el local pide al obrador lunes, miércoles y viernes
 const MARGEN_OBRADOR = 12; // tarifa a RZ-PRU: coste + 12 %
-const CUBIERTOS: Record<number, number> = { 0: 150, 1: 95, 2: 105, 3: 115, 4: 135, 5: 175, 6: 195 };
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
@@ -652,14 +662,15 @@ export async function sembrar(prisma: PrismaClient, ctx: ContextoPruebas) {
 
   // --- Ventas estimadas por día y consumo teórico del local (escandallo bruto) ---
   const FIN_PREVISION = 12;
+  // (raciones por comensal de mezcla-ventas.ts: la misma mezcla con la que caja.ts hace los tickets)
   const consumoL = new Map<number, Map<string, number>>(); // día → ref → cantidad bruta
-  const ventas = new Map<number, number>(); // cubiertos por día
+  const prevision = previsionPorComensal(platosCarta.map((p) => ({ clave: clavePlato(p), seccion: p.seccion, formato: null, precio: p.precio ?? 0, peso: PLATOS[clavePlato(p)][1] })));
   for (let d = INICIO + 1; d <= FIN_PREVISION; d++) {
     const cub = Math.round(CUBIERTOS[diaSemana(d)] * (0.88 + azar() * 0.24));
-    ventas.set(d, cub);
     const dia = new Map<string, number>();
-    for (const [, [, porCien, lineas]] of Object.entries(PLATOS)) {
-      const raciones = Math.round((cub * porCien * (0.75 + azar() * 0.5)) / 100);
+    for (const p of platosCarta) {
+      const [, , lineas] = PLATOS[clavePlato(p)];
+      const raciones = cub * (prevision.get(clavePlato(p)) ?? 0) * (0.85 + azar() * 0.3);
       if (raciones <= 0) continue;
       for (const [c, neta, merma] of lineas) {
         const r = ref(c);
@@ -976,16 +987,12 @@ export async function sembrar(prisma: PrismaClient, ctx: ContextoPruebas) {
       }
     }
 
-    // 6) Consumo del día en el local (ventas × escandallo), al cierre
+    // 6) Previsión del consumo del día (ventas estimadas × escandallo): solo para planificar compras y
+    //    pedidos. No se escribe ningún movimiento: el stock baja con los tickets de la parte «caja».
     if (d > INICIO && d < 0) {
       for (const [r, q] of consumoL.get(d) ?? []) {
         const cantidad = r3(q);
-        if (cantidad <= 0) continue;
-        movs.push({
-          centro: "L", ref: r, tipo: "CONSUMO", cantidad: -cantidad, coste: costeDe(r), fecha: fecha(d, 23, 45),
-          motivo: `Consumo teórico de las ventas del día (${ventas.get(d)} cubiertos × escandallos de la carta)`, documentoFijo: `CONSUMO ${fechaMadrid(diaFecha(d))}`, usuario: null,
-        });
-        mover("L", r, -cantidad);
+        if (cantidad > 0) mover("L", r, -cantidad);
       }
     }
   }
@@ -1286,7 +1293,8 @@ export async function sembrar(prisma: PrismaClient, ctx: ContextoPruebas) {
   }));
   await enLotes(filasMov, 3000, (lote) => prisma.movimientoStock.createMany({ data: lote }));
 
-  const negativos = [...stock.L, ...stock.O].filter(([, q]) => q < -0.001).length;
+  // solo el obrador: el stock simulado del local lleva la previsión de ventas (lo real lo deja la parte «caja»)
+  const negativos = [...stock.O].filter(([, q]) => q < -0.001).length;
   console.log(
     `  cocina: ${Object.keys(PROVEEDORES).length} proveedores, ${ING.size} ingredientes, ${REC.size} elaborados, ${platosData.length} platos, ` +
       `${compras.length} compras, ${pedidos.length} pedidos al obrador, ${ordenes.length} órdenes (${lotes.length} lotes), ${mermas.length} mermas, ` +

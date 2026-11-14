@@ -3,7 +3,7 @@ import { exigir } from "@/kernel/contexto";
 import { euros, fecha, numero } from "@/kernel/formato";
 import { Cabecera, Cifra, Rejilla, Pestanas, Aviso, Campo, Entrada, Boton, BotonEnlace } from "@/ui";
 import { TablaDesplegable, DatosDetalle } from "@/ui/tabla-desplegable";
-import { indicadoresMes, cifrasDelDia, resultado, sobreVentas, mesValido, nombreMes, mesDesplazado, hoyISO, aFecha, type Vista, type FilaCuadro } from "@/modulos/cuadro/servicio";
+import { indicadoresMes, cifrasDelDia, resultado, sobreVentas, mesValido, nombreMes, mesDesplazado, hoyISO, aFecha, criterioMercancia, TEXTO_CRITERIO, type Vista, type FilaCuadro } from "@/modulos/cuadro/servicio";
 import { Avisos, Importe, Pct, Desviacion, param, type ParametrosBusqueda } from "./_comun";
 
 export default async function CuadroDeMando({ searchParams }: { searchParams: ParametrosBusqueda }) {
@@ -15,6 +15,7 @@ export default async function CuadroDeMando({ searchParams }: { searchParams: Pa
   const ayer = new Date(aFecha(hoyISO()).getTime() - 86400000).toISOString().slice(0, 10);
   const [{ filas, total, fuentes, presupuestoAFecha }, deAyer] = await Promise.all([indicadoresMes(ctx, mes, vista), cifrasDelDia(ctx, ayer)]);
   const res = resultado(total.cifras);
+  const criterio = criterioMercancia(total.cifras);
   const faltan = Object.entries(fuentes).filter(([, f]) => !f.hay);
 
   // enlace al detalle: solo tiene sentido por centro
@@ -62,7 +63,7 @@ export default async function CuadroDeMando({ searchParams }: { searchParams: Pa
         <Cifra
           etiqueta="Mercancía sobre ventas"
           valor={<Pct valor={sobreVentas(total.cifras.mercancia, total.cifras.ventas)} />}
-          detalle={total.cifras.mercancia === null ? fuentes.mercancia.motivo : `${euros(total.cifras.mercancia)} de mercancía entrada`}
+          detalle={total.cifras.mercancia === null ? fuentes.mercancia.motivo : `${euros(total.cifras.mercancia)} · ${criterio ? TEXTO_CRITERIO[criterio] : "sin movimientos"}`}
         />
         <Cifra
           etiqueta="Resultado de gestión"
@@ -125,6 +126,7 @@ export default async function CuadroDeMando({ searchParams }: { searchParams: Pa
                   <DatosDetalle
                     datos={[
                       { etiqueta: "Detalle", valor: f.detalle || "—" },
+                      { etiqueta: "Mercancía según", valor: criterioMercancia(f.cifras) ? TEXTO_CRITERIO[criterioMercancia(f.cifras)!] : "—" },
                       { etiqueta: "Comensales", valor: f.cifras.comensales === null ? "sin datos" : numero(f.cifras.comensales) },
                       { etiqueta: "Tickets", valor: f.cifras.tickets === null ? "sin datos" : numero(f.cifras.tickets) },
                       { etiqueta: "Ticket medio", valor: f.cifras.tickets && f.cifras.ventas !== null ? euros(f.cifras.ventas / f.cifras.tickets) : "—" },
@@ -150,7 +152,7 @@ export default async function CuadroDeMando({ searchParams }: { searchParams: Pa
           })}
         />
         <p className="mt-3 text-xs text-slate-500">
-          Ventas sin IVA. Mercancía = compras recibidas + lo recibido de otros centros − lo servido a otros centros (así el obrador no cuenta dos veces). Gastos = gastos de Contabilidad y facturas de categorías de gasto, sin IVA.
+          Ventas sin IVA. Mercancía: en los locales con tickets de Caja, el coste teórico de lo vendido (cada línea × su escandallo, desde el primer día con tickets), que no depende de cuándo se compra; en el resto, compras recibidas + lo recibido de otros centros − lo servido a otros centros (así el obrador no cuenta dos veces). Gastos = gastos de Contabilidad y facturas de categorías de gasto, sin IVA.
         </p>
       </div>
     </>

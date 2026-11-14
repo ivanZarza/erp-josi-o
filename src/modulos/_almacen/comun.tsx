@@ -118,6 +118,7 @@ export const TIPOS_MOVIMIENTO: Record<string, string> = {
   MERMA: "Merma",
   AJUSTE_INVENTARIO: "Ajuste de inventario",
   CONSUMO: "Consumo del local",
+  VENTA: "Venta en caja",
   CARGA_INICIAL: "Carga inicial",
   TRASPASO: "Traspaso entre almacenes",
 };

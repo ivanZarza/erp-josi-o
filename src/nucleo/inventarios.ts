@@ -232,6 +232,6 @@ export async function leerInventario(tx: Tx, tenantId: string, area: AreaAlmacen
 /** Movimientos del centro y del área hechos después de abrir el inventario (avisan de que el teórico ya no es exacto). */
 export async function movimientosDesdeApertura(tx: Tx, tenantId: string, area: AreaAlmacen, inv: { id: string; centroId: string; almacenId?: string | null; createdAt: Date }) {
   return tx.movimientoStock.count({
-    where: { tenantId, centroId: inv.centroId, ...(inv.almacenId ? { almacenId: inv.almacenId } : { tipo: { not: "TRASPASO" as const } }), createdAt: { gt: inv.createdAt }, producto: { area }, NOT: { documentoId: inv.id } },
+    where: { tenantId, centroId: inv.centroId, ...(inv.almacenId ? { almacenId: inv.almacenId } : { tipo: { not: "TRASPASO" as const } }), createdAt: { gt: inv.createdAt }, producto: { area }, OR: [{ documentoId: null }, { documentoId: { not: inv.id } }] },
   });
 }

@@ -17,8 +17,8 @@
  *      recibe los jueves;
  *    - RZ-PRU pide al OB los lunes y jueves (pedido interno → servido con albarán ALB-S → recibido);
  *    - RZ-PRU compra directo cerveza, refrescos, aguas, zumos, café y leche según los días de reparto;
- *    - consumo diario del local (movimiento CONSUMO) = ventas estimadas de cada formato × escandallo
- *      (no hay TPV conectado: es la única forma de que el stock baje de forma creíble);
+ *    - previsión del consumo diario (ventas estimadas de cada formato × escandallo) SOLO para planificar
+ *      pedidos y compras: no se escribe movimiento; el stock baja con los tickets de la parte «caja»;
  *    - roturas y mermas con motivo (MER), inventario semanal del local los lunes y dos del obrador.
  *    La simulación se ejecuta dos veces con la misma semilla aleatoria: la primera solo cuenta los
  *    documentos para reservar los números (PL, ALB-S, PC, ALB-E, INV, MER) sin dejar huecos.
@@ -30,7 +30,8 @@
  */
 import { randomUUID } from "node:crypto";
 import type { PrismaClient } from "../../../src/generated/prisma/client";
-import { CODIGO_PRUEBAS, PREFIJO, type ContextoPruebas, type VinoCarta } from "./contexto";
+import { CODIGO_PRUEBAS, PREFIJO, type CartaRaza, type ContextoPruebas, type VinoCarta } from "./contexto";
+import { CUBIERTOS, CUBIERTOS_SEMANA, previsionPorComensal, type ArticuloMezcla } from "./mezcla-ventas";
 
 // ---------------------------------------------------------------------------------------------
 // Datos fijos
@@ -395,6 +396,18 @@ function ventasVino(v: VinoCarta, precio: number): number {
   const base = v.formato === "magnum" ? 0.4 : precio <= 30 ? 6 : precio <= 40 ? 3.5 : precio <= 60 ? 1.6 : precio <= 100 ? 0.7 : precio <= 200 ? 0.25 : 0.08;
   return r2(base * f);
 }
+/**
+ * Peso de venta de las bebidas que no son vino por botella, por «nombre|formato»: las ventas por semana
+ * estimadas (cafés, cervezas, refrescos, copas; generosos y dulces por copa). Los usan la previsión de esta
+ * parte y la elección de bebidas de los tickets (caja.ts), a través de mezcla-ventas.ts.
+ */
+export function pesosBebidas(carta: CartaRaza): Map<string, number> {
+  const m = new Map<string, number>();
+  for (const v of carta.bebidas) if (v.formato === "copa") m.set(`${v.nombre}|Copa`, ventasVino(v, v.precio ?? (v.precio_copa ? r2(v.precio_copa / copaDe(v)) : 30)));
+  for (const [, nombre, , , , , , serv] of ITEMS_OTROS) m.set(`${nombre}|`, serv);
+  return m;
+}
+
 /** Parte de botella que lleva una copa de la carta de copas (generosos 7,5 cl de 75; Oremus 6 cl de 50). */
 const copaDe = (v: VinoCarta) => (/oremo/i.test(v.nombre) ? 0.12 : 0.1);
 /** Copa de 15 cl de una botella de 75 cl. */
@@ -526,7 +539,7 @@ interface Mov {
   tenantId: string;
   centroId: string;
   productoId: string;
-  tipo: "ENTRADA_COMPRA" | "SALIDA_PEDIDO" | "ENTRADA_PEDIDO" | "MERMA" | "AJUSTE_INVENTARIO" | "CONSUMO" | "CARGA_INICIAL";
+  tipo: "ENTRADA_COMPRA" | "SALIDA_PEDIDO" | "ENTRADA_PEDIDO" | "MERMA" | "AJUSTE_INVENTARIO" | "CARGA_INICIAL";
   cantidad: number;
   costeUnitario: number;
   documento: string | null;
@@ -859,16 +872,17 @@ function simular(
       crearCompra(local, prov, lineas, creada, creada, a(manana, 9, 30), prov === P_CAFE ? "telefono" : "whatsapp", null);
     }
 
-    // venta bajo demanda del Opus One (sábado de la reserva)
+    // venta bajo demanda del Opus One (sábado de la reserva): la hace la parte «caja» con un ticket
     if (diasAtras === 19 && antes(a(dia, 23, 30))) {
       const opus = prods.find((p) => p.bajoDemanda && /opus one/i.test(p.nombre));
-      if (opus && hay(local, opus.id) >= 1) mover({ centroId: local, productoId: opus.id, tipo: "CONSUMO", cantidad: -1, documento: null, documentoId: null, motivo: "Venta bajo demanda: mesa 12", usuarioId: null, createdAt: a(dia, 23, 30) });
+      if (opus && hay(local, opus.id) >= 1) stock.set(sk(local, opus.id), r3(hay(local, opus.id) - 1));
     }
 
-    // 23:30 consumo del día en el local: ventas estimadas × escandallo
+    // 23:30 previsión del consumo del día (ventas estimadas × escandallo): solo para planificar pedidos y
+    // compras. No se escribe movimiento: el stock baja con los tickets de la parte «caja».
     const fConsumo = a(dia, 23, 30);
     if (antes(fConsumo)) {
-      const factor = ds === 5 || ds === 6 ? 1.45 : ds === 0 ? 1.1 : ds === 1 ? 0.6 : 0.85;
+      const factor = (CUBIERTOS[ds] * 7) / CUBIERTOS_SEMANA; // mismo reparto por día de la semana que las reservas
       const consumo = new Map<string, number>();
       for (const it of items) {
         const n = poisson(rnd, (it.servPorSemana / 7) * factor);
@@ -882,7 +896,7 @@ function simular(
         const p = porId.get(pid)!;
         const disponible = Math.max(0, hay(local, pid));
         const sale = r3(Math.min(p.entero ? Math.round(q) : q, p.entero ? Math.floor(disponible) : disponible));
-        if (sale > 0) mover({ centroId: local, productoId: pid, tipo: "CONSUMO", cantidad: -sale, documento: null, documentoId: null, motivo: "Ventas del día según escandallo (estimado: sin TPV conectado)", usuarioId: null, createdAt: fConsumo });
+        if (sale > 0) stock.set(sk(local, pid), r3(hay(local, pid) - sale));
       }
     }
   }
@@ -1017,6 +1031,22 @@ export async function sembrar(prisma: PrismaClient, ctx: ContextoPruebas) {
     defs.push({ clave, referencia: ref, nombre: p.nombre, familia: clave === "YZA" ? "Vermut y aperitivos" : "Destilados y licores", unidad: "BOTELLA", caja: 1, coste: Number(p.costeUnitario), iva: 21, proveedor: P_LICORES, origen: "OB", alergenos: clave === "YZA" ? ["SULFITOS"] : clave === "CRO" ? ["LECHE"] : [], reutiliza: ref });
   }
   for (const [seccion, nombre, descripcion, precio, ingredientes, alergenos, etiquetas, serv] of ITEMS_OTROS) items.push({ seccion, nombre, descripcion, precio, ingredientes, alergenos, etiquetas, servPorSemana: serv });
+  // Ventas previstas por semana de cada bebida y formato: la mezcla común de mezcla-ventas.ts (la misma con
+  // la que caja.ts hace los tickets) × los cubiertos previstos de la semana
+  {
+    const pesos = pesosBebidas(ctx.carta);
+    const articulos = items.flatMap((it): ArticuloMezcla[] =>
+      it.formatos
+        ? it.formatos.map((f) => ({ clave: `${it.nombre}|${f.nombre}`, seccion: it.seccion, formato: f.nombre, precio: f.precio, variosFormatos: it.formatos!.length > 1, peso: pesos.get(`${it.nombre}|${f.nombre}`) }))
+        : [{ clave: `${it.nombre}|`, seccion: it.seccion, formato: null, precio: it.precio, peso: pesos.get(`${it.nombre}|`) }],
+    );
+    const prevision = previsionPorComensal(articulos);
+    const semana = (clave: string) => r2((prevision.get(clave) ?? 0) * CUBIERTOS_SEMANA);
+    for (const it of items) {
+      if (it.formatos) for (const f of it.formatos) f.servPorSemana = semana(`${it.nombre}|${f.nombre}`);
+      else it.servPorSemana = semana(`${it.nombre}|`);
+    }
+  }
 
   // lo que se vende de verdad: cada formato con su parte del escandallo (o su producto propio)
   const itemsSim = items.flatMap((it) =>

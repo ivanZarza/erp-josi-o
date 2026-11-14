@@ -43,10 +43,10 @@ export default async function Ventas({ searchParams }: { searchParams: Parametro
 
   return (
     <>
-      <Cabecera titulo="Ventas" subtitulo="Ventas de cada local por jornada (día de negocio). Importes de venta sin IVA; cobros por forma de pago con IVA." />
+      <Cabecera titulo="Ventas" subtitulo="Ventas de cada local por jornada (día de negocio). Si el local tiene tickets, la jornada se calcula sola desde ellos; si no, se mete a mano. Importes de venta sin IVA; cobros por forma de pago con IVA." />
       <Avisos sp={sp} />
       <div className="mb-4">
-        <HuecoIntegracion nombre="Programa de caja (TPV)" descripcion="Leer del TPV los tickets, cobros por forma de pago, comensales y cierres (Revo, Ágora, Last.app… o Chift, pendiente P-03)" />
+        <HuecoIntegracion nombre="Programa de caja (TPV)" descripcion="Leer del TPV los tickets con sus líneas, cobros, propinas y comensales (Revo, Ágora, Last.app… o Chift, pendiente P-03). Mientras, los tickets se importan en CSV o se apuntan en «Tickets», y la jornada se calcula sola" />
       </div>
 
       <Rejilla columnas={4}>
@@ -65,8 +65,16 @@ export default async function Ventas({ searchParams }: { searchParams: Parametro
       )}
 
       {puedeEditar && (
-        <Tarjeta titulo={enEdicion ? `Corregir ventas de ${nombre.get(centroForm)} del ${fecha(fechaForm)}` : "Meter las ventas de un día"} className="mt-4">
-          {enEdicion?.origen === "TPV" ? (
+        <Tarjeta titulo={enEdicion ? `Ventas de ${nombre.get(centroForm)} del ${fecha(fechaForm)}` : "Meter las ventas de un día (locales sin tickets)"} className="mt-4">
+          {enEdicion?.desdeTickets ? (
+            <Aviso>
+              Esta jornada se calcula sola desde sus tickets: para corregirla, anula la línea o el ticket que esté mal en{" "}
+              <a className="underline" href={`/caja/tickets?desde=${fechaForm}&hasta=${fechaForm}&centro=${centroForm}`}>
+                Tickets
+              </a>
+              .
+            </Aviso>
+          ) : enEdicion?.origen === "TPV" ? (
             <Aviso>Esta jornada viene del TPV y no se puede cambiar a mano.</Aviso>
           ) : (
             <form action={accionGuardarJornada} className="space-y-4">
@@ -160,8 +168,8 @@ export default async function Ventas({ searchParams }: { searchParams: Parametro
               euros(j.ventaNeta),
               numero(j.comensales),
               j.tickets ? euros(Number(j.ventaNeta) / j.tickets) : "—",
-              <Etiqueta key="o" tono={j.origen === "TPV" ? "ok" : "normal"}>
-                {j.origen === "TPV" ? "TPV" : "A mano"}
+              <Etiqueta key="o" tono={j.desdeTickets ? "ok" : j.origen === "TPV" ? "ok" : "normal"}>
+                {j.desdeTickets ? (j.origen === "TPV" ? "Tickets del TPV" : "Tickets") : j.origen === "TPV" ? "TPV" : "A mano"}
               </Etiqueta>,
             ],
             detalle: (
@@ -175,11 +183,18 @@ export default async function Ventas({ searchParams }: { searchParams: Parametro
                     { etiqueta: "Descuentos", valor: euros(j.descuentos) },
                     { etiqueta: "Invitaciones", valor: euros(j.invitaciones) },
                     { etiqueta: "Anulaciones", valor: euros(j.anulaciones) },
-                    ...j.pagos.map((p) => ({ etiqueta: NOMBRE_FORMA_COBRO[p.forma], valor: euros(p.importe) })),
+                    { etiqueta: "Propinas", valor: euros(j.propinas) },
+                    { etiqueta: "Coste teórico de lo vendido", valor: j.costeTeorico !== null ? `${euros(j.costeTeorico)}${Number(j.ventaNeta) ? ` (${numero((Number(j.costeTeorico) / Number(j.ventaNeta)) * 100, 1)} %)` : ""}` : "—" },
+                    ...j.pagos.map((p) => ({ etiqueta: NOMBRE_FORMA_COBRO[p.forma], valor: `${euros(p.importe)}${Number(p.propina) ? ` + propinas ${euros(p.propina)}` : ""}` })),
                     { etiqueta: "Notas", valor: j.notas ?? "—" },
                   ]}
                 />
-                {puedeEditar && j.origen === "MANUAL" && (
+                {j.desdeTickets && (
+                  <BotonEnlace variante="secundario" href={`/caja/tickets?desde=${iso}&hasta=${iso}&centro=${j.centroId}`}>
+                    Ver los tickets
+                  </BotonEnlace>
+                )}
+                {puedeEditar && j.origen === "MANUAL" && !j.desdeTickets && (
                   <BotonEnlace variante="secundario" href={`/caja?centro=${j.centroId}&fecha=${iso}&desde=${desde}&hasta=${hasta}`}>
                     Corregir
                   </BotonEnlace>

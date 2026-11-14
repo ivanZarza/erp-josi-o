@@ -5,13 +5,17 @@ import "server-only";
  *
  * Fuentes:
  * - Ventas, comensales, tickets → Caja (ventasPorCentroYDia).
- * - Mercancía → núcleo (MovimientoStock): compras recibidas + recibido de otros centros − servido a otros centros.
+ * - Mercancía → coste teórico de lo vendido (tickets de Caja × escandallos) en los locales con tickets, desde
+ *   su primer día con tickets; si no, núcleo (MovimientoStock): compras recibidas + recibido de otros centros
+ *   − servido a otros centros. El teórico es mejor: no depende de cuándo se compra y no cuenta el stock que
+ *   queda en el almacén. Cada cifra dice cuál se ha usado (mercanciaTeorica / mercanciaCompras = días).
  * - Gastos → Contabilidad (gastosPorCentroYDia): gastos registrados + facturas de categorías de gasto.
  * - Personal → coste por centro y día del módulo Personal (costePersonalPorCentroYDia: fichajes o cuadrante × coste/hora).
  */
 import { db } from "@/kernel/db";
 import { centrosFiltro, type Contexto } from "@/kernel/contexto";
 import { auditar } from "@/kernel/eventos";
+import { porcentaje, euros, fecha as fechaTexto } from "@/kernel/formato";
 import { ventasPorCentroYDia } from "@/modulos/caja/servicio";
 import { gastosPorCentroYDia, detalleGastosCentro } from "@/modulos/contabilidad/servicio";
 import { costePersonalPorCentroYDia } from "@/modulos/personal/servicio";
@@ -63,7 +67,13 @@ export function fuentes(ctx: Contexto): Fuentes {
   const almacen = ctx.tieneModulo("bebidas") || ctx.tieneModulo("comidas") || ctx.tieneModulo("obrador");
   return {
     ventas: { hay: ctx.tieneModulo("caja"), motivo: ctx.tieneModulo("caja") ? "Jornadas de Caja y ventas" : "Caja y ventas no está contratado" },
-    mercancia: { hay: almacen, motivo: almacen ? "Compras recibidas y entradas desde otros centros (movimientos de stock)" : "Ni Bebidas, ni Comidas, ni Obrador están contratados" },
+    mercancia: {
+      hay: almacen || ctx.tieneModulo("caja"),
+      motivo:
+        almacen || ctx.tieneModulo("caja")
+          ? "Coste teórico de lo vendido (tickets × escandallos) en los locales con tickets; en el resto, compras recibidas y entradas desde otros centros"
+          : "Ni Caja con tickets, ni Bebidas, ni Comidas, ni Obrador están contratados",
+    },
     gastos: { hay: ctx.tieneModulo("contabilidad"), motivo: ctx.tieneModulo("contabilidad") ? "Gastos y facturas de gasto de Contabilidad" : "Contabilidad no está contratada" },
     personal: {
       hay: ctx.tieneModulo("personal"),
@@ -81,7 +91,25 @@ export interface Cifras {
   mercancia: number | null;
   gastos: number | null;
   personal: number | null;
+  /** Días (centro × día) cuya mercancía es el coste teórico de lo vendido. */
+  mercanciaTeorica: number;
+  /** Días (centro × día) cuya mercancía son las compras y entradas. */
+  mercanciaCompras: number;
 }
+
+/** Qué mercancía se ha usado en unas cifras: «teórico», «compras» o «mixto» (y null si no hay). */
+export function criterioMercancia(c: Cifras): "teorico" | "compras" | "mixto" | null {
+  if (c.mercanciaTeorica > 0 && c.mercanciaCompras > 0) return "mixto";
+  if (c.mercanciaTeorica > 0) return "teorico";
+  if (c.mercanciaCompras > 0) return "compras";
+  return null;
+}
+
+export const TEXTO_CRITERIO = {
+  teorico: "coste teórico de lo vendido (tickets × escandallos)",
+  compras: "compras y entradas de mercancía",
+  mixto: "coste teórico donde hay tickets y compras en el resto",
+} as const;
 
 const vacias = (f: Fuentes): Cifras => ({
   ventas: f.ventas.hay ? 0 : null,
@@ -90,6 +118,8 @@ const vacias = (f: Fuentes): Cifras => ({
   mercancia: f.mercancia.hay ? 0 : null,
   gastos: f.gastos.hay ? 0 : null,
   personal: f.personal.hay ? 0 : null,
+  mercanciaTeorica: 0,
+  mercanciaCompras: 0,
 });
 
 const sumar = (a: number | null, b: number) => (a === null ? null : redondear(a + b));
@@ -121,16 +151,28 @@ export async function cifrasPorCentroYDia(ctx: Contexto, centroIds: string[], de
     // Personal cuenta los días con ambos extremos incluidos: hasta − 1 día
     f.personal.hay ? costePersonalPorCentroYDia(ctx.tenant.id, centroIds, desde, new Date(hasta.getTime() - 86_400_000)) : Promise.resolve([]),
   ]);
+  // primer día con tickets de cada centro: desde ese día la mercancía es el coste teórico de lo vendido
+  const primerDiaTeorico = new Map<string, string>();
   for (const v of ventas) {
     const c = de(v.centroId, v.fecha);
     c.ventas = sumar(c.ventas, v.ventaNeta);
     c.comensales = (c.comensales ?? 0) + v.comensales;
     c.tickets = (c.tickets ?? 0) + v.tickets;
+    if (v.costeTeorico !== null) {
+      c.mercancia = sumar(c.mercancia ?? 0, v.costeTeorico);
+      c.mercanciaTeorica = 1;
+      const d = dia(v.fecha);
+      if (!primerDiaTeorico.has(v.centroId) || d < primerDiaTeorico.get(v.centroId)!) primerDiaTeorico.set(v.centroId, d);
+    }
   }
   for (const m of movimientos) {
     // la cantidad ya lleva signo: lo servido a otro centro resta, lo recibido suma
-    const c = de(m.centroId, fechaMadrid(m.createdAt));
-    c.mercancia = sumar(c.mercancia, Number(m.cantidad) * Number(m.costeUnitario));
+    const diaM = fechaMadrid(m.createdAt);
+    const desdeTeorico = primerDiaTeorico.get(m.centroId);
+    if (desdeTeorico && dia(diaM) >= desdeTeorico) continue;
+    const c = de(m.centroId, diaM);
+    c.mercancia = sumar(c.mercancia ?? 0, Number(m.cantidad) * Number(m.costeUnitario));
+    c.mercanciaCompras = 1;
   }
   for (const g of gastos) {
     const c = de(g.centroId, g.fecha);
@@ -141,6 +183,10 @@ export async function cifrasPorCentroYDia(ctx: Contexto, centroIds: string[], de
     c.personal = sumar(c.personal, p.coste);
   }
   return mapa;
+}
+
+function porcentajeTexto(parte: number, total: number): string {
+  return total ? porcentaje((parte / total) * 100) : "—";
 }
 
 /** Fecha y hora real → día (Madrid) a medianoche UTC. */
@@ -275,8 +321,13 @@ export async function detalleIndicador(ctx: Contexto, indicador: Indicador, cent
   }
   if (indicador === "mercancia") {
     if (!f.mercancia.hay) return { centro, filas: null, motivo: f.mercancia.motivo };
+    // con tickets: coste teórico de lo vendido de cada día (y compras solo antes del primer día con tickets)
+    const ventas = f.ventas.hay ? await ventasPorCentroYDia(ctx.tenant.id, [centroId], r.desde, r.hasta) : [];
+    const teoricos = ventas.filter((v) => v.costeTeorico !== null);
+    const primerTeorico = teoricos.length ? teoricos[0].fecha : null;
+    const filasTeoricas = teoricos.map((v) => ({ id: `teorico|${dia(v.fecha)}`, fecha: v.fecha, documento: "Tickets", concepto: `Coste teórico de lo vendido (${porcentajeTexto(v.costeTeorico!, v.ventaNeta)} de ${euros(v.ventaNeta)} de venta)`, importe: v.costeTeorico! }));
     const movs = await prisma.movimientoStock.findMany({
-      where: { tenantId: ctx.tenant.id, centroId, tipo: { in: [...TIPOS_MERCANCIA] }, createdAt: { gte: r.desde, lt: r.hasta } },
+      where: { tenantId: ctx.tenant.id, centroId, tipo: { in: [...TIPOS_MERCANCIA] }, createdAt: { gte: r.desde, lt: primerTeorico ?? r.hasta } },
       select: { tipo: true, documento: true, cantidad: true, costeUnitario: true, createdAt: true },
       orderBy: { createdAt: "asc" },
     });
@@ -299,11 +350,16 @@ export async function detalleIndicador(ctx: Contexto, indicador: Indicador, cent
     const nombreTipo: Record<string, string> = { ENTRADA_COMPRA: "Compra recibida", ENTRADA_PEDIDO: "Recibido de otro centro", SALIDA_PEDIDO: "Servido a otro centro" };
     return {
       centro,
-      motivo: f.mercancia.motivo,
-      filas: Array.from(docs.entries()).map(([k, d]) => {
-        const documento = k.split("|")[1];
-        return { id: k, fecha: d.fecha, documento, concepto: `${nombreTipo[d.tipo]}${proveedorDe.get(documento) ? ` · ${proveedorDe.get(documento)}` : ""} · ${d.lineas} líneas`, importe: redondear(d.importe) };
-      }),
+      motivo: teoricos.length
+        ? `Coste teórico de lo vendido (tickets × escandallos) desde el ${fechaTexto(primerTeorico!)}${docs.size ? "; antes, compras y entradas" : ""}. Detalle por plato en Caja → Venta por plato`
+        : "Compras recibidas y entradas desde otros centros (el local no tiene tickets con líneas este mes)",
+      filas: [
+        ...Array.from(docs.entries()).map(([k, d]) => {
+          const documento = k.split("|")[1];
+          return { id: k, fecha: d.fecha, documento, concepto: `${nombreTipo[d.tipo]}${proveedorDe.get(documento) ? ` · ${proveedorDe.get(documento)}` : ""} · ${d.lineas} líneas`, importe: redondear(d.importe) };
+        }),
+        ...filasTeoricas,
+      ],
     };
   }
   if (indicador === "gastos") {

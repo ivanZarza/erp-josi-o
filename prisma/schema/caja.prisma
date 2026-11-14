@@ -1,7 +1,9 @@
 // =====================================================================
-// CAJA Y VENTAS: jornadas de venta por centro y cierres de caja.
-// Mientras no haya TPV conectado, las jornadas se meten a mano (origen MANUAL).
-// El ERP no emite tickets (los emite el TPV, que es quien cumple Verifactu).
+// CAJA Y VENTAS: tickets con líneas, jornadas de venta por centro, apertura de caja y cierres.
+// La jornada se calcula desde los tickets (desdeTickets); si un local no tiene tickets, se mete a mano.
+// Los tickets llegan del TPV (importación) o se apuntan en la pantalla de Caja; cada línea vendida
+// descuenta stock por el escandallo del plato y su formato (src/nucleo/consumo-ventas.ts).
+// El ERP no emite tickets fiscales (los emite el TPV, que es quien cumple Verifactu).
 // Referencias al núcleo (centro, usuario) con id de texto, sin @relation.
 // Ver docs/specs/modulos/caja/README.md
 // =====================================================================
@@ -26,6 +28,9 @@ model JornadaVenta {
   descuentos   Decimal            @default(0) @db.Decimal(12, 2)
   invitaciones Decimal            @default(0) @db.Decimal(12, 2)
   anulaciones  Decimal            @default(0) @db.Decimal(12, 2)
+  propinas     Decimal            @default(0) @db.Decimal(12, 2) // propinas cobradas (aparte de la venta)
+  costeTeorico Decimal?           @db.Decimal(12, 2) // coste del escandallo de lo vendido (solo si hay tickets con líneas)
+  desdeTickets Boolean            @default(false) // calculada desde los tickets: no se toca a mano
   origen       OrigenJornadaVenta @default(MANUAL)
   notas        String?
   creadoPor    String?
@@ -52,7 +57,8 @@ model JornadaVentaPago {
   jornadaId String
   jornada   JornadaVenta   @relation(fields: [jornadaId], references: [id], onDelete: Cascade)
   forma     FormaCobroCaja
-  importe   Decimal        @db.Decimal(12, 2)
+  importe   Decimal        @db.Decimal(12, 2) // cobrado por la venta (sin propina)
+  propina   Decimal        @default(0) @db.Decimal(12, 2) // propinas cobradas con esa forma
 
   @@unique([jornadaId, forma])
 }
@@ -74,7 +80,14 @@ model CierreCaja {
   descuadre            Decimal          @db.Decimal(12, 2) // contado − teórico
   tarjetaTeorico       Decimal?         @db.Decimal(12, 2)
   tarjetaBanco         Decimal?         @db.Decimal(12, 2) // lo que liquida el banco (a mano hasta tener «Bancos»)
-  fondoCaja            Decimal          @default(0) @db.Decimal(12, 2) // cambio que se deja en caja
+  fondoCaja            Decimal          @default(0) @db.Decimal(12, 2) // cambio que se deja en caja para el día siguiente
+  fondoInicial         Decimal          @default(0) @db.Decimal(12, 2) // fondo contado en la apertura
+  efectivoVentas       Decimal?         @db.Decimal(12, 2) // cobros en efectivo de la jornada
+  retiradas            Decimal          @default(0) @db.Decimal(12, 2) // dinero sacado del cajón (caja fuerte, banco)
+  pagosCaja            Decimal          @default(0) @db.Decimal(12, 2) // pagos hechos con dinero de caja
+  entradasCaja         Decimal          @default(0) @db.Decimal(12, 2) // dinero metido en el cajón que no es venta (cambio)
+  propinasTarjeta      Decimal          @default(0) @db.Decimal(12, 2) // entran en la liquidación del banco
+  propinasEfectivo     Decimal          @default(0) @db.Decimal(12, 2) // van al bote, no al cajón
   motivo               String? // obligatorio si hay descuadre
   estado               EstadoCierreCaja @default(PENDIENTE)
   cerradoPor           String?
@@ -86,4 +99,140 @@ model CierreCaja {
 
   @@unique([tenantId, centroId, fecha])
   @@index([tenantId, estado])
+}
+
+// ---------------------------------------------------------------------------------------------
+// Tickets con líneas
+// ---------------------------------------------------------------------------------------------
+
+enum EstadoTicket {
+  ABIERTO // mesa abierta: ya ha pedido (el stock ya ha bajado), sin cobrar
+  COBRADO
+  ANULADO // ticket entero anulado: devuelve el stock; cuenta en «anulaciones»
+}
+
+enum TurnoVenta {
+  COMIDA
+  CENA
+}
+
+/// Ticket (cuenta) de una mesa o de la barra. Lo importa el TPV o se apunta en Caja.
+/// Importes de venta con IVA; descuentos, invitaciones y anulaciones sin IVA (como la jornada).
+model Ticket {
+  id              String             @id @default(cuid())
+  tenantId        String
+  centroId        String
+  fecha           DateTime           @db.Date // día de negocio (corte en la horaCorte del centro)
+  numero          String // el del TPV, o TCK-AAAA-000001 si se apunta en el ERP
+  abiertoEn       DateTime
+  cobradoEn       DateTime?
+  turno           TurnoVenta         @default(CENA)
+  mesa            String?
+  comensales      Int                @default(0)
+  empleadoId      String? // camarero (Personal)
+  camarero        String? // nombre tal cual llega del TPV (si no se enlaza con Personal)
+  estado          EstadoTicket       @default(ABIERTO)
+  base            Decimal            @default(0) @db.Decimal(12, 2) // venta sin IVA
+  cuotaIva        Decimal            @default(0) @db.Decimal(12, 2)
+  total           Decimal            @default(0) @db.Decimal(12, 2) // con IVA, sin propina
+  descuentos      Decimal            @default(0) @db.Decimal(12, 2) // sin IVA
+  invitaciones    Decimal            @default(0) @db.Decimal(12, 2) // precio de venta sin IVA de lo invitado
+  anulaciones     Decimal            @default(0) @db.Decimal(12, 2) // sin IVA
+  propina         Decimal            @default(0) @db.Decimal(12, 2)
+  costeTeorico    Decimal            @default(0) @db.Decimal(12, 4) // escandallo de lo servido (con invitaciones)
+  origen          OrigenJornadaVenta @default(MANUAL)
+  externoId       String? // id del ticket en el TPV (no se importa dos veces)
+  reservaId       String? // Reservas
+  motivoAnulacion String?
+  anuladoPor      String?
+  anuladoEn       DateTime?
+  notas           String?
+  creadoPor       String?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  lineas          TicketLinea[]
+  cobros          TicketCobro[]
+
+  @@unique([tenantId, centroId, numero])
+  @@index([tenantId, centroId, fecha])
+  @@index([tenantId, externoId])
+}
+
+/// Línea del ticket: un plato o bebida de la carta en un formato (botella, copa, mágnum…).
+/// Sin platoId = concepto del TPV sin enlazar con la carta (no descuenta stock).
+model TicketLinea {
+  id              String    @id @default(cuid())
+  ticketId        String
+  ticket          Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  orden           Int       @default(0)
+  momento         DateTime // cuándo se pidió (y bajó el stock)
+  platoId         String? // CartaPlato
+  formatoId       String? // CartaPlatoFormato
+  concepto        String // «Entraña · ración», «Pago de Carraovejas · Copa»
+  cantidad        Decimal   @db.Decimal(10, 3)
+  precio          Decimal   @db.Decimal(10, 2) // PVP unitario con IVA
+  iva             Decimal   @default(10) @db.Decimal(5, 2)
+  descuento       Decimal   @default(0) @db.Decimal(12, 2) // importe descontado, con IVA
+  invitacion      Boolean   @default(false)
+  total           Decimal   @default(0) @db.Decimal(12, 2) // con IVA (0 si invitación o anulada)
+  base            Decimal   @default(0) @db.Decimal(12, 2) // sin IVA
+  costeTeorico    Decimal   @default(0) @db.Decimal(12, 4) // coste del escandallo de la línea
+  anulada         Boolean   @default(false)
+  motivoAnulacion String?
+  anuladaPor      String?
+  anuladaEn       DateTime?
+
+  @@index([ticketId])
+  @@index([platoId])
+}
+
+/// Cobro de un ticket (puede haber varios: cuenta a medias, parte con tarjeta regalo…)
+model TicketCobro {
+  id       String         @id @default(cuid())
+  ticketId String
+  ticket   Ticket         @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  forma    FormaCobroCaja
+  importe  Decimal        @db.Decimal(12, 2) // con IVA, sin propina
+  propina  Decimal        @default(0) @db.Decimal(12, 2)
+  momento  DateTime
+
+  @@index([ticketId])
+}
+
+// ---------------------------------------------------------------------------------------------
+// Apertura de caja y movimientos de efectivo del día
+// ---------------------------------------------------------------------------------------------
+
+/// Apertura de la caja de un día: fondo inicial contado. El cierre del mismo día lo usa en el arqueo.
+model AperturaCaja {
+  id           String           @id @default(cuid())
+  tenantId     String
+  centroId     String
+  fecha        DateTime         @db.Date // día de negocio
+  fondoInicial Decimal          @db.Decimal(12, 2)
+  abiertaEn    DateTime         @default(now())
+  abiertaPor   String?
+  notas        String?
+  movimientos  MovimientoCaja[]
+
+  @@unique([tenantId, centroId, fecha])
+}
+
+enum TipoMovimientoCaja {
+  RETIRADA // a la caja fuerte o al banco
+  PAGO // pago con dinero de caja (repartidor, compra urgente)
+  ENTRADA // dinero que se mete en el cajón y no es venta (cambio)
+}
+
+model MovimientoCaja {
+  id         String             @id @default(cuid())
+  aperturaId String
+  apertura   AperturaCaja       @relation(fields: [aperturaId], references: [id], onDelete: Cascade)
+  tipo       TipoMovimientoCaja
+  importe    Decimal            @db.Decimal(12, 2) // siempre positivo
+  concepto   String
+  momento    DateTime           @default(now())
+  usuarioId  String?
+
+  @@index([aperturaId])
 }

@@ -366,6 +366,7 @@ enum TipoMovimiento {
   MERMA // rotura, caducidad, desperdicio (−)
   AJUSTE_INVENTARIO // cierre de inventario (±)
   CONSUMO // consumo del local (−)
+  VENTA // lo vendido en caja según el escandallo (−); al anular una línea o un ticket, vuelve (+)
   CARGA_INICIAL // importación inicial (+)
   TRASPASO // de un almacén a otro del mismo centro (− en origen, + en destino)
 }
