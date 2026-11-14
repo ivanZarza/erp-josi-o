@@ -13,7 +13,7 @@ export default async function CuadroDeMando({ searchParams }: { searchParams: Pa
   const vistaParam = param(sp, "vista");
   const vista: Vista = vistaParam === "marca" || vistaParam === "sociedad" ? vistaParam : "centro";
   const ayer = new Date(aFecha(hoyISO()).getTime() - 86400000).toISOString().slice(0, 10);
-  const [{ filas, total, fuentes }, deAyer] = await Promise.all([indicadoresMes(ctx, mes, vista), cifrasDelDia(ctx, ayer)]);
+  const [{ filas, total, fuentes, presupuestoAFecha }, deAyer] = await Promise.all([indicadoresMes(ctx, mes, vista), cifrasDelDia(ctx, ayer)]);
   const res = resultado(total.cifras);
   const faltan = Object.entries(fuentes).filter(([, f]) => !f.hay);
 
@@ -55,7 +55,7 @@ export default async function CuadroDeMando({ searchParams }: { searchParams: Pa
         <Cifra
           etiqueta="Ventas del mes"
           valor={total.cifras.ventas === null ? "Sin datos" : euros(total.cifras.ventas)}
-          detalle={total.presupuesto ? <>Presupuesto {euros(total.presupuesto.ventas)} · <Desviacion real={total.cifras.ventas} previsto={total.presupuesto.ventas} /></> : "Sin presupuesto"}
+          detalle={total.presupuesto ? <>Presupuesto{presupuestoAFecha ? " a fecha" : ""} {euros(total.presupuesto.ventas)} · <Desviacion real={total.cifras.ventas} previsto={total.presupuesto.ventas} /></> : "Sin presupuesto"}
           tono={total.presupuesto && total.cifras.ventas !== null ? (total.cifras.ventas >= total.presupuesto.ventas ? "ok" : "aviso") : "normal"}
           href={`/cuadro/presupuestos?mes=${mes}`}
         />

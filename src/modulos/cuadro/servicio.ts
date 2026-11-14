@@ -172,15 +172,21 @@ export async function indicadoresMes(ctx: Contexto, mes: string, vista: Vista) {
   const ids = centrosFiltro(ctx);
   const r = rangoMes(mes);
   const [a, m] = mes.split("-").map(Number);
+  // Mes en curso: las cifras llegan hasta hoy (el cuadrante futuro no es coste todavía)
+  // y el presupuesto se reparte por días para comparar «a fecha».
+  const hoy = aFecha(hoyISO());
+  const hasta = r.hasta > hoy ? new Date(hoy.getTime() + 86_400_000) : r.hasta;
+  const fraccion = Math.max(0, Math.min(1, (hasta.getTime() - r.desde.getTime()) / (r.hasta.getTime() - r.desde.getTime())));
   const [centros, porDia, presupuestos] = await Promise.all([
     prisma.centro.findMany({ where: { tenantId: ctx.tenant.id, id: { in: ids } }, include: { marca: true, sociedad: true }, orderBy: [{ tipo: "desc" }, { nombre: "asc" }] }),
-    cifrasPorCentroYDia(ctx, ids, r.desde, r.hasta),
+    cifrasPorCentroYDia(ctx, ids, r.desde, hasta),
     prisma.presupuestoCentro.findMany({ where: { tenantId: ctx.tenant.id, centroId: { in: ids }, anio: a, mes: m } }),
   ]);
   const f = fuentes(ctx);
   const porCentro = new Map<string, Cifras>(centros.map((c) => [c.id, vacias(f)]));
   for (const [k, v] of porDia) acumular(porCentro.get(k.split("|")[0])!, v);
-  const presu = new Map(presupuestos.map((p) => [p.centroId, { ventas: Number(p.ventas), mercancia: num(p.mercancia), personal: num(p.personal), gastos: num(p.gastos) }]));
+  const aFechaDe = (v: number | null) => (v === null ? null : redondear(v * fraccion));
+  const presu = new Map(presupuestos.map((p) => [p.centroId, { ventas: aFechaDe(Number(p.ventas))!, mercancia: aFechaDe(num(p.mercancia)), personal: aFechaDe(num(p.personal)), gastos: aFechaDe(num(p.gastos)) }]));
 
   const grupos = new Map<string, FilaCuadro>();
   for (const c of centros) {
@@ -200,7 +206,7 @@ export async function indicadoresMes(ctx: Contexto, mes: string, vista: Vista) {
     acumular(total.cifras, g.cifras);
     if (g.presupuesto) total.presupuesto = sumarPresupuesto(total.presupuesto, g.presupuesto);
   }
-  return { filas, total, fuentes: f };
+  return { filas, total, fuentes: f, presupuestoAFecha: fraccion < 1 };
 }
 
 /** Cifras de un día concreto (por ejemplo, ayer) sumando todos los centros del filtro. */
