@@ -1,0 +1,126 @@
+// =====================================================================
+// EVENTOS: solicitudes de grupos, empresas, Navidad y catering;
+// presupuestos con líneas y menús de grupo por marca.
+// Ficha: docs/specs/modulos/eventos/README.md
+// Referencias al núcleo y a otros módulos solo con id de texto.
+// =====================================================================
+
+enum TipoEvento {
+  EMPRESA
+  CELEBRACION
+  NAVIDAD
+  CATERING
+  OTRO
+}
+
+enum EstadoEvento {
+  NUEVA
+  CONTACTADA
+  PRESUPUESTO
+  ACEPTADA
+  CELEBRADA
+  PERDIDA
+}
+
+model EventoSolicitud {
+  id               String       @id @default(cuid())
+  tenantId         String
+  numero           String // EV-000001
+  tipo             TipoEvento   @default(CELEBRACION)
+  estado           EstadoEvento @default(NUEVA)
+  motivoPerdida    String?
+  nombreContacto   String
+  empresa          String?
+  telefono         String?
+  email            String?
+  clienteId        String? // módulo Clientes
+  personas         Int
+  fecha            DateTime?    @db.Date
+  hora             String?
+  presupuestoCliente Decimal?   @db.Decimal(12, 2) // lo que el cliente dice que quiere gastar
+  marcaId          String? // marca preferida (núcleo)
+  centroId         String? // local preferido o asignado (núcleo)
+  espacioId        String? // espacio de Reservas (ReservaEspacio)
+  recomiendame     Boolean      @default(false) // el cliente pide que le propongamos local
+  origen           String       @default("MANUAL") // MANUAL, WEB, RESERVA, CORREO, TELEFONO
+  reservaId        String? // si viene de una reserva grande
+  responsableId    String? // usuario comercial
+  notas            String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  presupuestos     EventoPresupuesto[]
+  historial        EventoHistorial[]
+
+  @@unique([tenantId, numero])
+  @@index([tenantId, estado])
+}
+
+model EventoHistorial {
+  id          String          @id @default(cuid())
+  solicitudId String
+  solicitud   EventoSolicitud @relation(fields: [solicitudId], references: [id], onDelete: Cascade)
+  desde       EstadoEvento?
+  hasta       EstadoEvento
+  nota        String?
+  usuarioId   String?
+  createdAt   DateTime        @default(now())
+}
+
+/// Menú de grupo de una marca («Fumet» 65 €, «Socarrat» 70 €)
+model EventoMenu {
+  id            String   @id @default(cuid())
+  tenantId      String
+  marcaId       String? // null = vale para todas las marcas
+  nombre        String
+  precioPersona Decimal  @db.Decimal(10, 2) // IVA incluido
+  iva           Decimal  @default(10) @db.Decimal(5, 2)
+  descripcion   String?
+  platos        String? // un plato por línea
+  minPersonas   Int      @default(1)
+  activo        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([tenantId, marcaId])
+}
+
+enum EstadoPresupuestoEvento {
+  BORRADOR
+  ENVIADO
+  ACEPTADO
+  RECHAZADO
+}
+
+model EventoPresupuesto {
+  id           String                  @id @default(cuid())
+  tenantId     String
+  solicitudId  String
+  solicitud    EventoSolicitud         @relation(fields: [solicitudId], references: [id])
+  numero       String // PRE-000001
+  version      Int                     @default(1)
+  estado       EstadoPresupuestoEvento @default(BORRADOR)
+  condiciones  String?
+  senal        Decimal?                @db.Decimal(12, 2) // señal pedida
+  total        Decimal                 @default(0) @db.Decimal(12, 2) // IVA incluido
+  enviadoEn    DateTime?
+  aceptadoEn   DateTime?
+  creadoPor    String?
+  createdAt    DateTime                @default(now())
+  updatedAt    DateTime                @updatedAt
+  lineas       EventoPresupuestoLinea[]
+
+  @@unique([tenantId, numero])
+}
+
+model EventoPresupuestoLinea {
+  id            String            @id @default(cuid())
+  presupuestoId String
+  presupuesto   EventoPresupuesto @relation(fields: [presupuestoId], references: [id], onDelete: Cascade)
+  menuId        String? // EventoMenu (si la línea es un menú)
+  concepto      String
+  cantidad      Decimal           @db.Decimal(10, 2)
+  precio        Decimal           @db.Decimal(12, 2) // IVA incluido, por unidad
+  iva           Decimal           @default(10) @db.Decimal(5, 2)
+  importe       Decimal           @db.Decimal(12, 2)
+  orden         Int               @default(0)
+}

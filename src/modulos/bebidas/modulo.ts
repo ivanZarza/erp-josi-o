@@ -1,0 +1,37 @@
+import type { ManifiestoModulo } from "@/kernel/tipos-modulo";
+
+export const modulo: ManifiestoModulo = {
+  id: "bebidas",
+  nombre: "Bebidas",
+  descripcion: "Vinos, licores, cervezas, refrescos y cafés: stock, compras, pedidos de los locales, inventarios y carta de bebidas (lo que hoy hace BODEGA 360)",
+  icono: "copa",
+  orden: 10,
+  menu: [
+    { ruta: "/bebidas", titulo: "Resumen", permiso: "bebidas:stock:ver" },
+    { ruta: "/bebidas/stock", titulo: "Stock", permiso: "bebidas:stock:ver" },
+    { ruta: "/bebidas/pedidos", titulo: "Pedidos de locales", permiso: "bebidas:pedidos:ver" },
+    { ruta: "/bebidas/compras", titulo: "Compras", permiso: "bebidas:compras:ver" },
+    { ruta: "/bebidas/inventarios", titulo: "Inventarios", permiso: "bebidas:inventarios:ver" },
+    { ruta: "/bebidas/movimientos", titulo: "Movimientos", permiso: "bebidas:stock:ver" },
+    { ruta: "/bebidas/productos", titulo: "Productos", permiso: "bebidas:productos:ver" },
+  ],
+  permisos: [
+    { clave: "bebidas:stock:ver", descripcion: "Ver stock de bebidas" },
+    { clave: "bebidas:productos:ver", descripcion: "Ver productos de bebida" },
+    { clave: "bebidas:productos:editar", descripcion: "Crear y editar productos de bebida" },
+    { clave: "bebidas:pedidos:ver", descripcion: "Ver pedidos de bebida" },
+    { clave: "bebidas:pedidos:crear", descripcion: "Pedir bebida al almacén" },
+    { clave: "bebidas:pedidos:servir", descripcion: "Servir pedidos de bebida" },
+    { clave: "bebidas:pedidos:recibir", descripcion: "Confirmar la recepción de pedidos de bebida en el local" },
+    { clave: "bebidas:compras:ver", descripcion: "Ver compras de bebida" },
+    { clave: "bebidas:compras:crear", descripcion: "Pedir a proveedores de bebida" },
+    { clave: "bebidas:compras:recibir", descripcion: "Recepcionar compras de bebida" },
+    { clave: "bebidas:inventarios:ver", descripcion: "Ver inventarios de bebida" },
+    { clave: "bebidas:inventarios:crear", descripcion: "Hacer inventarios de bebida" },
+    { clave: "bebidas:inventarios:cerrar", descripcion: "Cerrar inventarios de bebida" },
+    { clave: "bebidas:mermas:crear", descripcion: "Registrar roturas y mermas" },
+  ],
+  integraciones: [
+    { id: "bodega360", nombre: "Importar BODEGA 360", descripcion: "Traer productos, proveedores, movimientos y albaranes de la app actual", estado: "pendiente" },
+  ],
+};

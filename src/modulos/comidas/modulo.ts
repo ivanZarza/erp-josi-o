@@ -1,0 +1,40 @@
+import type { ManifiestoModulo } from "@/kernel/tipos-modulo";
+
+export const modulo: ManifiestoModulo = {
+  id: "comidas",
+  nombre: "Comidas",
+  descripcion: "Alimentación, cocina, carta de platos, alérgenos y escandallos",
+  icono: "plato",
+  orden: 11,
+  menu: [
+    { ruta: "/comidas", titulo: "Resumen", permiso: "comidas:stock:ver" },
+    { ruta: "/comidas/stock", titulo: "Stock", permiso: "comidas:stock:ver" },
+    { ruta: "/comidas/pedidos", titulo: "Pedidos de locales", permiso: "comidas:pedidos:ver" },
+    { ruta: "/comidas/compras", titulo: "Compras", permiso: "comidas:compras:ver" },
+    { ruta: "/comidas/inventarios", titulo: "Inventarios", permiso: "comidas:inventarios:ver" },
+    { ruta: "/comidas/movimientos", titulo: "Movimientos", permiso: "comidas:stock:ver" },
+    { ruta: "/comidas/productos", titulo: "Productos", permiso: "comidas:productos:ver" },
+    { ruta: "/comidas/carta", titulo: "Carta y escandallos", permiso: "comidas:carta:ver" },
+  ],
+  permisos: [
+    { clave: "comidas:stock:ver", descripcion: "Ver stock de comida" },
+    { clave: "comidas:productos:ver", descripcion: "Ver productos de comida" },
+    { clave: "comidas:productos:editar", descripcion: "Crear y editar productos de comida" },
+    { clave: "comidas:pedidos:ver", descripcion: "Ver pedidos de comida" },
+    { clave: "comidas:pedidos:crear", descripcion: "Pedir comida al obrador" },
+    { clave: "comidas:pedidos:servir", descripcion: "Servir pedidos de comida" },
+    { clave: "comidas:pedidos:recibir", descripcion: "Confirmar la recepción de pedidos de comida en el local" },
+    { clave: "comidas:compras:ver", descripcion: "Ver compras de comida" },
+    { clave: "comidas:compras:crear", descripcion: "Pedir a proveedores de comida" },
+    { clave: "comidas:compras:recibir", descripcion: "Recepcionar compras de comida" },
+    { clave: "comidas:inventarios:ver", descripcion: "Ver inventarios de comida" },
+    { clave: "comidas:inventarios:crear", descripcion: "Hacer inventarios de comida" },
+    { clave: "comidas:inventarios:cerrar", descripcion: "Cerrar inventarios de comida" },
+    { clave: "comidas:mermas:crear", descripcion: "Registrar mermas de comida" },
+    { clave: "comidas:carta:ver", descripcion: "Ver carta y escandallos" },
+    { clave: "comidas:carta:editar", descripcion: "Editar carta, alérgenos y escandallos" },
+  ],
+  integraciones: [
+    { id: "tpv-carta", nombre: "Carta al TPV", descripcion: "Enviar platos y precios al programa de caja", estado: "pendiente" },
+  ],
+};

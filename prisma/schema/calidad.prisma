@@ -1,0 +1,188 @@
+// =====================================================================
+// CALIDAD: APPCC (listas de comprobación), temperaturas, incidencias y mantenimiento.
+// Ver docs/specs/modulos/calidad/README.md
+// Referencias al núcleo (Centro, Usuario, Proveedor) solo con id de texto, sin @relation.
+// =====================================================================
+
+enum TipoListaCalidad {
+  APERTURA
+  CIERRE
+  LIMPIEZA
+  RECEPCION
+  OTRA
+}
+
+/// Plantilla de lista de comprobación APPCC. centroId vacío = vale para todos los centros.
+model CalidadPlantilla {
+  id        String           @id @default(cuid())
+  tenantId  String
+  centroId  String?
+  nombre    String
+  tipo      TipoListaCalidad
+  orden     Int              @default(0)
+  activo    Boolean          @default(true)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  puntos      CalidadPlantillaPunto[]
+  ejecuciones CalidadEjecucion[]
+
+  @@index([tenantId, centroId])
+}
+
+model CalidadPlantillaPunto {
+  id          String           @id @default(cuid())
+  plantillaId String
+  plantilla   CalidadPlantilla @relation(fields: [plantillaId], references: [id], onDelete: Cascade)
+  texto       String
+  pideValor   Boolean          @default(false) // p. ej. temperatura de recepción
+  orden       Int              @default(0)
+  activo      Boolean          @default(true)
+}
+
+/// Lista hecha un día en un centro
+model CalidadEjecucion {
+  id              String           @id @default(cuid())
+  tenantId        String
+  centroId        String
+  plantillaId     String
+  plantilla       CalidadPlantilla @relation(fields: [plantillaId], references: [id])
+  fecha           DateTime         @db.Date // jornada
+  todoCorrecto    Boolean
+  observaciones   String?
+  realizadoPor    String?
+  realizadoNombre String?
+  createdAt       DateTime         @default(now())
+  respuestas      CalidadRespuesta[]
+
+  @@unique([plantillaId, centroId, fecha])
+  @@index([tenantId, centroId, fecha])
+}
+
+model CalidadRespuesta {
+  id          String           @id @default(cuid())
+  ejecucionId String
+  ejecucion   CalidadEjecucion @relation(fields: [ejecucionId], references: [id], onDelete: Cascade)
+  puntoId     String
+  texto       String // copia del texto del punto en ese momento
+  correcto    Boolean
+  valor       String?
+}
+
+enum TipoEquipoFrio {
+  CAMARA_REFRIGERACION
+  CAMARA_CONGELACION
+  NEVERA
+  ARCON_CONGELADOR
+  MESA_FRIA
+  OTRO
+}
+
+model CalidadEquipo {
+  id        String         @id @default(cuid())
+  tenantId  String
+  centroId  String
+  nombre    String
+  tipo      TipoEquipoFrio
+  minimo    Decimal        @db.Decimal(5, 1)
+  maximo    Decimal        @db.Decimal(5, 1)
+  sondaId   String? // hueco: identificador de la sonda conectada (fase posterior)
+  activo    Boolean        @default(true)
+  createdAt DateTime       @default(now())
+  registros CalidadTemperatura[]
+
+  @@index([tenantId, centroId])
+}
+
+model CalidadTemperatura {
+  id               String        @id @default(cuid())
+  tenantId         String
+  centroId         String
+  equipoId         String
+  equipo           CalidadEquipo @relation(fields: [equipoId], references: [id])
+  temperatura      Decimal       @db.Decimal(5, 1)
+  fueraDeRango     Boolean       @default(false)
+  origen           String        @default("MANUAL") // MANUAL | SONDA
+  accionCorrectora String?
+  registradoPor    String?
+  registradoNombre String?
+  createdAt        DateTime      @default(now())
+
+  @@index([equipoId, createdAt])
+  @@index([tenantId, centroId, createdAt])
+}
+
+enum TipoIncidenciaCalidad {
+  AVERIA
+  QUEJA
+  ACCIDENTE
+  SEGURIDAD_ALIMENTARIA
+  TEMPERATURA
+  OTRA
+}
+
+enum EstadoIncidenciaCalidad {
+  ABIERTA
+  EN_CURSO
+  RESUELTA
+  ANULADA
+}
+
+model CalidadIncidencia {
+  id                String                  @id @default(cuid())
+  tenantId          String
+  centroId          String
+  numero            String // INC-000001
+  tipo              TipoIncidenciaCalidad
+  titulo            String
+  descripcion       String?
+  prioridad         String                  @default("MEDIA") // BAJA | MEDIA | ALTA
+  responsableId     String?
+  responsableNombre String?
+  plazo             DateTime?               @db.Date
+  estado            EstadoIncidenciaCalidad @default(ABIERTA)
+  origen            String                  @default("MANUAL") // MANUAL | APPCC | TEMPERATURA | LOTE | MANTENIMIENTO
+  origenId          String?
+  solucion          String?
+  fotoUrl           String? // hueco: subida de fotos pendiente
+  creadoPor         String?
+  creadoNombre      String?
+  resueltaEn        DateTime?
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+
+  @@unique([tenantId, numero])
+  @@index([tenantId, centroId, estado])
+}
+
+/// Mantenimiento preventivo: tarea que se repite cada N días
+model CalidadMantenimiento {
+  id          String    @id @default(cuid())
+  tenantId    String
+  centroId    String
+  nombre      String // Limpieza de campana extractora
+  equipo      String?
+  empresa     String? // proveedor que lo hace (texto libre o nombre del proveedor del núcleo)
+  proveedorId String?
+  cadaDias    Int
+  ultimaVez   DateTime? @db.Date
+  proximaVez  DateTime  @db.Date
+  notas       String?
+  activo      Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  hechos      CalidadMantenimientoHecho[]
+
+  @@index([tenantId, centroId, proximaVez])
+}
+
+model CalidadMantenimientoHecho {
+  id              String               @id @default(cuid())
+  tareaId         String
+  tarea           CalidadMantenimiento @relation(fields: [tareaId], references: [id])
+  fecha           DateTime             @db.Date
+  coste           Decimal?             @db.Decimal(12, 2)
+  nota            String?
+  realizadoPor    String?
+  realizadoNombre String?
+  createdAt       DateTime             @default(now())
+}

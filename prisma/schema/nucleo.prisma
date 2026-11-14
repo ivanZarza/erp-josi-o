@@ -1,0 +1,518 @@
+// =====================================================================
+// NÚCLEO: organización, usuarios, módulos contratados y motores comunes
+// (productos, proveedores, stock, pedidos, inventarios).
+// Lo usan todas las áreas. Ver specs/04_datos.md y specs/modulos/README.md
+// =====================================================================
+
+// Cliente de la aplicación: modo Cloudflare (workerd). Funciona también en `next dev`.
+// Ver docs/tecnico/prueba-cloudflare.md
+generator client {
+  provider = "prisma-client"
+  output   = "../../src/generated/prisma"
+  runtime  = "workerd"
+}
+
+// Cliente para scripts con tsx (semillas, importaciones): modo Node.
+generator scripts {
+  provider = "prisma-client"
+  output   = "../../src/generated/prisma-node"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------- Cadena y módulos ----------
+
+model Tenant {
+  id        String   @id @default(cuid())
+  nombre    String
+  perfil    String   @default("RESTAURANTE") // perfil de negocio de partida (specs/03 §5.0)
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  modulos     TenantModulo[]
+  sociedades  Sociedad[]
+  marcas      Marca[]
+  edificios   Edificio[]
+  centros     Centro[]
+  usuarios    Usuario[]
+  proveedores Proveedor[]
+  familias    FamiliaProducto[]
+  productos   Producto[]
+}
+
+/// Áreas contratadas por la cadena (Bebidas, Comidas, Contabilidad…)
+model TenantModulo {
+  id        String    @id @default(cuid())
+  tenantId  String
+  tenant    Tenant    @relation(fields: [tenantId], references: [id])
+  modulo    String // id del módulo (src/modulos/<id>/modulo.ts)
+  activo    Boolean   @default(true)
+  desde     DateTime  @default(now())
+  hasta     DateTime?
+  opciones  Json? // opciones activadas dentro del área
+  createdAt DateTime  @default(now())
+
+  @@unique([tenantId, modulo])
+}
+
+// ---------- Organización ----------
+
+model Sociedad {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  razonSocial String
+  cif         String
+  domicilio   String?
+  email       String?
+  iban        String?
+  activo      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  centros     Centro[]
+
+  @@unique([tenantId, cif])
+}
+
+model Marca {
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id])
+  nombre        String
+  concepto      String?
+  web           String?
+  instagram     String?
+  colorPrincipal String?
+  colorFondo    String?
+  lema          String?
+  activo        Boolean  @default(true)
+  plantilla     Json? // plantilla de marca para abrir locales (specs/modulos/organizacion.md)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  centros       Centro[]
+
+  @@unique([tenantId, nombre])
+}
+
+model Edificio {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  direccion String
+  cp        String?
+  ciudad    String
+  provincia String?
+  comunidad String? // para festivos y convenio
+  createdAt DateTime @default(now())
+  centros   Centro[]
+}
+
+enum TipoCentro {
+  LOCAL
+  OBRADOR
+  ALMACEN
+}
+
+enum EstadoCentro {
+  PREPARACION
+  ABIERTO
+  TEMPORADA
+  CERRADO_TEMPORAL
+  CERRADO
+}
+
+model Centro {
+  id          String       @id @default(cuid())
+  tenantId    String
+  tenant      Tenant       @relation(fields: [tenantId], references: [id])
+  codigo      String // VA-AYA, OB…
+  nombre      String
+  tipo        TipoCentro   @default(LOCAL)
+  estado      EstadoCentro @default(ABIERTO)
+  sociedadId  String?
+  sociedad    Sociedad?    @relation(fields: [sociedadId], references: [id])
+  marcaId     String?
+  marca       Marca?       @relation(fields: [marcaId], references: [id])
+  edificioId  String?
+  edificio    Edificio?    @relation(fields: [edificioId], references: [id])
+  telefono    String?
+  email       String?
+  horaCorte   String       @default("05:00") // la jornada termina a esta hora
+  aperturaEn  DateTime?
+  datos       Json? // horario, espacios, servicios (se irán sacando a tablas)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  modulos          CentroModulo[]
+  ambitos          UsuarioCentro[]
+  almacenes        Almacen[]
+  movimientos      MovimientoStock[]
+  pedidosOrigen    PedidoInterno[]   @relation("PedidoOrigen")
+  pedidosDestino   PedidoInterno[]   @relation("PedidoDestino")
+  pedidosCompra    PedidoCompra[]
+  inventarios      Inventario[]
+  ajustesProducto  ProductoCentro[]
+
+  @@unique([tenantId, codigo])
+}
+
+/// Áreas activadas en cada centro (el obrador tiene Obrador; los locales, Reservas…)
+model CentroModulo {
+  id       String  @id @default(cuid())
+  centroId String
+  centro   Centro  @relation(fields: [centroId], references: [id])
+  modulo   String
+  activo   Boolean @default(true)
+
+  @@unique([centroId, modulo])
+}
+
+// ---------- Usuarios ----------
+
+model Usuario {
+  id           String          @id @default(cuid())
+  tenantId     String
+  tenant       Tenant          @relation(fields: [tenantId], references: [id])
+  email        String
+  nombre       String
+  passwordHash String
+  rol          String // ver src/kernel/permisos.ts (ROLES)
+  permisos     Json? // permisos guardados en el usuario (mandan sobre los del rol)
+  todosCentros Boolean         @default(false)
+  activo       Boolean         @default(true)
+  ultimoAcceso DateTime?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  centros      UsuarioCentro[]
+
+  @@unique([tenantId, email])
+}
+
+/// Ámbito: qué centros ve un usuario (si no tiene todosCentros)
+model UsuarioCentro {
+  id        String  @id @default(cuid())
+  usuarioId String
+  usuario   Usuario @relation(fields: [usuarioId], references: [id])
+  centroId  String
+  centro    Centro  @relation(fields: [centroId], references: [id])
+
+  @@unique([usuarioId, centroId])
+}
+
+/// Historial de cambios (dinero, stock, precios, permisos, personal)
+model Auditoria {
+  id         String   @id @default(cuid())
+  tenantId   String
+  usuarioId  String?
+  entidad    String
+  entidadId  String
+  accion     String
+  antes      Json?
+  despues    Json?
+  createdAt  DateTime @default(now())
+
+  @@index([tenantId, entidad, entidadId])
+}
+
+/// Eventos internos entre módulos (specs/03 §5.2 regla 3)
+model EventoInterno {
+  id         String    @id @default(cuid())
+  tenantId   String
+  tipo       String // p. ej. "almacen.pedido.servido"
+  datos      Json
+  procesado  Boolean   @default(false)
+  createdAt  DateTime  @default(now())
+
+  @@index([tenantId, tipo])
+}
+
+/// Huecos de integración: estado de cada conexión externa por cadena (TPV, CoverManager…)
+model Integracion {
+  id         String    @id @default(cuid())
+  tenantId   String
+  tipo       String // "tpv", "reservas", "contabilidad", "rrhh", "correo", "whatsapp"
+  proveedor  String? // "revo", "covermanager", "a3"…
+  centroId   String?
+  estado     String    @default("NO_CONECTADA") // NO_CONECTADA | CONFIGURADA | ACTIVA | ERROR
+  config     Json? // sin secretos: los secretos van cifrados aparte o en variables de entorno
+  ultimaSync DateTime?
+  ultimoError String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([tenantId, tipo])
+}
+
+// ---------- Motores comunes: productos y proveedores ----------
+
+/// Área a la que pertenece una familia de productos: decide en qué módulo se ve
+enum AreaProducto {
+  BEBIDAS
+  COMIDAS
+  CONSUMIBLES
+}
+
+model FamiliaProducto {
+  id        String       @id @default(cuid())
+  tenantId  String
+  tenant    Tenant       @relation(fields: [tenantId], references: [id])
+  area      AreaProducto
+  nombre    String // Vinos, Licores, Carnes, Pescados…
+  orden     Int          @default(0)
+  activo    Boolean      @default(true)
+  productos Producto[]
+
+  @@unique([tenantId, area, nombre])
+}
+
+model Producto {
+  id            String          @id @default(cuid())
+  tenantId      String
+  tenant        Tenant          @relation(fields: [tenantId], references: [id])
+  area          AreaProducto
+  familiaId     String?
+  familia       FamiliaProducto? @relation(fields: [familiaId], references: [id])
+  referencia    String
+  nombre        String
+  unidad        String          @default("UD") // UD, BOTELLA, KG, L, CAJA
+  unidadesCompra Decimal        @default(1) @db.Decimal(12, 3) // unidades por formato de compra
+  costeUnitario Decimal         @default(0) @db.Decimal(12, 4) // € por unidad (precio medio)
+  sinCoste      Boolean         @default(false) // permitido coste 0 con motivo
+  iva           Decimal         @default(21) @db.Decimal(5, 2)
+  stockMinimo   Decimal         @default(0) @db.Decimal(12, 3) // por defecto; cada centro puede cambiarlo
+  proveedorId   String?
+  proveedor     Proveedor?      @relation(fields: [proveedorId], references: [id])
+  codigoBarras  String?
+  activo        Boolean         @default(true)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  centros       ProductoCentro[]
+  movimientos   MovimientoStock[]
+  lineasPedido  PedidoInternoLinea[]
+  lineasCompra  PedidoCompraLinea[]
+  lineasInventario InventarioLinea[]
+
+  @@unique([tenantId, referencia])
+  @@index([tenantId, area])
+}
+
+/// Ajustes de un producto en un centro: si se puede pedir, mínimo y máximo
+model ProductoCentro {
+  id          String   @id @default(cuid())
+  productoId  String
+  producto    Producto @relation(fields: [productoId], references: [id])
+  centroId    String
+  centro      Centro   @relation(fields: [centroId], references: [id])
+  activo      Boolean  @default(true)
+  minimo      Decimal? @db.Decimal(12, 3)
+  maximo      Decimal? @db.Decimal(12, 3)
+  precioVenta Decimal? @db.Decimal(12, 4) // tarifa del obrador para este centro (si aplica)
+
+  @@unique([productoId, centroId])
+}
+
+model Proveedor {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  nombre      String
+  cif         String?
+  contacto    String?
+  telefono    String? // SIEMPRE internacional: +34…
+  email       String?
+  areas       AreaProducto[]
+  diasReparto String?
+  pedidoMinimo Decimal? @db.Decimal(12, 2)
+  notas       String?
+  activo      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  productos   Producto[]
+  pedidos     PedidoCompra[]
+
+  @@unique([tenantId, nombre])
+}
+
+// ---------- Motores comunes: stock ----------
+
+model Almacen {
+  id        String @id @default(cuid())
+  centroId  String
+  centro    Centro @relation(fields: [centroId], references: [id])
+  nombre    String // Bodega, Cámara, Seco…
+  activo    Boolean @default(true)
+}
+
+enum TipoMovimiento {
+  ENTRADA_COMPRA      // recepción de compra (+)
+  SALIDA_PEDIDO       // servir pedido interno, en origen (−)
+  ENTRADA_PEDIDO      // recibir pedido interno, en destino (+)
+  PRODUCCION_CONSUMO  // ingredientes usados en el obrador (−)
+  PRODUCCION_ENTRADA  // elaborado producido (+)
+  MERMA               // rotura, caducidad, desperdicio (−)
+  AJUSTE_INVENTARIO   // cierre de inventario (±)
+  CONSUMO             // consumo del local (−)
+  CARGA_INICIAL       // importación inicial (+)
+}
+
+/// El stock es SIEMPRE la suma de movimientos (regla de oro 3)
+model MovimientoStock {
+  id            String         @id @default(cuid())
+  tenantId      String
+  centroId      String
+  centro        Centro         @relation(fields: [centroId], references: [id])
+  productoId    String
+  producto      Producto       @relation(fields: [productoId], references: [id])
+  tipo          TipoMovimiento
+  cantidad      Decimal        @db.Decimal(12, 3) // con signo
+  costeUnitario Decimal        @db.Decimal(12, 4)
+  documento     String? // ALB-S-000046, PC-000056, INV-…
+  documentoId   String?
+  motivo        String?
+  usuarioId     String?
+  createdAt     DateTime       @default(now())
+
+  @@index([tenantId, centroId, productoId])
+  @@index([tenantId, createdAt])
+}
+
+// ---------- Motores comunes: pedidos entre centros ----------
+
+enum EstadoPedidoInterno {
+  BORRADOR
+  PENDIENTE
+  SERVIDO
+  RECIBIDO
+  RECHAZADO
+  CANCELADO
+}
+
+model PedidoInterno {
+  id          String               @id @default(cuid())
+  tenantId    String
+  numero      String // PL-000047
+  area        AreaProducto
+  origenId    String // quien sirve (obrador)
+  origen      Centro               @relation("PedidoOrigen", fields: [origenId], references: [id])
+  destinoId   String // quien pide (local)
+  destino     Centro               @relation("PedidoDestino", fields: [destinoId], references: [id])
+  estado      EstadoPedidoInterno  @default(PENDIENTE)
+  notas       String?
+  creadoPor   String?
+  servidoPor  String?
+  servidoEn   DateTime?
+  albaran     String? // ALB-S-…
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+  lineas      PedidoInternoLinea[]
+
+  @@unique([tenantId, numero])
+}
+
+model PedidoInternoLinea {
+  id          String        @id @default(cuid())
+  pedidoId    String
+  pedido      PedidoInterno @relation(fields: [pedidoId], references: [id], onDelete: Cascade)
+  productoId  String
+  producto    Producto      @relation(fields: [productoId], references: [id])
+  pedida      Decimal       @db.Decimal(12, 3)
+  servida     Decimal?      @db.Decimal(12, 3)
+  recibida    Decimal?      @db.Decimal(12, 3)
+  precio      Decimal?      @db.Decimal(12, 4) // tarifa aplicada (coste si no hay tarifa)
+}
+
+// ---------- Motores comunes: compras a proveedor ----------
+
+enum EstadoCompra {
+  BORRADOR
+  ENVIADO
+  RECIBIDO_PARCIAL
+  RECIBIDO
+  CANCELADO
+}
+
+model PedidoCompra {
+  id          String              @id @default(cuid())
+  tenantId    String
+  numero      String // PC-000056
+  area        AreaProducto
+  proveedorId String
+  proveedor   Proveedor           @relation(fields: [proveedorId], references: [id])
+  centroId    String // quien recibe
+  centro      Centro              @relation(fields: [centroId], references: [id])
+  estado      EstadoCompra        @default(BORRADOR)
+  enviadoPor  String? // whatsapp | email | telefono
+  enviadoEn   DateTime?
+  recibidoEn  DateTime?
+  albaran     String? // ALB-E-…
+  notas       String?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  lineas      PedidoCompraLinea[]
+
+  @@unique([tenantId, numero])
+}
+
+model PedidoCompraLinea {
+  id         String       @id @default(cuid())
+  pedidoId   String
+  pedido     PedidoCompra @relation(fields: [pedidoId], references: [id], onDelete: Cascade)
+  productoId String
+  producto   Producto     @relation(fields: [productoId], references: [id])
+  cantidad   Decimal      @db.Decimal(12, 3)
+  recibida   Decimal?     @db.Decimal(12, 3)
+  precio     Decimal      @db.Decimal(12, 4)
+}
+
+// ---------- Motores comunes: inventarios ----------
+
+enum EstadoInventario {
+  ABIERTO
+  PENDIENTE_APROBACION
+  CERRADO
+}
+
+model Inventario {
+  id         String            @id @default(cuid())
+  tenantId   String
+  numero     String
+  area       AreaProducto
+  centroId   String
+  centro     Centro            @relation(fields: [centroId], references: [id])
+  nombre     String // Semana 45 · 2026
+  estado     EstadoInventario  @default(ABIERTO)
+  creadoPor  String?
+  cerradoPor String?
+  cerradoEn  DateTime?
+  createdAt  DateTime          @default(now())
+  lineas     InventarioLinea[]
+
+  @@unique([tenantId, numero])
+}
+
+model InventarioLinea {
+  id           String     @id @default(cuid())
+  inventarioId String
+  inventario   Inventario @relation(fields: [inventarioId], references: [id], onDelete: Cascade)
+  productoId   String
+  producto     Producto   @relation(fields: [productoId], references: [id])
+  teorico      Decimal    @db.Decimal(12, 3)
+  contado      Decimal?   @db.Decimal(12, 3)
+  coste        Decimal    @db.Decimal(12, 4)
+}
+
+/// Contadores para numerar documentos sin huecos (por cadena, serie y año)
+model Contador {
+  id       String @id @default(cuid())
+  tenantId String
+  serie    String // PL, PC, ALB-S, ALB-E, INV…
+  anio     Int
+  valor    Int    @default(0)
+
+  @@unique([tenantId, serie, anio])
+}

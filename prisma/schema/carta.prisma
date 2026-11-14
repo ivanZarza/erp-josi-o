@@ -1,0 +1,135 @@
+// =====================================================================
+// COMIDAS · CARTA Y ESCANDALLOS: cartas por marca, platos, escandallos, precios por
+// local, recargos y alérgenos de los productos.
+// Ver docs/specs/modulos/comidas/carta-escandallos.md
+// Referencias al núcleo (Marca, Centro, Producto) solo con id de texto, sin @relation.
+// =====================================================================
+
+/// Objetivo de coste de mercancía de cada marca (% sobre precio sin IVA)
+model CartaObjetivoMarca {
+  id                String  @id @default(cuid())
+  tenantId          String
+  marcaId           String
+  objetivoCostePct  Decimal @default(30) @db.Decimal(5, 2)
+
+  @@unique([tenantId, marcaId])
+}
+
+/// Los 14 alérgenos de cada producto del catálogo (claves de carta-alergenos.ts).
+/// Lo usan los escandallos y las recetas del obrador para heredar alérgenos.
+model CartaAlergenoProducto {
+  id         String   @id @default(cuid())
+  tenantId   String
+  productoId String
+  alergenos  String[]
+  trazas     String[]
+  updatedAt  DateTime @updatedAt
+
+  @@unique([tenantId, productoId])
+}
+
+enum TipoCarta {
+  PERMANENTE
+  TEMPORAL
+}
+
+model Carta {
+  id        String    @id @default(cuid())
+  tenantId  String
+  marcaId   String
+  nombre    String
+  tipo      TipoCarta @default(PERMANENTE)
+  desde     DateTime? @db.Date
+  hasta     DateTime? @db.Date
+  activo    Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  secciones CartaSeccion[]
+
+  @@index([tenantId, marcaId])
+}
+
+model CartaSeccion {
+  id       String  @id @default(cuid())
+  cartaId  String
+  carta    Carta   @relation(fields: [cartaId], references: [id], onDelete: Cascade)
+  nombre   String
+  nombreEn String?
+  orden    Int     @default(0)
+  lineas   CartaLinea[]
+}
+
+/// Plato dentro de una sección (un mismo plato puede estar en varias cartas)
+model CartaLinea {
+  id        String       @id @default(cuid())
+  seccionId String
+  seccion   CartaSeccion @relation(fields: [seccionId], references: [id], onDelete: Cascade)
+  platoId   String
+  plato     CartaPlato   @relation(fields: [platoId], references: [id])
+  orden     Int          @default(0)
+
+  @@unique([seccionId, platoId])
+}
+
+model CartaPlato {
+  id                 String   @id @default(cuid())
+  tenantId           String
+  marcaId            String
+  nombre             String
+  nombreEn           String?
+  descripcion        String?
+  descripcionEn      String?
+  precio             Decimal  @db.Decimal(10, 2) // PVP con IVA de la marca (cada local puede cambiarlo)
+  iva                Decimal  @default(10) @db.Decimal(5, 2)
+  alergenos          String[]
+  trazas             String[]
+  alergenosRevisados Boolean  @default(false) // revisados por cocina (los 14 son obligatorios)
+  etiquetas          String[] // sin gluten, vegetariano…
+  fotoUrl            String?
+  activo             Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  ingredientes CartaPlatoIngrediente[]
+  precios      CartaPlatoPrecio[]
+  lineas       CartaLinea[]
+
+  @@index([tenantId, marcaId])
+}
+
+/// Escandallo: ingrediente (producto del catálogo o elaborado del obrador) por ración
+model CartaPlatoIngrediente {
+  id         String     @id @default(cuid())
+  platoId    String
+  plato      CartaPlato @relation(fields: [platoId], references: [id], onDelete: Cascade)
+  productoId String
+  cantidad   Decimal    @db.Decimal(12, 4) // neta por ración, en la unidad del producto
+  mermaPct   Decimal    @default(0) @db.Decimal(5, 2)
+  orden      Int        @default(0)
+}
+
+/// Variación por local: precio propio o plato que no se sirve
+model CartaPlatoPrecio {
+  id         String     @id @default(cuid())
+  platoId    String
+  plato      CartaPlato @relation(fields: [platoId], references: [id], onDelete: Cascade)
+  centroId   String
+  precio     Decimal?   @db.Decimal(10, 2)
+  disponible Boolean    @default(true)
+
+  @@unique([platoId, centroId])
+}
+
+/// Recargo fijo por persona (pan y aperitivo) en cada local
+model CartaRecargo {
+  id        String   @id @default(cuid())
+  tenantId  String
+  centroId  String
+  concepto  String   @default("Pan y aperitivo")
+  importe   Decimal  @db.Decimal(6, 2) // por persona, IVA incluido
+  iva       Decimal  @default(10) @db.Decimal(5, 2)
+  activo    Boolean  @default(true)
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, centroId, concepto])
+}

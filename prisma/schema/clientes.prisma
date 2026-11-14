@@ -1,0 +1,151 @@
+// =====================================================================
+// CLIENTES: un cliente para todo el grupo, consentimientos fechados,
+// visitas, encuestas y tarjetas regalo.
+// Ficha: docs/specs/modulos/clientes/README.md
+// Referencias al núcleo y a otros módulos solo con id de texto.
+// =====================================================================
+
+model Cliente {
+  id              String    @id @default(cuid())
+  tenantId        String
+  nombre          String
+  apellidos       String?
+  telefono        String? // internacional: +34…
+  email           String?
+  fechaNacimiento DateTime? @db.Date
+  idioma          String    @default("es")
+  preferencias    String?
+  alergias        String?
+  notas           String? // notas de sala
+  etiquetas       String[] // VIP, empresa, habitual…
+  origen          String    @default("MANUAL") // MANUAL, RESERVA, WEB, COVERMANAGER, EVENTO
+  visitas         Int       @default(0)
+  ultimaVisita    DateTime?
+  activo          Boolean   @default(true) // desactivado = baja (RGPD: datos anonimizados)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  consentimientos ClienteConsentimiento[]
+  visitasLista    ClienteVisita[]
+  encuestas       ClienteEncuesta[]
+
+  @@index([tenantId, telefono])
+  @@index([tenantId, email])
+  @@index([tenantId, nombre])
+}
+
+enum TipoConsentimiento {
+  RESERVA // tratar datos para gestionar la reserva
+  CORREO // correo comercial
+  WHATSAPP // WhatsApp comercial
+}
+
+/// Cada cambio es una fila nueva: el vigente es el último por tipo y ámbito
+model ClienteConsentimiento {
+  id        String             @id @default(cuid())
+  tenantId  String
+  clienteId String
+  cliente   Cliente            @relation(fields: [clienteId], references: [id])
+  tipo      TipoConsentimiento
+  otorgado  Boolean
+  marcaId   String? // null = todo el grupo
+  texto     String? // versión del texto legal aceptado
+  origen    String             @default("MANUAL") // MANUAL, RESERVA, WEB…
+  usuarioId String?
+  fecha     DateTime           @default(now())
+
+  @@index([tenantId, clienteId, tipo])
+}
+
+model ClienteVisita {
+  id        String   @id @default(cuid())
+  tenantId  String
+  clienteId String
+  cliente   Cliente  @relation(fields: [clienteId], references: [id])
+  centroId  String
+  fecha     DateTime
+  personas  Int      @default(1)
+  importe   Decimal? @db.Decimal(12, 2)
+  reservaId String? // módulo Reservas
+  origen    String   @default("RESERVA")
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, clienteId])
+  @@index([tenantId, centroId, fecha])
+}
+
+enum EstadoEncuesta {
+  PENDIENTE // enviada, sin respuesta
+  RESPONDIDA
+  GESTIONADA // nota baja atendida por gerencia
+}
+
+model ClienteEncuesta {
+  id               String         @id @default(cuid())
+  tenantId         String
+  clienteId        String?
+  cliente          Cliente?       @relation(fields: [clienteId], references: [id])
+  centroId         String
+  visitaId         String?
+  reservaId        String?
+  estado           EstadoEncuesta @default(PENDIENTE)
+  nota             Int? // 1 a 5
+  comentario       String?
+  invitadoResena   Boolean        @default(false) // nota alta → invitación a reseña de Google
+  avisoGerencia    Boolean        @default(false) // nota baja → aviso a gerencia
+  seguimiento      String?
+  enviadaEn        DateTime       @default(now())
+  respondidaEn     DateTime?
+  createdAt        DateTime       @default(now())
+
+  @@index([tenantId, centroId, estado])
+}
+
+enum EstadoTarjetaRegalo {
+  ACTIVA
+  AGOTADA
+  CADUCADA
+  ANULADA
+}
+
+model TarjetaRegalo {
+  id              String              @id @default(cuid())
+  tenantId        String
+  codigo          String // único por cadena, p. ej. RZ-7K3M-9QX2
+  importeInicial  Decimal             @db.Decimal(12, 2)
+  saldo           Decimal             @db.Decimal(12, 2)
+  caducidad       DateTime            @db.Date
+  marcaId         String? // null = válida en todo el grupo
+  estado          EstadoTarjetaRegalo @default(ACTIVA)
+  compradorNombre String?
+  compradorEmail  String?
+  destinatario    String?
+  mensaje         String?
+  clienteId       String?
+  origen          String              @default("MANUAL") // MANUAL, WEB
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  movimientos     TarjetaRegaloMovimiento[]
+
+  @@unique([tenantId, codigo])
+}
+
+enum TipoMovimientoTarjeta {
+  EMISION
+  CANJE
+  AJUSTE
+  ANULACION
+}
+
+model TarjetaRegaloMovimiento {
+  id        String                @id @default(cuid())
+  tarjetaId String
+  tarjeta   TarjetaRegalo         @relation(fields: [tarjetaId], references: [id])
+  tipo      TipoMovimientoTarjeta
+  importe   Decimal               @db.Decimal(12, 2) // con signo
+  saldoTras Decimal               @db.Decimal(12, 2)
+  centroId  String?
+  nota      String?
+  usuarioId String?
+  createdAt DateTime              @default(now())
+}

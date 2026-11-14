@@ -1,0 +1,25 @@
+@import "tailwindcss";
+
+/* Colores comunes del backoffice (sobrio, sin degradados). El acento es configurable por cadena. */
+@theme {
+  --color-acento: #7a1f2b;
+  --color-acento-claro: #f6e9eb;
+  --color-tinta: #1c1917;
+  --color-suave: #78716c;
+  --color-borde: #e7e5e4;
+  --color-fondo: #fafaf9;
+  --color-ok: #15803d;
+  --color-aviso: #b45309;
+  --color-error: #b91c1c;
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+}
+
+html,
+body {
+  background: var(--color-fondo);
+  color: var(--color-tinta);
+}
+
+.cifra {
+  font-variant-numeric: tabular-nums;
+}

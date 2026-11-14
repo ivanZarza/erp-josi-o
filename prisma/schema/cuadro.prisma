@@ -1,0 +1,44 @@
+// =====================================================================
+// CUADRO DE MANDO: presupuesto por centro y mes, e indicadores diarios
+// calculados (foto de ventas, compras, gastos y personal de cada día).
+// Referencias al núcleo con id de texto, sin @relation.
+// Ver docs/specs/modulos/cuadro/README.md
+// =====================================================================
+
+/// Presupuesto de un centro para un mes (lo que se espera vender y gastar)
+model PresupuestoCentro {
+  id         String   @id @default(cuid())
+  tenantId   String
+  centroId   String
+  anio       Int
+  mes        Int // 1–12
+  ventas     Decimal  @db.Decimal(12, 2) // venta neta sin IVA
+  mercancia  Decimal? @db.Decimal(12, 2) // coste de mercancía
+  personal   Decimal? @db.Decimal(12, 2)
+  gastos     Decimal? @db.Decimal(12, 2) // gastos fijos y variables
+  notas      String?
+  editadoPor String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([tenantId, centroId, anio, mes])
+}
+
+/// Indicadores de un centro y día, calculados a partir de Caja, compras del núcleo y Contabilidad.
+/// null = sin datos (módulo no contratado o fuente vacía); 0 = había fuente y salió cero.
+model IndicadorDiario {
+  id          String   @id @default(cuid())
+  tenantId    String
+  centroId    String
+  fecha       DateTime @db.Date
+  ventas      Decimal? @db.Decimal(12, 2)
+  comensales  Int?
+  tickets     Int?
+  mercancia   Decimal? @db.Decimal(12, 2) // compras a proveedor + entradas desde el obrador
+  gastos      Decimal? @db.Decimal(12, 2)
+  personal    Decimal? @db.Decimal(12, 2)
+  calculadoEn DateTime @default(now())
+
+  @@unique([tenantId, centroId, fecha])
+  @@index([tenantId, fecha])
+}

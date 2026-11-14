@@ -1,0 +1,89 @@
+// =====================================================================
+// CAJA Y VENTAS: jornadas de venta por centro y cierres de caja.
+// Mientras no haya TPV conectado, las jornadas se meten a mano (origen MANUAL).
+// El ERP no emite tickets (los emite el TPV, que es quien cumple Verifactu).
+// Referencias al núcleo (centro, usuario) con id de texto, sin @relation.
+// Ver docs/specs/modulos/caja/README.md
+// =====================================================================
+
+enum OrigenJornadaVenta {
+  MANUAL
+  TPV
+}
+
+/// Ventas de un día de negocio en un centro (la jornada se corta a la horaCorte del centro)
+model JornadaVenta {
+  id            String             @id @default(cuid())
+  tenantId      String
+  centroId      String
+  fecha         DateTime           @db.Date // día de negocio
+  ventaNeta     Decimal            @db.Decimal(12, 2) // sin IVA
+  cuotaIva      Decimal            @default(0) @db.Decimal(12, 2)
+  ventaComida   Decimal?           @db.Decimal(12, 2) // turno de comida (neto), si se sabe
+  ventaCena     Decimal?           @db.Decimal(12, 2) // turno de cena (neto), si se sabe
+  comensales    Int                @default(0)
+  tickets       Int                @default(0)
+  descuentos    Decimal            @default(0) @db.Decimal(12, 2)
+  invitaciones  Decimal            @default(0) @db.Decimal(12, 2)
+  anulaciones   Decimal            @default(0) @db.Decimal(12, 2)
+  origen        OrigenJornadaVenta @default(MANUAL)
+  notas         String?
+  creadoPor     String?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  pagos         JornadaVentaPago[]
+
+  @@unique([tenantId, centroId, fecha])
+  @@index([tenantId, fecha])
+}
+
+enum FormaCobroCaja {
+  EFECTIVO
+  TARJETA
+  BIZUM
+  VALE // vales, tarjetas regalo
+  CREDITO // a cuenta de cliente o empresa
+  OTRA
+}
+
+/// Cobros de la jornada por forma de pago (importes con IVA)
+model JornadaVentaPago {
+  id        String         @id @default(cuid())
+  jornadaId String
+  jornada   JornadaVenta   @relation(fields: [jornadaId], references: [id], onDelete: Cascade)
+  forma     FormaCobroCaja
+  importe   Decimal        @db.Decimal(12, 2)
+
+  @@unique([jornadaId, forma])
+}
+
+enum EstadoCierreCaja {
+  PENDIENTE // hecho por el gerente, pendiente de validar
+  VALIDADO // finanzas lo da por bueno
+  RECHAZADO // finanzas pide que se revise
+}
+
+/// Cierre de caja del día: efectivo contado frente a teórico, tarjeta frente a banco
+model CierreCaja {
+  id                 String           @id @default(cuid())
+  tenantId           String
+  centroId           String
+  fecha              DateTime         @db.Date
+  efectivoTeorico    Decimal          @db.Decimal(12, 2)
+  efectivoContado    Decimal          @db.Decimal(12, 2)
+  descuadre          Decimal          @db.Decimal(12, 2) // contado − teórico
+  tarjetaTeorico     Decimal?         @db.Decimal(12, 2)
+  tarjetaBanco       Decimal?         @db.Decimal(12, 2) // lo que liquida el banco (a mano hasta tener «Bancos»)
+  fondoCaja          Decimal          @default(0) @db.Decimal(12, 2) // cambio que se deja en caja
+  motivo             String? // obligatorio si hay descuadre
+  estado             EstadoCierreCaja @default(PENDIENTE)
+  cerradoPor         String?
+  validadoPor        String?
+  validadoEn         DateTime?
+  comentarioValidacion String?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  @@unique([tenantId, centroId, fecha])
+  @@index([tenantId, estado])
+}

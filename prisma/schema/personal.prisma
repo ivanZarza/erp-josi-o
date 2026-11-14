@@ -1,0 +1,384 @@
+// =====================================================================
+// PERSONAL (RRHH): plantilla, contratos, cuadrantes, fichajes, ausencias,
+// formación, selección y documentos. Ficha: docs/specs/modulos/personal/README.md
+// Referencias al núcleo (Centro, Usuario, Sociedad) solo con el id en texto,
+// sin @relation, para no tocar nucleo.prisma.
+// =====================================================================
+
+enum DepartamentoPersonal {
+  COCINA
+  SALA
+  BARRA
+  OFFICE
+  ALMACEN
+  OBRADOR
+  REPARTO
+  DIRECCION
+  ADMINISTRACION
+}
+
+enum TipoContrato {
+  INDEFINIDO
+  TEMPORAL
+  FIJO_DISCONTINUO
+  PRACTICAS
+  PARCIAL
+}
+
+enum TipoFichaje {
+  ENTRADA
+  INICIO_PAUSA
+  FIN_PAUSA
+  SALIDA
+}
+
+enum TipoAusencia {
+  VACACIONES
+  ASUNTOS_PROPIOS
+  PERMISO_RETRIBUIDO
+  BAJA_ENFERMEDAD
+  BAJA_ACCIDENTE
+  NACIMIENTO
+  EXCEDENCIA
+  SIN_JUSTIFICAR
+}
+
+enum EstadoAusencia {
+  PEDIDA
+  APROBADA
+  RECHAZADA
+  ANULADA
+}
+
+enum EstadoCuadrante {
+  BORRADOR
+  PUBLICADO
+}
+
+enum EstadoOfertaEmpleo {
+  ABIERTA
+  CUBIERTA
+  CERRADA
+}
+
+enum EstadoCandidato {
+  RECIBIDO
+  ENTREVISTA
+  PRUEBA
+  OFERTA
+  CONTRATADO
+  DESCARTADO
+}
+
+/// Puestos de trabajo (jefe de cocina, camarero, mozo de almacén…)
+model Puesto {
+  id           String               @id @default(cuid())
+  tenantId     String
+  nombre       String
+  departamento DepartamentoPersonal
+  orden        Int                  @default(0)
+  activo       Boolean              @default(true)
+  createdAt    DateTime             @default(now())
+
+  empleados Empleado[]
+  ofertas   OfertaEmpleo[]
+
+  @@unique([tenantId, nombre])
+}
+
+/// Convenio colectivo (hostelería de Madrid, de Baleares, de Murcia…)
+model Convenio {
+  id                  String   @id @default(cuid())
+  tenantId            String
+  nombre              String
+  comunidad           String? // comunidad autónoma donde aplica
+  horasAnuales        Int? // jornada máxima anual del convenio
+  diasVacaciones      Int      @default(30) // días naturales al año
+  descansoMinimoHoras Decimal  @default(12) @db.Decimal(4, 1) // descanso mínimo entre jornadas
+  activo              Boolean  @default(true)
+  createdAt           DateTime @default(now())
+
+  categorias CategoriaConvenio[]
+  contratos  Contrato[]
+
+  @@unique([tenantId, nombre])
+}
+
+/// Categoría o nivel profesional dentro de un convenio
+model CategoriaConvenio {
+  id               String   @id @default(cuid())
+  convenioId       String
+  convenio         Convenio @relation(fields: [convenioId], references: [id])
+  nombre           String // «Cocinero/a», «Camarero/a»…
+  nivel            String? // nivel o grupo del convenio
+  salarioBaseAnual Decimal? @db.Decimal(12, 2) // tabla salarial del convenio (referencia)
+  activo           Boolean  @default(true)
+
+  empleados Empleado[]
+  contratos Contrato[]
+
+  @@unique([convenioId, nombre])
+}
+
+/// Ficha del empleado. Nunca se borra: la baja pone activo = false.
+model Empleado {
+  id                 String             @id @default(cuid())
+  tenantId           String
+  codigo             String // EMP-0001
+  nombre             String
+  apellidos          String
+  dni                String?
+  nss                String? // número de la Seguridad Social
+  fechaNacimiento    DateTime?          @db.Date
+  email              String?
+  telefono           String? // internacional: +34…
+  direccion          String?
+  contactoEmergencia String?
+  iban               String?
+  centroPrincipalId  String // Centro (núcleo)
+  sociedadId         String? // Sociedad que contrata (núcleo)
+  puestoId           String?
+  puesto             Puesto?            @relation(fields: [puestoId], references: [id])
+  categoriaId        String?
+  categoria          CategoriaConvenio? @relation(fields: [categoriaId], references: [id])
+  usuarioId          String? // Usuario del ERP (núcleo), para el portal
+  pin                String? // PIN de 4 cifras para fichar en la tableta del local
+  fechaAlta          DateTime           @db.Date
+  fechaBaja          DateTime?          @db.Date
+  motivoBaja         String?
+  activo             Boolean            @default(true)
+  notas              String?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  centros      EmpleadoCentro[]
+  contratos    Contrato[]
+  asignaciones AsignacionTurno[]
+  fichajes     Fichaje[]
+  ausencias    Ausencia[]
+  certificados CertificadoEmpleado[]
+  documentos   DocumentoEmpleado[]
+
+  @@unique([tenantId, codigo])
+  @@index([tenantId, centroPrincipalId])
+}
+
+/// Centros donde puede trabajar además del principal (préstamos)
+model EmpleadoCentro {
+  id         String   @id @default(cuid())
+  empleadoId String
+  empleado   Empleado @relation(fields: [empleadoId], references: [id])
+  centroId   String // Centro (núcleo)
+
+  @@unique([empleadoId, centroId])
+}
+
+/// Contrato de trabajo. Historial: un empleado puede tener varios; solo uno activo.
+model Contrato {
+  id                   String             @id @default(cuid())
+  tenantId             String
+  empleadoId           String
+  empleado             Empleado           @relation(fields: [empleadoId], references: [id])
+  tipo                 TipoContrato
+  jornadaSemanal       Decimal            @db.Decimal(5, 2) // horas a la semana
+  convenioId           String?
+  convenio             Convenio?          @relation(fields: [convenioId], references: [id])
+  categoriaId          String?
+  categoria            CategoriaConvenio? @relation(fields: [categoriaId], references: [id])
+  sociedadId           String? // Sociedad que contrata (núcleo)
+  salarioBrutoAnual    Decimal?           @db.Decimal(12, 2)
+  porcentajeCotizacion Decimal            @default(32) @db.Decimal(5, 2) // cotizaciones de empresa sobre el salario
+  costeHora            Decimal?           @db.Decimal(8, 2) // coste empresa por hora; si está vacío se calcula
+  fechaInicio          DateTime           @db.Date
+  fechaFin             DateTime?          @db.Date // vacío = indefinido
+  finPeriodoPrueba     DateTime?          @db.Date
+  activo               Boolean            @default(true)
+  motivoFin            String?
+  notas                String?
+  creadoPor            String?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  @@index([tenantId, empleadoId])
+  @@index([tenantId, fechaFin])
+}
+
+/// Turnos tipo de un centro (Mañana, Tarde, Partido…) para montar el cuadrante deprisa
+model TurnoTipo {
+  id       String  @id @default(cuid())
+  tenantId String
+  centroId String? // vacío = para todos los centros
+  nombre   String
+  inicio   String // "10:00"
+  fin      String // "17:00" (si es menor que el inicio, acaba al día siguiente)
+  inicio2  String? // segundo tramo del turno partido
+  fin2     String?
+  activo   Boolean @default(true)
+
+  @@index([tenantId, centroId])
+}
+
+/// Estado de la semana del cuadrante de un centro (borrador o publicado)
+model CuadranteSemana {
+  id           String          @id @default(cuid())
+  tenantId     String
+  centroId     String
+  lunes        DateTime        @db.Date
+  estado       EstadoCuadrante @default(BORRADOR)
+  publicadoPor String?
+  publicadoEn  DateTime?
+  createdAt    DateTime        @default(now())
+
+  @@unique([centroId, lunes])
+}
+
+/// Turno asignado a una persona un día en un centro. Partido = con segundo tramo.
+/// Si el centro no es el principal del empleado, es un préstamo: el coste va a este centro.
+model AsignacionTurno {
+  id           String   @id @default(cuid())
+  tenantId     String
+  centroId     String
+  empleadoId   String
+  empleado     Empleado @relation(fields: [empleadoId], references: [id])
+  fecha        DateTime @db.Date
+  inicio       String // "HH:MM"
+  fin          String
+  inicio2      String?
+  fin2         String?
+  pausaMinutos Int      @default(0) // descanso no retribuido dentro del turno
+  notas        String?
+  creadoPor    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([empleadoId, fecha])
+  @@index([tenantId, centroId, fecha])
+}
+
+/// Registro de jornada. Las correcciones no borran: anulan el original y crean otro con motivo y autor.
+model Fichaje {
+  id               String      @id @default(cuid())
+  tenantId         String
+  empleadoId       String
+  empleado         Empleado    @relation(fields: [empleadoId], references: [id])
+  centroId         String
+  tipo             TipoFichaje
+  momento          DateTime
+  origen           String      @default("PANTALLA") // PANTALLA | TABLETA | MOVIL | MANUAL | IMPORTADO
+  anulado          Boolean     @default(false)
+  corrigeAId       String? // fichaje original que sustituye
+  motivoCorreccion String?
+  corregidoPor     String? // Usuario (núcleo)
+  corregidoEn      DateTime?
+  creadoPor        String?
+  createdAt        DateTime    @default(now())
+
+  @@index([tenantId, centroId, momento])
+  @@index([empleadoId, momento])
+}
+
+/// Vacaciones, permisos y bajas. Flujo: PEDIDA → APROBADA | RECHAZADA (o ANULADA).
+model Ausencia {
+  id            String         @id @default(cuid())
+  tenantId      String
+  empleadoId    String
+  empleado      Empleado       @relation(fields: [empleadoId], references: [id])
+  centroId      String // centro principal del empleado al pedirla
+  tipo          TipoAusencia
+  desde         DateTime       @db.Date
+  hasta         DateTime       @db.Date
+  dias          Int // días naturales
+  estado        EstadoAusencia @default(PEDIDA)
+  comentario    String?
+  pedidaPor     String?
+  resueltaPor   String?
+  resueltaEn    DateTime?
+  motivoRechazo String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@index([tenantId, centroId, desde])
+  @@index([empleadoId, desde])
+}
+
+/// Certificados obligatorios (manipulador, alérgenos, PRL…) y formaciones, con caducidad
+model CertificadoEmpleado {
+  id         String    @id @default(cuid())
+  tenantId   String
+  empleadoId String
+  empleado   Empleado  @relation(fields: [empleadoId], references: [id])
+  tipo       String // MANIPULADOR | ALERGENOS | PRL | CARRETILLERO | PERMISO_TRABAJO | FORMACION_INTERNA | OTRO
+  nombre     String
+  entidad    String?
+  obtenidoEn DateTime? @db.Date
+  caducaEn   DateTime? @db.Date
+  activo     Boolean   @default(true)
+  creadoPor  String?
+  createdAt  DateTime  @default(now())
+
+  @@index([tenantId, caducaEn])
+}
+
+/// Documentos del empleado: solo metadatos (los archivos irán a Cloudflare R2)
+model DocumentoEmpleado {
+  id         String    @id @default(cuid())
+  tenantId   String
+  empleadoId String
+  empleado   Empleado  @relation(fields: [empleadoId], references: [id])
+  tipo       String // DNI | PERMISO_TRABAJO | CONTRATO | NOMINA | CERTIFICADO | OTRO
+  nombre     String
+  claveR2    String? // ruta del archivo en R2 (pendiente)
+  tamano     Int?
+  caducaEn   DateTime? @db.Date
+  activo     Boolean   @default(true)
+  subidoPor  String?
+  createdAt  DateTime  @default(now())
+
+  @@index([tenantId, empleadoId])
+}
+
+/// Ofertas de empleo por centro y puesto
+model OfertaEmpleo {
+  id           String             @id @default(cuid())
+  tenantId     String
+  centroId     String
+  puestoId     String?
+  puesto       Puesto?            @relation(fields: [puestoId], references: [id])
+  titulo       String
+  descripcion  String?
+  tipoContrato TipoContrato?
+  jornada      Decimal?           @db.Decimal(5, 2)
+  plazas       Int                @default(1)
+  estado       EstadoOfertaEmpleo @default(ABIERTA)
+  publicadaEn  DateTime           @default(now())
+  cerradaEn    DateTime?
+  creadoPor    String?
+  createdAt    DateTime           @default(now())
+
+  candidatos Candidato[]
+
+  @@index([tenantId, estado])
+}
+
+/// Candidatos (con oferta o en la bolsa). RGPD: borrarEn = fecha en que se eliminan sus datos.
+model Candidato {
+  id               String          @id @default(cuid())
+  tenantId         String
+  ofertaId         String?
+  oferta           OfertaEmpleo?   @relation(fields: [ofertaId], references: [id])
+  nombre           String
+  apellidos        String?
+  email            String?
+  telefono         String?
+  origen           String? // web, InfoJobs, recomendación…
+  estado           EstadoCandidato @default(RECIBIDO)
+  notas            String?
+  cvClaveR2        String?
+  consentimientoEn DateTime?
+  borrarEn         DateTime?       @db.Date
+  empleadoId       String? // cuando se contrata
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  @@index([tenantId, estado])
+}
