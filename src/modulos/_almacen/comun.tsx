@@ -1,7 +1,7 @@
 /**
  * Piezas comunes de las páginas de Bebidas y Comidas (Server Components).
  */
-import { Aviso, Etiqueta } from "@/ui";
+import { Aviso, Etiqueta, Selector } from "@/ui";
 import type { Contexto } from "@/kernel/contexto";
 import { moduloDeArea, type AreaAlmacen } from "@/nucleo/comun-almacen";
 import type { EstadoStock } from "@/nucleo/stock";
@@ -119,7 +119,36 @@ export const TIPOS_MOVIMIENTO: Record<string, string> = {
   AJUSTE_INVENTARIO: "Ajuste de inventario",
   CONSUMO: "Consumo del local",
   CARGA_INICIAL: "Carga inicial",
+  TRASPASO: "Traspaso entre almacenes",
 };
+
+/**
+ * Selector de almacén de un centro para entradas y salidas. La primera opción (valor vacío) deja que
+ * el motor use el almacén por defecto de cada producto (ver src/nucleo/regla-almacen.ts).
+ */
+export function SelectorAlmacen({
+  name = "almacenId",
+  almacenes,
+  textoDefecto = "Cada producto en su almacén",
+  defaultValue = "",
+}: {
+  name?: string;
+  almacenes: { id: string; nombre: string }[];
+  textoDefecto?: string;
+  defaultValue?: string;
+}) {
+  if (almacenes.length === 0) return null;
+  return (
+    <Selector name={name} defaultValue={defaultValue} className="w-auto" aria-label="Almacén">
+      <option value="">{textoDefecto}</option>
+      {almacenes.map((a) => (
+        <option key={a.id} value={a.id}>
+          {a.nombre}
+        </option>
+      ))}
+    </Selector>
+  );
+}
 
 export const NOMBRE_UNIDAD: Record<string, string> = {
   UD: "unidades",

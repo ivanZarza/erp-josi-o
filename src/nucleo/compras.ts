@@ -116,6 +116,7 @@ export async function cancelarCompra(tx: Tx, tenantId: string, usuarioId: string
  *   coste nuevo = (stock × coste actual + recibido × precio) / (stock + recibido)
  * (si el stock era 0 o negativo, el coste nuevo es el precio de esta compra).
  * Cada recepción tiene su albarán de entrada ALB-E. Si falta algo y no se cierra, queda RECIBIDO_PARCIAL.
+ * Almacén: el elegido al recibir (todo entra ahí) o, si no se elige, el de por defecto de cada producto.
  */
 export async function recibirCompra(
   tx: Tx,
@@ -123,7 +124,7 @@ export async function recibirCompra(
   usuarioId: string,
   area: AreaAlmacen,
   id: string,
-  d: { lineas: Map<string, { recibida: number | null; precio: number | null }>; albaranProveedor?: string | null; cerrar: boolean },
+  d: { lineas: Map<string, { recibida: number | null; precio: number | null }>; albaranProveedor?: string | null; cerrar: boolean; almacenId?: string | null },
 ) {
   const c = await tx.pedidoCompra.findFirst({ where: { id, tenantId, area }, include: { lineas: true } });
   if (!c) throw new ErrorNegocio("La compra no existe.");
@@ -156,6 +157,8 @@ export async function recibirCompra(
       {
         tenantId,
         centroId: c.centroId,
+        // almacén elegido al recibir; si no, el de por defecto de cada producto
+        ...(d.almacenId ? { almacenId: d.almacenId } : {}),
         productoId: l.productoId,
         tipo: "ENTRADA_COMPRA",
         cantidad: recibida,

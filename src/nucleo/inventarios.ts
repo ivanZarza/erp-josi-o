@@ -2,7 +2,7 @@ import "server-only";
 import { Prisma } from "@/generated/prisma/client";
 import { auditar, emitir } from "@/kernel/eventos";
 import { siguienteNumero } from "@/kernel/numeracion";
-import { registrarMovimientos, type NuevoMovimiento } from "./movimientos";
+import { registrarMovimientos, resolutorAlmacen, type NuevoMovimiento } from "./movimientos";
 import { stockEnCentro } from "./stock";
 import { ErrorNegocio, UMBRAL_APROBACION_INVENTARIO, num, r2, r3, r4, type AreaAlmacen, type Tx } from "./comun-almacen";
 
@@ -13,14 +13,36 @@ import { ErrorNegocio, UMBRAL_APROBACION_INVENTARIO, num, r2, r3, r4, type AreaA
  *   y lo cierra quien tenga el permiso «cerrar inventarios»; si no, se cierra directamente
  * → CERRADO: un movimiento AJUSTE_INVENTARIO por cada línea contada con diferencia (contado − teórico).
  * Las líneas sin contar no se ajustan.
+ *
+ * Almacenes: un inventario puede ser de todo el centro o de un solo almacén (p. ej. contar la Barra sola).
+ * - De un almacén: el teórico es el stock de ese almacén, salen los productos con stock allí o que lo
+ *   tienen como almacén por defecto, y el ajuste se apunta en ese almacén.
+ * - De todo el centro: el teórico es el total del centro; el ajuste lo reparte el motor (las sobras
+ *   entran en el almacén por defecto; las faltas salen del por defecto y, si no basta, de los demás).
+ * No puede haber a la vez dos inventarios sin cerrar del mismo almacén, ni uno del centro con otro de un almacén.
  */
 
-export async function crearInventario(tx: Tx, tenantId: string, usuarioId: string, area: AreaAlmacen, d: { centroId: string; nombre?: string | null }) {
+export async function crearInventario(tx: Tx, tenantId: string, usuarioId: string, area: AreaAlmacen, d: { centroId: string; almacenId?: string | null; nombre?: string | null }) {
   const centro = await tx.centro.findFirst({ where: { id: d.centroId, tenantId } });
   if (!centro) throw new ErrorNegocio("El centro no existe.");
-  const abierto = await tx.inventario.findFirst({ where: { tenantId, area, centroId: d.centroId, estado: { in: ["ABIERTO", "PENDIENTE_APROBACION"] } } });
-  if (abierto) throw new ErrorNegocio(`Ya hay un inventario sin cerrar en ${centro.nombre} (${abierto.numero}). Termínalo antes de empezar otro.`);
-  const stock = await stockEnCentro(tx, tenantId, area, d.centroId);
+  const almacen = d.almacenId ? await tx.almacen.findFirst({ where: { id: d.almacenId, centroId: d.centroId, activo: true } }) : null;
+  if (d.almacenId && !almacen) throw new ErrorNegocio("El almacén elegido no es de ese centro.");
+  const abierto = await tx.inventario.findFirst({
+    where: {
+      tenantId,
+      area,
+      centroId: d.centroId,
+      estado: { in: ["ABIERTO", "PENDIENTE_APROBACION"] },
+      // choca con uno de todo el centro, o con uno del mismo almacén (si este es de un almacén)
+      ...(almacen ? { OR: [{ almacenId: null }, { almacenId: almacen.id }] } : {}),
+    },
+    include: { almacen: { select: { nombre: true } } },
+  });
+  if (abierto) {
+    const de = abierto.almacen ? `${abierto.almacen.nombre} de ${centro.nombre}` : centro.nombre;
+    throw new ErrorNegocio(`Ya hay un inventario sin cerrar en ${de} (${abierto.numero}). Termínalo antes de empezar otro.`);
+  }
+  const stock = await stockEnCentro(tx, tenantId, area, d.centroId, almacen ? almacen.id : undefined);
   const productos = await tx.producto.findMany({
     where: { tenantId, area, OR: [{ activo: true }, { id: { in: Array.from(stock.keys()) } }] },
     select: { id: true, costeUnitario: true, activo: true },
@@ -29,8 +51,13 @@ export async function crearInventario(tx: Tx, tenantId: string, usuarioId: strin
   const conMinimo = new Set(
     (await tx.productoCentro.findMany({ where: { centroId: d.centroId, minimo: { gt: 0 } }, select: { productoId: true } })).map((x) => x.productoId),
   );
-  const lineas = productos.filter((p) => (stock.get(p.id) ?? 0) !== 0 || (p.activo && (centro.tipo !== "LOCAL" || conMinimo.has(p.id))));
-  if (lineas.length === 0) throw new ErrorNegocio("No hay productos que contar en este centro.");
+  let lineas = productos.filter((p) => (stock.get(p.id) ?? 0) !== 0 || (p.activo && (centro.tipo !== "LOCAL" || conMinimo.has(p.id))));
+  if (almacen) {
+    // de un almacén: lo que tiene stock allí o lo que debería estar allí (almacén por defecto)
+    const { resolver } = await resolutorAlmacen(tx, [d.centroId], lineas.map((p) => p.id));
+    lineas = lineas.filter((p) => (stock.get(p.id) ?? 0) !== 0 || resolver(d.centroId, p.id) === almacen.id);
+  }
+  if (lineas.length === 0) throw new ErrorNegocio(`No hay productos que contar en ${almacen ? `${almacen.nombre} de ` : ""}${centro.nombre}.`);
   const numero = await siguienteNumero(tx, tenantId, "INV");
   const inv = await tx.inventario.create({
     data: {
@@ -38,14 +65,21 @@ export async function crearInventario(tx: Tx, tenantId: string, usuarioId: strin
       numero,
       area,
       centroId: d.centroId,
-      nombre: d.nombre?.trim() || nombrePorDefecto(),
+      almacenId: almacen?.id ?? null,
+      nombre: nombreInventario(d.nombre?.trim() || nombrePorDefecto(), almacen?.nombre),
       estado: "ABIERTO",
       creadoPor: usuarioId,
       lineas: { create: lineas.map((p) => ({ productoId: p.id, teorico: new Prisma.Decimal(r3(stock.get(p.id) ?? 0)), coste: new Prisma.Decimal(r4(num(p.costeUnitario))) })) },
     },
   });
-  await auditar(tx, { tenantId, usuarioId, entidad: "Inventario", entidadId: inv.id, accion: "crear", despues: { numero, centroId: d.centroId, lineas: lineas.length } });
+  await auditar(tx, { tenantId, usuarioId, entidad: "Inventario", entidadId: inv.id, accion: "crear", despues: { numero, centroId: d.centroId, almacenId: almacen?.id ?? null, lineas: lineas.length } });
   return inv;
+}
+
+/** Un inventario de un almacén lleva delante el nombre del almacén («Barra · Semana 45 · 2026»). */
+function nombreInventario(nombre: string, almacen?: string): string {
+  if (!almacen || nombre.toLowerCase().includes(almacen.toLowerCase())) return nombre;
+  return `${almacen} · ${nombre}`;
 }
 
 /** «Semana 45 · 2026» (semana ISO). */
@@ -121,6 +155,8 @@ async function aplicar(tx: Tx, tenantId: string, usuarioId: string, inv: Awaited
     movs.push({
       tenantId,
       centroId: inv.centroId,
+      // inventario de un almacén: el ajuste va a ese almacén; de todo el centro: lo reparte el motor
+      ...(inv.almacenId ? { almacenId: inv.almacenId } : {}),
       productoId: l.productoId,
       tipo: "AJUSTE_INVENTARIO",
       cantidad: dif,
@@ -176,7 +212,7 @@ export async function reabrirInventario(tx: Tx, tenantId: string, usuarioId: str
 export async function listarInventarios(tx: Tx, tenantId: string, area: AreaAlmacen, centroIds: string[]) {
   return tx.inventario.findMany({
     where: { tenantId, area, centroId: { in: centroIds } },
-    include: { centro: { select: { nombre: true, codigo: true } }, lineas: { select: { teorico: true, contado: true, coste: true } } },
+    include: { centro: { select: { nombre: true, codigo: true } }, almacen: { select: { nombre: true } }, lineas: { select: { teorico: true, contado: true, coste: true } } },
     orderBy: { createdAt: "desc" },
     take: 100,
   });
@@ -187,14 +223,15 @@ export async function leerInventario(tx: Tx, tenantId: string, area: AreaAlmacen
     where: { id, tenantId, area },
     include: {
       centro: { select: { id: true, nombre: true, codigo: true } },
+      almacen: { select: { id: true, nombre: true } },
       lineas: { include: { producto: { include: { familia: true } } } },
     },
   });
 }
 
 /** Movimientos del centro y del área hechos después de abrir el inventario (avisan de que el teórico ya no es exacto). */
-export async function movimientosDesdeApertura(tx: Tx, tenantId: string, area: AreaAlmacen, inv: { id: string; centroId: string; createdAt: Date }) {
+export async function movimientosDesdeApertura(tx: Tx, tenantId: string, area: AreaAlmacen, inv: { id: string; centroId: string; almacenId?: string | null; createdAt: Date }) {
   return tx.movimientoStock.count({
-    where: { tenantId, centroId: inv.centroId, createdAt: { gt: inv.createdAt }, producto: { area }, NOT: { documentoId: inv.id } },
+    where: { tenantId, centroId: inv.centroId, ...(inv.almacenId ? { almacenId: inv.almacenId } : { tipo: { not: "TRASPASO" as const } }), createdAt: { gt: inv.createdAt }, producto: { area }, NOT: { documentoId: inv.id } },
   });
 }

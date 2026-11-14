@@ -7,6 +7,7 @@ import { Cabecera, Tarjeta, Selector, Boton, BotonEnlace, Campo, Entrada, Aviso,
 import { TablaDesplegable, DatosDetalle } from "@/ui/tabla-desplegable";
 import { listarInventarios, leerInventario, cuentasInventario, nombrePorDefecto, movimientosDesdeApertura } from "@/nucleo/inventarios";
 import { UMBRAL_APROBACION_INVENTARIO, num, r3 } from "@/nucleo/comun-almacen";
+import { almacenesDeCentros } from "@/nucleo/stock";
 import { accionCrearInventario, accionGuardarRecuento, accionAprobarInventario, accionReabrirInventario } from "../acciones";
 import { Recuento } from "../recuento";
 import { EtiquetaInventario, Mensajes, Ocultos, rutaVolver, textosArea, unidad, veCentro, type PropsPagina, type PropsPaginaId } from "../comun";
@@ -18,8 +19,12 @@ export async function PaginaInventarios({ area, searchParams }: PropsPagina) {
   const sp = await searchParams;
   const prisma = await db();
   const centros = centrosDelArea(ctx, area);
-  const inventarios = await listarInventarios(prisma, ctx.tenant.id, area, centros.map((c) => c.id));
+  const [inventarios, almacenes] = await Promise.all([
+    listarInventarios(prisma, ctx.tenant.id, area, centros.map((c) => c.id)),
+    almacenesDeCentros(prisma, centros.map((c) => c.id)),
+  ]);
   const volver = rutaVolver(`/${t.m}/inventarios`, sp);
+  const centroPorDefecto = ctx.centroActivo?.id ?? centros.find((c) => c.tipo !== "LOCAL")?.id ?? centros[0]?.id;
 
   return (
     <>
@@ -30,14 +35,22 @@ export async function PaginaInventarios({ area, searchParams }: PropsPagina) {
           <Tarjeta titulo="Empezar inventario">
             <form action={accionCrearInventario} className="flex flex-wrap items-end gap-2">
               <Ocultos area={area} volver={volver} />
-              <div className="w-64">
-                <Campo etiqueta="Centro">
-                  <Selector name="centroId" defaultValue={ctx.centroActivo?.id ?? centros.find((c) => c.tipo !== "LOCAL")?.id ?? centros[0].id}>
-                    {centros.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.nombre}
-                      </option>
-                    ))}
+              <div className="w-72">
+                <Campo etiqueta="Qué se cuenta">
+                  <Selector name="ubicacion" defaultValue={`${centroPorDefecto}:`}>
+                    {centros.map((c) => {
+                      const suyos = almacenes.filter((a) => a.centroId === c.id);
+                      return (
+                        <optgroup key={c.id} label={c.nombre}>
+                          <option value={`${c.id}:`}>{suyos.length ? `${c.nombre}: todos los almacenes` : c.nombre}</option>
+                          {suyos.map((a) => (
+                            <option key={a.id} value={`${c.id}:${a.id}`}>
+                              {c.nombre}: solo {a.nombre}
+                            </option>
+                          ))}
+                        </optgroup>
+                      );
+                    })}
                   </Selector>
                 </Campo>
               </div>
@@ -48,12 +61,18 @@ export async function PaginaInventarios({ area, searchParams }: PropsPagina) {
               </div>
               <Boton type="submit">Empezar a contar</Boton>
             </form>
+            {almacenes.length > 0 && (
+              <p className="mt-2 text-xs text-slate-500">
+                Se puede contar un almacén solo (por ejemplo la Barra): salen los productos que tienen stock allí o que tienen ese almacén como su sitio, y el ajuste se apunta en
+                ese almacén. El nombre lleva delante el del almacén.
+              </p>
+            )}
           </Tarjeta>
         )}
         <TablaDesplegable
           columnas={[
             { titulo: "Inventario" },
-            { titulo: "Centro" },
+            { titulo: "Centro · almacén" },
             { titulo: "Contadas", alinear: "derecha", secundaria: true },
             { titulo: "Diferencia", alinear: "derecha" },
             { titulo: "Fecha", secundaria: true },
@@ -69,7 +88,7 @@ export async function PaginaInventarios({ area, searchParams }: PropsPagina) {
                 <Link key="n" href={`/${t.m}/inventarios/${i.id}`} className="font-medium text-acento">
                   {i.nombre}
                 </Link>,
-                i.centro.nombre,
+                i.almacen ? `${i.centro.nombre} · ${i.almacen.nombre}` : `${i.centro.nombre} · todo`,
                 `${numero(c.contadas)} de ${numero(c.lineas)}`,
                 <span key="d" className={c.diferenciaEuros < 0 ? "text-red-600" : c.diferenciaEuros > 0 ? "text-emerald-600" : ""}>
                   {euros(c.diferenciaEuros)}
@@ -127,7 +146,7 @@ export async function PaginaInventario({ area, searchParams, params }: PropsPagi
     <>
       <Cabecera
         titulo={inv.nombre}
-        subtitulo={`${inv.centro.nombre} · ${inv.numero} · abierto ${fechaHora(inv.createdAt)}`}
+        subtitulo={`${inv.centro.nombre} · ${inv.almacen ? `solo ${inv.almacen.nombre}` : "todos los almacenes"} · ${inv.numero} · abierto ${fechaHora(inv.createdAt)}`}
         acciones={
           <BotonEnlace href={`/${t.m}/inventarios`} variante="secundario">
             Volver
@@ -144,7 +163,7 @@ export async function PaginaInventario({ area, searchParams, params }: PropsPagi
         </div>
         {movidos > 0 && (
           <Aviso tono="aviso">
-            Ha habido {numero(movidos)} movimiento(s) de stock en este centro desde que se abrió el inventario. El ajuste se calcula contra el stock del momento de abrirlo: cuenta lo
+            Ha habido {numero(movidos)} movimiento(s) de stock en {inv.almacen ? `${inv.almacen.nombre} de ` : ""}este centro desde que se abrió el inventario. El ajuste se calcula contra el stock del momento de abrirlo: cuenta lo
             que había entonces o vuelve a empezar el inventario.
           </Aviso>
         )}

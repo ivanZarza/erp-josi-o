@@ -16,7 +16,7 @@ export async function registrarMerma(
   tenantId: string,
   usuarioId: string,
   area: AreaAlmacen,
-  d: { centroId: string; productoId: string; cantidad: number; motivo: string; nota?: string | null },
+  d: { centroId: string; almacenId?: string | null; productoId: string; cantidad: number; motivo: string; nota?: string | null },
 ) {
   if (!(d.cantidad > 0)) throw new ErrorNegocio("La cantidad de la merma tiene que ser mayor que 0.");
   if (!d.motivo.trim()) throw new ErrorNegocio("El motivo de la merma es obligatorio.");
@@ -26,14 +26,17 @@ export async function registrarMerma(
   ]);
   if (!producto) throw new ErrorNegocio("El producto no es de esta área.");
   if (!centro) throw new ErrorNegocio("El centro no existe.");
-  const hay = await stockDe(tx, tenantId, d.centroId, d.productoId);
+  // con almacén elegido, se mira lo que hay en ese almacén; si no, en todo el centro (el motor reparte la salida)
+  const almacen = d.almacenId ? await tx.almacen.findFirst({ where: { id: d.almacenId, centroId: d.centroId, activo: true } }) : null;
+  if (d.almacenId && !almacen) throw new ErrorNegocio("El almacén elegido no es de ese centro.");
+  const hay = await stockDe(tx, tenantId, d.centroId, d.productoId, almacen ? almacen.id : undefined);
   const cantidad = r3(d.cantidad);
-  if (cantidad > hay) throw new ErrorNegocio(`No se puede dar de baja más de lo que hay: en ${centro.nombre} quedan ${numero(hay, 3)}.`);
+  if (cantidad > hay) throw new ErrorNegocio(`No se puede dar de baja más de lo que hay: en ${almacen ? `${almacen.nombre} de ` : ""}${centro.nombre} quedan ${numero(hay, 3)}.`);
   const documento = await siguienteNumero(tx, tenantId, "MER");
   const coste = num(producto.costeUnitario);
   const motivo = d.nota?.trim() ? `${d.motivo}: ${d.nota.trim()}` : d.motivo;
   await registrarMovimientos(tx, [
-    { tenantId, centroId: d.centroId, productoId: d.productoId, tipo: "MERMA", cantidad: -cantidad, costeUnitario: coste, documento, motivo, usuarioId },
+    { tenantId, centroId: d.centroId, ...(almacen ? { almacenId: almacen.id } : {}), productoId: d.productoId, tipo: "MERMA", cantidad: -cantidad, costeUnitario: coste, documento, motivo, usuarioId },
   ]);
   await auditar(tx, { tenantId, usuarioId, entidad: "MovimientoStock", entidadId: documento, accion: "merma", despues: { ...d, coste, valor: r2(cantidad * coste) } });
   await emitir(tx, tenantId, "almacen.merma.registrada", { documento, area, centroId: d.centroId, productoId: d.productoId, cantidad, valor: r2(cantidad * coste), motivo: d.motivo });

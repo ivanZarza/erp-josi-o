@@ -8,10 +8,11 @@ import { TablaDesplegable, DatosDetalle } from "@/ui/tabla-desplegable";
 import { listarCompras, leerCompra, importeCompra, textoWhatsApp, enlaceWhatsApp, propuestaCompra } from "@/nucleo/compras";
 import { listarProductos } from "@/nucleo/productos";
 import { num } from "@/nucleo/comun-almacen";
+import { almacenesDeCentros } from "@/nucleo/stock";
 import { proveedoresDeArea } from "@/modulos/proveedores/servicio";
 import { accionCrearCompra, accionEditarCompra, accionEnviarCompra, accionRecibirCompra, accionCancelarCompra } from "../acciones";
 import { SelectorCantidades, type ProductoSeleccionable } from "../selector-cantidades";
-import { EtiquetaCompra, Mensajes, Ocultos, rutaVolver, textosArea, uno, unidad, veCentro, paraCampo, type PropsPagina, type PropsPaginaId } from "../comun";
+import { EtiquetaCompra, Mensajes, Ocultos, SelectorAlmacen, rutaVolver, textosArea, uno, unidad, veCentro, paraCampo, type PropsPagina, type PropsPaginaId } from "../comun";
 import { centrosDelArea } from "./resumen";
 
 const ESTADOS = [
@@ -242,6 +243,7 @@ export async function PaginaCompra({ area, searchParams, params }: PropsPaginaId
   const abierta = c.estado === "BORRADOR" || c.estado === "ENVIADO";
   const puedeCrear = ctx.puede(`${t.m}:compras:crear`);
   const puedeRecibir = ctx.puede(`${t.m}:compras:recibir`) && (abierta || c.estado === "RECIBIDO_PARCIAL");
+  const almacenes = puedeRecibir ? await almacenesDeCentros(prisma, [c.centroId]) : [];
 
   const texto = textoWhatsApp({
     numero: c.numero,
@@ -364,6 +366,11 @@ export async function PaginaCompra({ area, searchParams, params }: PropsPaginaId
                     <Entrada name="albaranProveedor" placeholder="Opcional" />
                   </Campo>
                 </div>
+                {almacenes.length > 0 && (
+                  <Campo etiqueta="Entra en">
+                    <SelectorAlmacen almacenes={almacenes} />
+                  </Campo>
+                )}
                 <label className="flex min-h-10 items-center gap-2 text-sm">
                   <input type="checkbox" name="cerrar" /> Cerrar la compra aunque falte algo
                 </label>

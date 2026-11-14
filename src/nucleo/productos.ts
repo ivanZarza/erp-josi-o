@@ -153,25 +153,28 @@ export async function cambiarActivoProducto(tx: Tx, tenantId: string, usuarioId:
   await auditar(tx, { tenantId, usuarioId, entidad: "Producto", entidadId: id, accion: activo ? "activar" : "desactivar", antes: { activo: p.activo }, despues: { activo } });
 }
 
-/** Ajustes del producto en un centro: si se puede pedir, mínimo, máximo y tarifa del obrador para ese centro. */
+/** Ajustes del producto en un centro: si se puede pedir, mínimo, máximo, tarifa del obrador para ese centro y almacén por defecto. */
 export async function ajustarProductoCentro(
   tx: Tx,
   tenantId: string,
   usuarioId: string,
   area: AreaAlmacen,
-  d: { productoId: string; centroId: string; activo: boolean; minimo: number | null; maximo: number | null; precioVenta: number | null },
+  d: { productoId: string; centroId: string; activo: boolean; minimo: number | null; maximo: number | null; precioVenta: number | null; almacenId?: string | null },
 ) {
   const p = await tx.producto.findFirst({ where: { id: d.productoId, tenantId, area } });
   if (!p) throw new ErrorNegocio("El producto no existe en esta área.");
   const c = await tx.centro.findFirst({ where: { id: d.centroId, tenantId } });
   if (!c) throw new ErrorNegocio("El centro no existe.");
   if (d.minimo !== null && d.maximo !== null && d.maximo < d.minimo) throw new ErrorNegocio("El máximo no puede ser menor que el mínimo.");
+  if (d.almacenId && !(await tx.almacen.findFirst({ where: { id: d.almacenId, centroId: d.centroId } }))) throw new ErrorNegocio("El almacén elegido no es de ese centro.");
+  // undefined = no se toca; null = vuelve a la regla por familia
+  const almacen = d.almacenId === undefined ? {} : { almacenId: d.almacenId };
   const dec = (v: number | null) => (v === null ? null : new Prisma.Decimal(v));
   const antes = await tx.productoCentro.findUnique({ where: { productoId_centroId: { productoId: d.productoId, centroId: d.centroId } } });
   await tx.productoCentro.upsert({
     where: { productoId_centroId: { productoId: d.productoId, centroId: d.centroId } },
-    create: { productoId: d.productoId, centroId: d.centroId, activo: d.activo, minimo: dec(d.minimo), maximo: dec(d.maximo), precioVenta: dec(d.precioVenta) },
-    update: { activo: d.activo, minimo: dec(d.minimo), maximo: dec(d.maximo), precioVenta: dec(d.precioVenta) },
+    create: { productoId: d.productoId, centroId: d.centroId, activo: d.activo, minimo: dec(d.minimo), maximo: dec(d.maximo), precioVenta: dec(d.precioVenta), ...almacen },
+    update: { activo: d.activo, minimo: dec(d.minimo), maximo: dec(d.maximo), precioVenta: dec(d.precioVenta), ...almacen },
   });
   await auditar(tx, {
     tenantId,
@@ -179,7 +182,7 @@ export async function ajustarProductoCentro(
     entidad: "ProductoCentro",
     entidadId: `${d.productoId}|${d.centroId}`,
     accion: "ajustar",
-    antes: antes ? { activo: antes.activo, minimo: num(antes.minimo), maximo: num(antes.maximo), precioVenta: antes.precioVenta ? num(antes.precioVenta) : null } : null,
+    antes: antes ? { activo: antes.activo, minimo: num(antes.minimo), maximo: num(antes.maximo), precioVenta: antes.precioVenta ? num(antes.precioVenta) : null, almacenId: antes.almacenId } : null,
     despues: d,
   });
 }

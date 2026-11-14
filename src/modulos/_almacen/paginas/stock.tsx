@@ -4,7 +4,7 @@ import { db } from "@/kernel/db";
 import { euros, numero } from "@/kernel/formato";
 import { Cabecera, Cifra, Rejilla, Entrada, Selector, Boton, Tabla } from "@/ui";
 import { TablaDesplegable, DatosDetalle } from "@/ui/tabla-desplegable";
-import { listadoStock, resumirStock, type EstadoStock, type FilaStock } from "@/nucleo/stock";
+import { listadoStock, resumirStock, almacenesDeCentros, SIN_UBICAR, type EstadoStock, type FilaStock } from "@/nucleo/stock";
 import { listarFamilias } from "@/nucleo/productos";
 import { MOTIVOS_MERMA } from "@/nucleo/mermas";
 import type { Contexto } from "@/kernel/contexto";
@@ -20,17 +20,25 @@ export async function PaginaStock({ area, searchParams }: PropsPagina) {
   const prisma = await db();
   const centros = centrosDelArea(ctx, area);
   const estado = uno(sp, "estado") as EstadoStock | "AVISOS" | "";
-  const [filas, familias] = await Promise.all([
-    listadoStock(prisma, ctx.tenant.id, area, centros, { texto: uno(sp, "q"), familiaId: uno(sp, "familia") || undefined, estado: estado || undefined }),
+  const almacen = uno(sp, "almacen");
+  const [filas, familias, almacenes] = await Promise.all([
+    listadoStock(prisma, ctx.tenant.id, area, centros, { texto: uno(sp, "q"), familiaId: uno(sp, "familia") || undefined, estado: estado || undefined, almacen: almacen || undefined }),
     listarFamilias(prisma, ctx.tenant.id, area),
+    almacenesDeCentros(prisma, centros.map((c) => c.id)),
   ]);
+  // el filtro va por nombre: «Bodega» junta las bodegas de todos los centros elegidos
+  const nombresAlmacen = Array.from(new Set(almacenes.map((a) => a.nombre))).sort((a, b) => a.localeCompare(b, "es"));
+  const nombreFiltro = almacen === SIN_UBICAR ? "Sin ubicar" : almacen;
   const r = resumirStock(filas);
   const volver = rutaVolver(`/${t.m}/stock`, sp);
   const varios = centros.length > 1;
 
   return (
     <>
-      <Cabecera titulo={`Stock de ${t.nombre.toLowerCase()}`} subtitulo={ctx.centroActivo ? ctx.centroActivo.nombre : `Suma de ${centros.length} centros; al abrir una fila se ve cada centro.`} />
+      <Cabecera
+        titulo={`Stock de ${t.nombre.toLowerCase()}`}
+        subtitulo={`${ctx.centroActivo ? ctx.centroActivo.nombre : `Suma de ${centros.length} centros`}${almacen ? ` · solo ${nombreFiltro}` : ""}. Al abrir una fila se ve cada centro y cada almacén.`}
+      />
       <Mensajes sp={sp} />
       <div className="space-y-4">
         <Rejilla columnas={4}>
@@ -52,6 +60,17 @@ export async function PaginaStock({ area, searchParams }: PropsPagina) {
               </option>
             ))}
           </Selector>
+          {nombresAlmacen.length > 0 && (
+            <Selector name="almacen" defaultValue={almacen} className="w-auto" aria-label="Almacén">
+              <option value="">Todos los almacenes</option>
+              {nombresAlmacen.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+              <option value={SIN_UBICAR}>Sin ubicar</option>
+            </Selector>
+          )}
           <Selector name="estado" defaultValue={estado} className="w-auto">
             <option value="">Todos los estados</option>
             <option value="AVISOS">Con aviso</option>
@@ -69,7 +88,7 @@ export async function PaginaStock({ area, searchParams }: PropsPagina) {
             { titulo: "Producto" },
             { titulo: "Familia", secundaria: true },
             { titulo: "Proveedor", secundaria: true },
-            { titulo: "Stock", alinear: "derecha" },
+            { titulo: almacen ? `En ${nombreFiltro}` : "Stock", alinear: "derecha" },
             { titulo: "Mínimo", alinear: "derecha", secundaria: true },
             { titulo: "Estado" },
             { titulo: "Valor", alinear: "derecha" },
@@ -77,7 +96,7 @@ export async function PaginaStock({ area, searchParams }: PropsPagina) {
           vacio={
             centros.length === 0
               ? `Ninguno de tus centros tiene activada el área de ${t.nombre}.`
-              : uno(sp, "q") || estado || uno(sp, "familia")
+              : uno(sp, "q") || estado || uno(sp, "familia") || almacen
                 ? "No hay productos con ese filtro."
                 : "No hay stock registrado. Llega con las compras recibidas y con los pedidos servidos."
           }
@@ -95,12 +114,15 @@ export async function PaginaStock({ area, searchParams }: PropsPagina) {
               </div>,
               f.producto.familia ?? "—",
               f.producto.proveedor ?? "—",
-              `${numero(f.total, 3)} ${unidad(f.producto.unidad)}`,
+              <div key="s">
+                {numero(f.total, 3)} {unidad(f.producto.unidad)}
+                {almacen && f.total !== f.totalCentros && <div className="text-xs text-slate-500">de {numero(f.totalCentros, 3)} en el centro</div>}
+              </div>,
               f.minimoTotal === null ? "—" : numero(f.minimoTotal, 3),
               <EtiquetaStock key="e" estado={f.estado} />,
               euros(f.valor),
             ],
-            detalle: <DetalleStock fila={f} area={area} ctx={ctx} volver={volver} varios={varios} todosCentros={centros} />,
+            detalle: <DetalleStock fila={f} area={area} ctx={ctx} volver={volver} varios={varios} todosCentros={centros} almacenes={almacenes} />,
           }))}
         />
       </div>
@@ -115,6 +137,7 @@ function DetalleStock({
   volver,
   varios,
   todosCentros,
+  almacenes,
 }: {
   fila: FilaStock;
   area: AreaAlmacen;
@@ -122,11 +145,19 @@ function DetalleStock({
   volver: string;
   varios: boolean;
   todosCentros: { id: string; nombre: string }[];
+  almacenes: { id: string; nombre: string; centroId: string }[];
 }) {
   const t = textosArea(area);
   const puedeEditar = ctx.puede(`${t.m}:productos:editar`);
   const puedeMerma = ctx.puede(`${t.m}:mermas:crear`);
-  const conStock = f.porCentro.filter((c) => c.stock > 0);
+  const conStock = f.porCentro.filter((c) => c.stock > 0 && ctx.centros.some((x) => x.id === c.centro.id));
+  const hayAlmacenes = f.porCentro.some((c) => c.almacenes.length > 0);
+  // opciones de la merma: cada almacén con stock; si el centro no tiene almacenes, el centro entero
+  const ubicaciones = conStock.flatMap((c) => {
+    const conAlm = c.almacenes.filter((a) => a.id !== null && a.stock > 0);
+    if (conAlm.length === 0) return [{ valor: `${c.centro.id}:`, texto: `${c.centro.nombre} (hay ${numero(c.stock, 3)})` }];
+    return conAlm.map((a) => ({ valor: `${c.centro.id}:${a.id}`, texto: `${varios ? `${c.centro.nombre} · ` : ""}${a.nombre} (hay ${numero(a.stock, 3)})` }));
+  });
   return (
     <div className="space-y-4">
       <DatosDetalle
@@ -149,7 +180,7 @@ function DetalleStock({
         ]}
       />
 
-      {(varios || puedeEditar) && (
+      {(varios || puedeEditar || hayAlmacenes) && (
         <Tabla
           clave={(c) => c.centro.id}
           filas={f.porCentro}
@@ -157,6 +188,25 @@ function DetalleStock({
             { titulo: "Centro", celda: (c) => c.centro.nombre },
             { titulo: "Stock", alinear: "derecha", celda: (c) => numero(c.stock, 3) },
             { titulo: "Estado", celda: (c) => <EtiquetaStock estado={c.estado} /> },
+            {
+              titulo: "Por almacén",
+              celda: (c) =>
+                c.almacenes.length === 0 ? (
+                  <span className="text-slate-400">Sin almacenes</span>
+                ) : (
+                  <ul className="space-y-0.5 text-sm">
+                    {c.almacenes.map((a) => (
+                      <li key={a.id ?? "sin"} className="flex justify-between gap-3">
+                        <span className={a.id === null ? "text-amber-700" : ""}>
+                          {a.nombre}
+                          {a.porDefecto && <span className="text-xs text-slate-500"> · su sitio</span>}
+                        </span>
+                        <span className="tabular-nums">{numero(a.stock, 3)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ),
+            },
             {
               titulo: puedeEditar ? "Mínimo · máximo · tarifa al centro · se puede pedir" : "Mínimo · máximo · tarifa",
               celda: (c) =>
@@ -171,6 +221,18 @@ function DetalleStock({
                     <label className="flex items-center gap-1 text-xs">
                       <input type="checkbox" name="activoEnCentro" defaultChecked={c.activoEnCentro} /> pedible
                     </label>
+                    {almacenes.some((a) => a.centroId === c.centro.id) && (
+                      <Selector name="almacenId" defaultValue={c.almacenManualId ?? ""} className="w-auto" aria-label="Almacén por defecto">
+                        <option value="">Su sitio: por familia{c.almacenDefectoId && !c.almacenManualId ? ` (${almacenes.find((a) => a.id === c.almacenDefectoId)?.nombre ?? "—"})` : ""}</option>
+                        {almacenes
+                          .filter((a) => a.centroId === c.centro.id)
+                          .map((a) => (
+                            <option key={a.id} value={a.id}>
+                              Su sitio: {a.nombre}
+                            </option>
+                          ))}
+                      </Selector>
+                    )}
                     <Boton variante="secundario" type="submit" className="min-h-9 px-3">
                       Guardar
                     </Boton>
@@ -184,24 +246,24 @@ function DetalleStock({
       )}
       {puedeEditar && (
         <p className="text-xs text-slate-500">
-          El mínimo vacío en un local significa «sin control de mínimo». La tarifa es el precio al que el obrador sirve a ese centro; si está vacía se usa el coste.
+          El mínimo vacío en un local significa «sin control de mínimo». La tarifa es el precio al que el obrador sirve a ese centro; si está vacía se usa el coste. «Su sitio» es el
+          almacén donde entra el producto en ese centro (compras, pedidos, producción) y del que sale primero; «por familia» lo decide solo (vinos a Bodega, cervezas y refrescos a
+          Barra, refrigerados a Cámara…).
           {todosCentros.length > f.porCentro.length && " Para poner mínimo en un local que aún no aparece aquí, elígelo arriba en el selector de centro."}
         </p>
       )}
 
-      {puedeMerma && conStock.length > 0 && (
+      {puedeMerma && ubicaciones.length > 0 && (
         <form action={accionMerma} className="flex flex-wrap items-end gap-2 rounded-lg border border-slate-200 p-3">
           <Ocultos area={area} volver={volver} />
           <input type="hidden" name="productoId" value={f.producto.id} />
           <div className="w-full text-sm font-medium">Registrar rotura o merma</div>
-          <Selector name="centroId" className="w-auto" defaultValue={conStock[0].centro.id} aria-label="Centro">
-            {conStock
-              .filter((c) => ctx.centros.some((x) => x.id === c.centro.id))
-              .map((c) => (
-                <option key={c.centro.id} value={c.centro.id}>
-                  {c.centro.nombre} (hay {numero(c.stock, 3)})
-                </option>
-              ))}
+          <Selector name="ubicacion" className="w-auto" defaultValue={ubicaciones[0].valor} aria-label="De dónde">
+            {ubicaciones.map((u) => (
+              <option key={u.valor} value={u.valor}>
+                {u.texto}
+              </option>
+            ))}
           </Selector>
           <Entrada name="cantidad" inputMode="decimal" placeholder="Cantidad" required className="w-28" aria-label="Cantidad" />
           <Selector name="motivo" className="w-auto" required defaultValue="" aria-label="Motivo">

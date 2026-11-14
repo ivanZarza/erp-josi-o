@@ -141,13 +141,26 @@ export async function editarPedidoInterno(tx: Tx, tenantId: string, usuarioId: s
 
 /**
  * Servir: el obrador manda lo que hay. Cada cantidad se limita sola al stock disponible en origen
- * (como en BODEGA 360). Genera el albarán de salida y los movimientos en origen y destino.
+ * (como en BODEGA 360). Sale del almacén elegido o, si no se elige, del de por defecto de cada producto
+ * (y de los demás si allí no hay bastante). En el local entra en el almacén por defecto de cada producto. Genera el albarán de salida y los movimientos en origen y destino.
  * `servidas`: id de línea → cantidad a servir (si falta, se sirve lo pedido limitado al stock).
  */
-export async function servirPedidoInterno(tx: Tx, tenantId: string, usuarioId: string, area: AreaAlmacen, id: string, servidas: Map<string, number | null>) {
+export async function servirPedidoInterno(
+  tx: Tx,
+  tenantId: string,
+  usuarioId: string,
+  area: AreaAlmacen,
+  id: string,
+  servidas: Map<string, number | null>,
+  almacenOrigenId?: string | null,
+) {
   const p = await pedidoDe(tx, tenantId, area, id);
   if (p.estado !== "PENDIENTE") throw new ErrorNegocio("Este pedido ya no está pendiente de servir.");
-  const disponible = await stockEnCentro(tx, tenantId, area, p.origenId);
+  if (almacenOrigenId && !(await tx.almacen.findFirst({ where: { id: almacenOrigenId, centroId: p.origenId, activo: true } }))) {
+    throw new ErrorNegocio("El almacén de salida no es del centro que sirve.");
+  }
+  // con almacén de salida elegido, se limita a lo que hay en ese almacén; si no, a lo del centro (el motor reparte)
+  const disponible = await stockEnCentro(tx, tenantId, area, p.origenId, almacenOrigenId || undefined);
   const precios = await preciosPara(tx, p.lineas.map((l) => l.productoId), p.destinoId);
   const albaran = await siguienteNumero(tx, tenantId, "ALB-S");
   const movs: NuevoMovimiento[] = [];
@@ -167,7 +180,7 @@ export async function servirPedidoInterno(tx: Tx, tenantId: string, usuarioId: s
     if (servida > 0) {
       const coste = precios.coste(l.productoId);
       const comun = { tenantId, productoId: l.productoId, costeUnitario: coste, documento: albaran, documentoId: p.id, usuarioId };
-      movs.push({ ...comun, centroId: p.origenId, tipo: "SALIDA_PEDIDO", cantidad: -servida, motivo: `Pedido ${p.numero}` });
+      movs.push({ ...comun, centroId: p.origenId, ...(almacenOrigenId ? { almacenId: almacenOrigenId } : {}), tipo: "SALIDA_PEDIDO", cantidad: -servida, motivo: `Pedido ${p.numero}` });
       movs.push({ ...comun, centroId: p.destinoId, tipo: "ENTRADA_PEDIDO", cantidad: servida, motivo: `Pedido ${p.numero}` });
     }
   }

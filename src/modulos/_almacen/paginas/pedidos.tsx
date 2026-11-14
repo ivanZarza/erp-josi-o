@@ -6,7 +6,7 @@ import { euros, numero, fecha, fechaHora } from "@/kernel/formato";
 import { Cabecera, Tarjeta, Selector, Boton, BotonEnlace, Campo, AreaTexto, Entrada, Aviso, Tabla, Vacio } from "@/ui";
 import { TablaDesplegable, DatosDetalle } from "@/ui/tabla-desplegable";
 import { listarPedidosInternos, leerPedidoInterno, catalogoParaPedir, importePedido } from "@/nucleo/pedidos";
-import { stockEnCentro } from "@/nucleo/stock";
+import { stockEnCentro, almacenesDeCentros } from "@/nucleo/stock";
 import { centrosQueSirven, num } from "@/nucleo/comun-almacen";
 import {
   accionCrearPedido,
@@ -17,7 +17,7 @@ import {
   accionCancelarPedido,
 } from "../acciones";
 import { SelectorCantidades } from "../selector-cantidades";
-import { EtiquetaPedido, Mensajes, Ocultos, rutaVolver, textosArea, uno, unidad, veCentro, paraCampo, type PropsPagina, type PropsPaginaId } from "../comun";
+import { EtiquetaPedido, Mensajes, Ocultos, SelectorAlmacen, rutaVolver, textosArea, uno, unidad, veCentro, paraCampo, type PropsPagina, type PropsPaginaId } from "../comun";
 import { centrosDelArea } from "./resumen";
 
 const ESTADOS = [
@@ -226,6 +226,7 @@ export async function PaginaPedido({ area, searchParams, params }: PropsPaginaId
   const puedeCambiar = p.estado === "PENDIENTE" && ctx.puede(`${t.m}:pedidos:crear`) && veCentro(ctx, p.destinoId);
   const puedeRecibir = p.estado === "SERVIDO" && ctx.puede(`${t.m}:pedidos:recibir`) && veCentro(ctx, p.destinoId);
   const disponible = puedeServir ? await stockEnCentro(prisma, ctx.tenant.id, area, p.origenId) : new Map<string, number>();
+  const almacenesOrigen = puedeServir ? await almacenesDeCentros(prisma, [p.origenId]) : [];
   const catalogo = puedeCambiar ? await catalogoParaPedir(prisma, ctx.tenant.id, area, p.origenId, p.destinoId) : [];
 
   return (
@@ -287,7 +288,19 @@ export async function PaginaPedido({ area, searchParams, params }: PropsPaginaId
                   },
                 ]}
               />
-              <Boton type="submit">Servir y hacer albarán</Boton>
+              <div className="flex flex-wrap items-end gap-3">
+                {almacenesOrigen.length > 0 && (
+                  <Campo etiqueta="Sale de">
+                    <SelectorAlmacen almacenes={almacenesOrigen} textoDefecto="Cada producto de su almacén" />
+                  </Campo>
+                )}
+                <Boton type="submit">Servir y hacer albarán</Boton>
+              </div>
+              {almacenesOrigen.length > 0 && (
+                <p className="text-xs text-slate-500">
+                  «Hay» es lo del centro entero. Si eliges un almacén, solo se sirve lo que haya en él. En el local entra en el almacén de cada producto.
+                </p>
+              )}
             </form>
             <form action={accionRechazarPedido} className="mt-4 flex flex-wrap items-end gap-2 border-t border-slate-200 pt-4">
               <Ocultos area={area} volver={volver} id={p.id} />

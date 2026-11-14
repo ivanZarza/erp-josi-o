@@ -19,6 +19,7 @@ import {
 } from "@/nucleo/pedidos";
 import { crearCompra, editarCompra, marcarCompraEnviada, recibirCompra, cancelarCompra, type LineaCompra } from "@/nucleo/compras";
 import { crearInventario, guardarRecuento, terminarInventario, aprobarInventario, reabrirInventario } from "@/nucleo/inventarios";
+import { registrarTraspaso } from "@/nucleo/traspasos";
 import { euros } from "@/kernel/formato";
 import { ejecutar, rutaSegura } from "./ejecutar";
 import {
@@ -30,6 +31,7 @@ import {
   EsquemaCompraNueva,
   EsquemaInventarioNuevo,
   EsquemaEnvio,
+  EsquemaTraspaso,
   leerCantidades,
 } from "./esquemas";
 
@@ -46,6 +48,19 @@ function veCentro(ctx: Contexto, centroId: string) {
 }
 
 const idDe = (form: FormData) => String(form.get("id") ?? "");
+
+/**
+ * Centro y almacén elegidos en un solo selector «ubicacion» = "<centroId>:<almacenId>" (almacén vacío =
+ * todo el centro / el de por defecto). Si el formulario no lo trae, se leen centroId y almacenId sueltos.
+ */
+function centroYAlmacen(form: FormData) {
+  const u = form.get("ubicacion");
+  if (typeof u === "string" && u.includes(":")) {
+    const [centroId, almacenId] = u.split(":");
+    return { centroId, almacenId };
+  }
+  return { centroId: String(form.get("centroId") ?? ""), almacenId: String(form.get("almacenId") ?? "") };
+}
 
 // ---------------------------------------------------------------- productos
 
@@ -104,6 +119,7 @@ export async function accionAjustarCentro(form: FormData) {
       minimo: form.get("minimo") ?? "",
       maximo: form.get("maximo") ?? "",
       precioVenta: form.get("precioVenta") ?? "",
+      almacenId: form.has("almacenId") ? String(form.get("almacenId") ?? "") : undefined,
     });
     await p.prisma.$transaction((tx) => ajustarProductoCentro(tx, p.ctx.tenant.id, p.ctx.usuario.id, p.area, d));
     return { ok: "Ajustes del producto en el centro guardados." };
@@ -117,7 +133,7 @@ export async function accionMerma(form: FormData) {
   return ejecutar(p, async () => {
     const d = EsquemaMerma.parse({
       productoId: form.get("productoId") ?? "",
-      centroId: form.get("centroId") ?? "",
+      ...centroYAlmacen(form),
       cantidad: form.get("cantidad") ?? "",
       motivo: form.get("motivo") ?? "",
       nota: form.get("nota") ?? "",
@@ -168,7 +184,8 @@ export async function accionServirPedido(form: FormData) {
   return ejecutar(p, async () => {
     const ped = await pedidoConAcceso(p, idDe(form), "origen");
     const servidas = leerCantidades(form, "s_");
-    const r = await p.prisma.$transaction((tx) => servirPedidoInterno(tx, p.ctx.tenant.id, p.ctx.usuario.id, p.area, ped.id, servidas));
+    const almacenOrigenId = String(form.get("almacenId") ?? "").trim() || null;
+    const r = await p.prisma.$transaction((tx) => servirPedidoInterno(tx, p.ctx.tenant.id, p.ctx.usuario.id, p.area, ped.id, servidas, almacenOrigenId));
     return { ok: `Pedido ${ped.numero} servido con el albarán ${r.albaran}.${r.recortadas ? ` ${r.recortadas} línea(s) ajustadas al stock disponible.` : ""}` };
   });
 }
@@ -258,7 +275,8 @@ export async function accionRecibirCompra(form: FormData) {
     const lineas = new Map<string, { recibida: number | null; precio: number | null }>();
     for (const k of new Set([...recibidas.keys(), ...precios.keys()])) lineas.set(k, { recibida: recibidas.get(k) ?? 0, precio: precios.get(k) ?? null });
     const albaranProveedor = String(form.get("albaranProveedor") ?? "").trim().slice(0, 60) || null;
-    const r = await p.prisma.$transaction((tx) => recibirCompra(tx, p.ctx.tenant.id, p.ctx.usuario.id, p.area, c.id, { lineas, albaranProveedor, cerrar: form.get("cerrar") === "on" }));
+    const almacenId = String(form.get("almacenId") ?? "").trim() || null;
+    const r = await p.prisma.$transaction((tx) => recibirCompra(tx, p.ctx.tenant.id, p.ctx.usuario.id, p.area, c.id, { lineas, albaranProveedor, cerrar: form.get("cerrar") === "on", almacenId }));
     return { ok: `Recepción guardada con el albarán ${r.albaran}. ${r.estado === "RECIBIDO" ? "Compra completa." : "Queda mercancía pendiente."}` };
   });
 }
@@ -284,7 +302,7 @@ async function inventarioConAcceso(p: Awaited<ReturnType<typeof preparar>>, id: 
 export async function accionCrearInventario(form: FormData) {
   const p = await preparar(form, "inventarios:crear");
   return ejecutar(p, async () => {
-    const d = EsquemaInventarioNuevo.parse({ centroId: form.get("centroId") ?? "", nombre: form.get("nombre") ?? "" });
+    const d = EsquemaInventarioNuevo.parse({ ...centroYAlmacen(form), nombre: form.get("nombre") ?? "" });
     veCentro(p.ctx, d.centroId);
     const inv = await p.prisma.$transaction((tx) => crearInventario(tx, p.ctx.tenant.id, p.ctx.usuario.id, p.area, d));
     return { ir: `/${p.m}/inventarios/${inv.id}?ok=${encodeURIComponent(`Inventario ${inv.numero} abierto. Ya puedes contar.`)}` };
@@ -325,5 +343,17 @@ export async function accionReabrirInventario(form: FormData) {
     const inv = await inventarioConAcceso(p, idDe(form));
     await p.prisma.$transaction((tx) => reabrirInventario(tx, p.ctx.tenant.id, p.ctx.usuario.id, p.area, inv.id));
     return { ok: "Inventario devuelto a recuento." };
+  });
+}
+
+// ---------------------------------------------------------------- traspasos entre almacenes del mismo centro
+
+export async function accionTraspaso(form: FormData) {
+  const p = await preparar(form, "traspasos:crear");
+  return ejecutar(p, async () => {
+    const d = EsquemaTraspaso.parse({ centroId: form.get("centroId") ?? "", origenId: form.get("origenId") ?? "", destinoId: form.get("destinoId") ?? "", nota: form.get("nota") ?? "" });
+    veCentro(p.ctx, d.centroId);
+    const r = await p.prisma.$transaction((tx) => registrarTraspaso(tx, p.ctx.tenant.id, p.ctx.usuario.id, p.area, { ...d, lineas: lineasPedidas(form) }));
+    return { ok: `Traspaso ${r.documento} hecho (${r.lineas} producto(s)).` };
   });
 }

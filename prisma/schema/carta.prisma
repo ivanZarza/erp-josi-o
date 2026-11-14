@@ -1,6 +1,6 @@
 // =====================================================================
-// COMIDAS · CARTA Y ESCANDALLOS: cartas por marca, platos, escandallos, precios por
-// local, recargos y alérgenos de los productos.
+// CARTA Y ESCANDALLOS (Comidas y Bebidas): cartas de marca o de un local, platos y
+// bebidas con sus formatos de venta, escandallos, precios por local, recargos y alérgenos.
 // Ver docs/specs/modulos/comidas/carta-escandallos.md
 // Referencias al núcleo (Marca, Centro, Producto) solo con id de texto, sin @relation.
 // =====================================================================
@@ -33,10 +33,18 @@ enum TipoCarta {
   TEMPORAL
 }
 
+/// Área de la carta a la que pertenece un plato o una sección: decide si se ve en Comidas o en Bebidas
+enum AreaCarta {
+  COMIDAS
+  BEBIDAS
+}
+
+/// Carta de la marca (centroId vacío: la ven todos sus locales) o de un local concreto (centroId)
 model Carta {
   id        String         @id @default(cuid())
   tenantId  String
   marcaId   String
+  centroId  String? // vacío = de la marca; con valor = solo de ese local
   nombre    String
   tipo      TipoCarta      @default(PERMANENTE)
   desde     DateTime?      @db.Date
@@ -47,12 +55,14 @@ model Carta {
   secciones CartaSeccion[]
 
   @@index([tenantId, marcaId])
+  @@index([tenantId, centroId])
 }
 
 model CartaSeccion {
   id       String       @id @default(cuid())
   cartaId  String
   carta    Carta        @relation(fields: [cartaId], references: [id], onDelete: Cascade)
+  area     AreaCarta    @default(COMIDAS)
   nombre   String
   nombreEn String?
   orden    Int          @default(0)
@@ -71,10 +81,14 @@ model CartaLinea {
   @@unique([seccionId, platoId])
 }
 
+/// Plato o bebida de la carta. Si tiene formatos (botella, copa, mágnum…), cada uno lleva su precio
+/// y su parte del escandallo; `precio` es entonces el del primer formato.
 model CartaPlato {
-  id                 String   @id @default(cuid())
+  id                 String    @id @default(cuid())
   tenantId           String
   marcaId            String
+  centroId           String? // vacío = de la marca; con valor = plato propio de ese local
+  area               AreaCarta @default(COMIDAS)
   nombre             String
   nombreEn           String?
   descripcion        String?
@@ -93,8 +107,28 @@ model CartaPlato {
   ingredientes CartaPlatoIngrediente[]
   precios      CartaPlatoPrecio[]
   lineas       CartaLinea[]
+  formatos     CartaPlatoFormato[]
 
   @@index([tenantId, marcaId])
+  @@index([tenantId, area])
+}
+
+/// Formato de venta de un plato o bebida (botella, copa, mágnum, media botella, caña, doble…).
+/// Sin productoId: vende `cantidad` veces el escandallo del plato (copa de 15 cl de una botella de
+/// 75 cl = 0,2). Con productoId: vende `cantidad` unidades de ese producto en lugar del escandallo
+/// (mágnum = 1 botella del producto mágnum).
+model CartaPlatoFormato {
+  id         String     @id @default(cuid())
+  platoId    String
+  plato      CartaPlato @relation(fields: [platoId], references: [id], onDelete: Cascade)
+  nombre     String
+  precio     Decimal    @db.Decimal(10, 2) // PVP con IVA de la marca
+  cantidad   Decimal    @default(1) @db.Decimal(10, 4)
+  productoId String?
+  orden      Int        @default(0)
+  activo     Boolean    @default(true)
+
+  @@unique([platoId, nombre])
 }
 
 /// Escandallo: ingrediente (producto del catálogo o elaborado del obrador) por ración

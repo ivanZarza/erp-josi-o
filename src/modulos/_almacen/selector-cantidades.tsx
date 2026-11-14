@@ -33,11 +33,14 @@ export function SelectorCantidades({
   iniciales = {},
   conPrecio = false,
   mostrarDisponible = false,
+  textoExceso = "Pides más de lo que hay: se servirá lo disponible.",
 }: {
   productos: ProductoSeleccionable[];
   iniciales?: Record<string, number>;
   conPrecio?: boolean;
   mostrarDisponible?: boolean;
+  /** Aviso cuando la cantidad pasa de lo disponible. */
+  textoExceso?: string;
 }) {
   const [cant, setCant] = useState<Record<string, string>>(() => Object.fromEntries(Object.entries(iniciales).map(([k, v]) => [k, escribir(v)])));
   const [precio, setPrecio] = useState<Record<string, string>>(() => Object.fromEntries(productos.map((p) => [p.id, p.precio != null ? escribir(p.precio) : ""])));
@@ -107,7 +110,7 @@ export function SelectorCantidades({
                         )}
                         {!conPrecio && p.precio != null && <> · {euros(p.precio)}</>}
                       </div>
-                      {pasa && <div className="text-xs text-amber-700">Pides más de lo que hay: se servirá lo disponible.</div>}
+                      {pasa && <div className="text-xs text-amber-700">{textoExceso}</div>}
                     </div>
                     {conPrecio && (
                       <label className="flex items-center gap-1 text-xs text-slate-500">

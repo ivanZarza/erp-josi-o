@@ -1,0 +1,35 @@
+// =====================================================================
+// BEBIDAS: ficha de vino de los productos de Bebidas (bodega, D.O., uva, añada, capacidad,
+// tipo, crianza y textos para la carta y los camareros).
+// Ver docs/specs/modulos/bebidas/README.md y docs/specs/nucleo/catalogo.md §5
+// Referencia al núcleo (Producto) solo con id de texto, sin @relation.
+// =====================================================================
+
+enum TipoVino {
+  TINTO
+  BLANCO
+  ROSADO
+  ESPUMOSO
+  GENEROSO
+  DULCE
+}
+
+/// Ficha de vino de un producto de Bebidas (una por producto)
+model FichaVino {
+  id             String    @id @default(cuid())
+  tenantId       String
+  productoId     String
+  bodega         String?
+  denominacion   String? // D.O., A.O.C. o región: «Ribera del Duero», «Champagne»…
+  uva            String? // una o varias: «Tempranillo, Garnacha»
+  anada          Int? // vacío = sin añada (o añada no controlada)
+  capacidadCl    Decimal   @default(75) @db.Decimal(6, 1) // 37,5 · 50 · 75 · 150 (mágnum)…
+  tipo           TipoVino?
+  crianza        String? // joven, roble, crianza, reserva, gran reserva…
+  notasCata      String?
+  maridaje       String?
+  argumentoVenta String? // frase para que el camarero lo recomiende
+  updatedAt      DateTime  @updatedAt
+
+  @@unique([tenantId, productoId])
+}

@@ -5,7 +5,7 @@
  *  1. 10 proveedores de comida (carne madurada, importación, carnicería, pescadería, fruta y verdura,
  *     lácteos, panadería, despensa, congelados y aceites).
  *  2. Catálogo de ingredientes RZC-… con familia, unidad, coste 2026, IVA de compra y alérgenos.
- *  3. Carta «Carta Raza Pruebas» (marca Raza) con los 62 platos de comida, escandallo por ración,
+ *  3. Carta «Carta Raza Pruebas» (marca Raza, solo del local RZ-PRU) con los 62 platos de comida, escandallo por ración,
  *     merma, alérgenos deducidos de los ingredientes y recargo de pan y aperitivo en RZ-PRU.
  *  4. Obrador (OB): 31 elaborados RZO-… con receta, tarifa a RZ-PRU (coste + 12 %), órdenes y lotes.
  *  5. Ocho semanas de historia hacia atrás desde ctx.hoy, simuladas día a día:
@@ -1135,13 +1135,16 @@ export async function sembrar(prisma: PrismaClient, ctx: ContextoPruebas) {
     data: Array.from(REC.keys()).filter((r) => refsLocal.has(r)).map((r) => ({ tenantId: t, obradorId, productoId: P_(r), centroId: localId, modo: "COSTE_MAS_PORCENTAJE" as const, porcentaje: MARGEN_OBRADOR, actualizadoPor: uEconomato })),
   });
 
-  // Carta «Carta Raza Pruebas» (marca Raza): se busca por marca y nombre (Bebidas añade sus secciones a la misma)
+  // Carta «Carta Raza Pruebas»: es del local RZ-PRU (no de toda la marca Raza), para que no salga en los
+  // Raza reales. Se busca por marca y nombre (Bebidas añade sus secciones a la misma) y, si ya existía
+  // como carta de la marca, pasa a ser del local. Sus platos también son solo de RZ-PRU.
   let carta = await prisma.carta.findFirst({ where: { tenantId: t, marcaId: marcaRaza, nombre: "Carta Raza Pruebas" } });
-  if (!carta) carta = await prisma.carta.create({ data: { tenantId: t, marcaId: marcaRaza, nombre: "Carta Raza Pruebas", tipo: "PERMANENTE" } });
+  if (!carta) carta = await prisma.carta.create({ data: { tenantId: t, marcaId: marcaRaza, centroId: localId, nombre: "Carta Raza Pruebas", tipo: "PERMANENTE" } });
+  else if (carta.centroId !== localId) carta = await prisma.carta.update({ where: { id: carta.id }, data: { centroId: localId } });
   const yaSecciones = await prisma.cartaSeccion.count({ where: { cartaId: carta.id } });
   const secciones = Array.from(new Set(platosCarta.map((p) => p.seccion)));
   const seccionId = new Map(secciones.map((s) => [s, nuevoId()]));
-  await prisma.cartaSeccion.createMany({ data: secciones.map((s, i) => ({ id: seccionId.get(s)!, cartaId: carta!.id, nombre: s, orden: yaSecciones + i + 1 })) });
+  await prisma.cartaSeccion.createMany({ data: secciones.map((s, i) => ({ id: seccionId.get(s)!, cartaId: carta!.id, area: "COMIDAS" as const, nombre: s, orden: yaSecciones + i + 1 })) });
   const platosData: Prisma.CartaPlatoCreateManyInput[] = [];
   const ingredientesData: Prisma.CartaPlatoIngredienteCreateManyInput[] = [];
   const lineasData: Prisma.CartaLineaCreateManyInput[] = [];
@@ -1157,7 +1160,7 @@ export async function sembrar(prisma: PrismaClient, ctx: ContextoPruebas) {
     const descripcion = [p.descripcion, desc].filter(Boolean).map((x) => x!.replace(/\.$/, "")).join(". ") + (p.descripcion || desc ? "." : "");
     const id = nuevoId();
     platosData.push({
-      id, tenantId: t, marcaId: marcaRaza, nombre: nombrePlato(p), descripcion: descripcion || null, precio: p.precio ?? 0, iva: 10,
+      id, tenantId: t, marcaId: marcaRaza, centroId: localId, area: "COMIDAS", nombre: nombrePlato(p), descripcion: descripcion || null, precio: p.precio ?? 0, iva: 10,
       alergenos: a, trazas: tr, alergenosRevisados: false, etiquetas,
     });
     escandallo.forEach(([c, neta, merma], i) => ingredientesData.push({ platoId: id, productoId: P_(ref(c)), cantidad: neta, mermaPct: merma, orden: i + 1 }));

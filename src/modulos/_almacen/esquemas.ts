@@ -72,11 +72,19 @@ export const EsquemaAjusteCentro = z.object({
   minimo: numeroOpcional("Mínimo"),
   maximo: numeroOpcional("Máximo"),
   precioVenta: numeroOpcional("Tarifa al centro"),
+  /** undefined = el formulario no lo trae (no se toca); null = regla por familia. */
+  almacenId: z
+    .string()
+    .trim()
+    .max(40)
+    .optional()
+    .transform((v) => (v === undefined ? undefined : v === "" ? null : v)),
 });
 
 export const EsquemaMerma = z.object({
   productoId: id,
   centroId: id,
+  almacenId: idOpcional,
   cantidad: numeroObligatorio("Cantidad", { min: 0.001 }),
   motivo: z.string().trim().min(1, "Elige el motivo de la merma.").max(60),
   nota: texto(200),
@@ -84,7 +92,8 @@ export const EsquemaMerma = z.object({
 
 export const EsquemaPedidoNuevo = z.object({ origenId: id, destinoId: id, notas: texto(500) });
 export const EsquemaCompraNueva = z.object({ proveedorId: id, centroId: id, notas: texto(500) });
-export const EsquemaInventarioNuevo = z.object({ centroId: id, nombre: texto(80) });
+export const EsquemaInventarioNuevo = z.object({ centroId: id, almacenId: idOpcional, nombre: texto(80) });
+export const EsquemaTraspaso = z.object({ centroId: id, origenId: id, destinoId: id, nota: texto(200) });
 export const EsquemaEnvio = z.enum(["whatsapp", "email", "telefono"]);
 
 /**

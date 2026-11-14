@@ -13,6 +13,7 @@ import { sembrar as personal } from "./personal";
 import { sembrar as sala } from "./sala";
 import { sembrar as caja } from "./caja";
 import { sembrar as contabilidad } from "./contabilidad";
+import { sembrar as almacenes } from "./almacenes";
 
 /** Orden obligatorio: las partes de la segunda ola usan lo creado por la primera. */
 export const PARTES: Record<string, SembrarParte> = {
@@ -22,6 +23,7 @@ export const PARTES: Record<string, SembrarParte> = {
   sala, // ola 1: reservas, clientes, eventos, calidad
   contabilidad, // ola 2: facturas, gastos, nóminas en contabilidad
   caja, // ola 2: ventas y cierres (usa platos y bebidas) y cuadro de mando; va la última para que los indicadores incluyan los gastos
+  almacenes, // ubica en su almacén los movimientos sin almacén y añade traspasos de ejemplo
 };
 
 const MODULOS_LOCAL = ["bebidas", "comidas", "caja", "personal", "contabilidad", "cuadro", "calidad", "reservas", "eventos", "clientes", "webs"];

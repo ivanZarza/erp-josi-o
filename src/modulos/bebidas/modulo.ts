@@ -12,8 +12,11 @@ export const modulo: ManifiestoModulo = {
     { ruta: "/bebidas/pedidos", titulo: "Pedidos de locales", permiso: "bebidas:pedidos:ver" },
     { ruta: "/bebidas/compras", titulo: "Compras", permiso: "bebidas:compras:ver" },
     { ruta: "/bebidas/inventarios", titulo: "Inventarios", permiso: "bebidas:inventarios:ver" },
+    { ruta: "/bebidas/traspasos", titulo: "Traspasos", permiso: "bebidas:stock:ver" },
     { ruta: "/bebidas/movimientos", titulo: "Movimientos", permiso: "bebidas:stock:ver" },
     { ruta: "/bebidas/productos", titulo: "Productos", permiso: "bebidas:productos:ver" },
+    { ruta: "/bebidas/carta", titulo: "Carta de bebidas", permiso: "bebidas:carta:ver" },
+    { ruta: "/bebidas/bodega", titulo: "Bodega", permiso: "bebidas:productos:ver" },
   ],
   permisos: [
     { clave: "bebidas:stock:ver", descripcion: "Ver stock de bebidas" },
@@ -29,9 +32,13 @@ export const modulo: ManifiestoModulo = {
     { clave: "bebidas:inventarios:ver", descripcion: "Ver inventarios de bebida" },
     { clave: "bebidas:inventarios:crear", descripcion: "Hacer inventarios de bebida" },
     { clave: "bebidas:inventarios:cerrar", descripcion: "Cerrar inventarios de bebida" },
+    { clave: "bebidas:traspasos:crear", descripcion: "Pasar bebida de un almacén a otro del mismo centro (p. ej. Bodega → Barra)" },
     { clave: "bebidas:mermas:crear", descripcion: "Registrar roturas y mermas" },
+    { clave: "bebidas:carta:ver", descripcion: "Ver la carta de bebidas, sus formatos (botella, copa…) y escandallos" },
+    { clave: "bebidas:carta:editar", descripcion: "Editar la carta de bebidas, formatos, precios y escandallos" },
   ],
   integraciones: [
+    { id: "tpv-carta-bebidas", nombre: "Carta de bebidas al TPV", descripcion: "Enviar bebidas, formatos y precios al programa de caja", estado: "pendiente" },
     { id: "bodega360", nombre: "Importar BODEGA 360", descripcion: "Traer productos, proveedores, movimientos y albaranes de la app actual", estado: "pendiente" },
   ],
 };

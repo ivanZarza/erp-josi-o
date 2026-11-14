@@ -3,7 +3,7 @@ import { db } from "@/kernel/db";
 import { euros, numero, fechaHora } from "@/kernel/formato";
 import { Cabecera, Entrada, Selector, Boton } from "@/ui";
 import { TablaDesplegable, DatosDetalle } from "@/ui/tabla-desplegable";
-import { listarMovimientos } from "@/nucleo/stock";
+import { listarMovimientos, almacenesDeCentros, SIN_UBICAR } from "@/nucleo/stock";
 import { num } from "@/nucleo/comun-almacen";
 import { Mensajes, TIPOS_MOVIMIENTO, textosArea, uno, unidad, type PropsPagina } from "../comun";
 import { centrosDelArea } from "./resumen";
@@ -24,17 +24,21 @@ export async function PaginaMovimientos({ area, searchParams }: PropsPagina) {
   const centros = centrosDelArea(ctx, area);
   const ids = centros.map((c) => c.id);
   const productoId = uno(sp, "producto");
-  const [movs, usuarios, producto] = await Promise.all([
+  const almacen = uno(sp, "almacen");
+  const [movs, usuarios, producto, almacenes] = await Promise.all([
     listarMovimientos(prisma, ctx.tenant.id, area, ids, {
       tipo: uno(sp, "tipo") || undefined,
       texto: uno(sp, "q"),
       productoId: productoId || undefined,
       desde: dia(uno(sp, "desde")),
       hasta: dia(uno(sp, "hasta"), 1),
+      almacen: almacen || undefined,
     }),
     prisma.usuario.findMany({ where: { tenantId: ctx.tenant.id }, select: { id: true, nombre: true } }),
     productoId ? prisma.producto.findFirst({ where: { id: productoId, tenantId: ctx.tenant.id, area }, select: { nombre: true } }) : null,
+    almacenesDeCentros(prisma, ids, { conInactivos: true }),
   ]);
+  const nombresAlmacen = Array.from(new Set(almacenes.map((a) => a.nombre))).sort((a, b) => a.localeCompare(b, "es"));
   const quien = new Map(usuarios.map((u) => [u.id, u.nombre]));
 
   return (
@@ -54,6 +58,17 @@ export async function PaginaMovimientos({ area, searchParams }: PropsPagina) {
             </option>
           ))}
         </Selector>
+        {nombresAlmacen.length > 0 && (
+          <Selector name="almacen" defaultValue={almacen} className="w-auto" aria-label="Almacén">
+            <option value="">Todos los almacenes</option>
+            {nombresAlmacen.map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+            <option value={SIN_UBICAR}>Sin ubicar</option>
+          </Selector>
+        )}
         <Entrada type="date" name="desde" defaultValue={uno(sp, "desde")} className="w-auto" aria-label="Desde" />
         <Entrada type="date" name="hasta" defaultValue={uno(sp, "hasta")} className="w-auto" aria-label="Hasta" />
         <Boton variante="secundario" type="submit">
@@ -64,7 +79,7 @@ export async function PaginaMovimientos({ area, searchParams }: PropsPagina) {
         columnas={[
           { titulo: "Fecha" },
           { titulo: "Producto" },
-          { titulo: "Centro", secundaria: true },
+          { titulo: "Centro · almacén", secundaria: true },
           { titulo: "Tipo" },
           { titulo: "Cantidad", alinear: "derecha" },
           { titulo: "Documento", secundaria: true },
@@ -78,7 +93,7 @@ export async function PaginaMovimientos({ area, searchParams }: PropsPagina) {
             celdas: [
               fechaHora(m.createdAt),
               m.producto.nombre,
-              m.centro.nombre,
+              `${m.centro.nombre} · ${m.almacen?.nombre ?? "sin ubicar"}`,
               TIPOS_MOVIMIENTO[m.tipo] ?? m.tipo,
               <span key="c" className={cant < 0 ? "text-red-600" : "text-emerald-700"}>
                 {cant > 0 ? "+" : ""}
@@ -92,6 +107,7 @@ export async function PaginaMovimientos({ area, searchParams }: PropsPagina) {
                 datos={[
                   { etiqueta: "Producto", valor: `${m.producto.nombre} (${m.producto.referencia})` },
                   { etiqueta: "Centro", valor: m.centro.nombre },
+                  { etiqueta: "Almacén", valor: m.almacen?.nombre ?? "Sin ubicar" },
                   { etiqueta: "Cantidad", valor: `${numero(cant, 3)} ${unidad(m.producto.unidad)}` },
                   { etiqueta: "Coste unitario", valor: euros(num(m.costeUnitario), 4) },
                   { etiqueta: "Documento", valor: m.documento ?? "—" },

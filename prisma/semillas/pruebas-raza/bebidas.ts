@@ -5,20 +5,27 @@
  *    estaba entre las 103 bebidas de BODEGA 360 (semilla general) se reutiliza ese producto.
  * 2. 46 bebidas inventadas que la carta no trae (aguas, refrescos, zumos, cervezas de botella y
  *    barril, vermut, destilados para copas, café, infusiones y leche), RZB-B…, con sus proveedores.
- * 3. Secciones de bebidas en la «Carta Raza Pruebas» (módulo Carta), con precio de carta y escandallo
- *    (botella = 1; copa = fracción de botella; caña = litros del barril; café = gramos).
- * 4. Ocho semanas de movimiento hacia atrás desde ctx.hoy, simuladas día a día y en orden:
+ * 3. Ficha de vino de cada vino de la carta (bodega, D.O., uva, añada, capacidad, tipo, crianza y
+ *    maridaje; tabla FichaVino del módulo Bebidas).
+ * 4. Secciones de bebidas (área Bebidas) en la «Carta Raza Pruebas», que es del local RZ-PRU (no de toda
+ *    la marca), con escandallo (botella = 1; caña = litros del barril; café = kilos) y formatos de venta:
+ *    cada vino es UNA bebida con sus formatos (botella, copa de 15 cl = 0,2 botella, mágnum con su
+ *    propio producto). Los generosos y dulces se venden solo por copa; diez vinos baratos también por copa
+ *    (inventado); Malleolus y Mauro, en botella y en mágnum.
+ * 5. Ocho semanas de movimiento hacia atrás desde ctx.hoy, simuladas día a día y en orden:
  *    - el obrador (OB, almacén central de vino y destilados) compra a los distribuidores los martes y
  *      recibe los jueves;
  *    - RZ-PRU pide al OB los lunes y jueves (pedido interno → servido con albarán ALB-S → recibido);
  *    - RZ-PRU compra directo cerveza, refrescos, aguas, zumos, café y leche según los días de reparto;
- *    - consumo diario del local (movimiento CONSUMO) = ventas estimadas × escandallo de la carta
+ *    - consumo diario del local (movimiento CONSUMO) = ventas estimadas de cada formato × escandallo
  *      (no hay TPV conectado: es la única forma de que el stock baje de forma creíble);
  *    - roturas y mermas con motivo (MER), inventario semanal del local los lunes y dos del obrador.
  *    La simulación se ejecuta dos veces con la misma semilla aleatoria: la primera solo cuenta los
  *    documentos para reservar los números (PL, ALB-S, PC, ALB-E, INV, MER) sin dejar huecos.
  *
- * Todo se escribe con createMany por lotes (la carga final va a una base en la nube).
+ * Todo se escribe con createMany por lotes (la carga final va a una base en la nube). Si los vinos ya están
+ * cargados no se repite nada; solo se completa lo que falte de una carga anterior (carta del local, área de
+ * las secciones y fichas de vino), sin duplicar.
  * Datos inventados salvo los vinos y precios de la carta. Huecos detectados: docs/pruebas/huecos-bebidas.md
  */
 import { randomUUID } from "node:crypto";
@@ -129,6 +136,14 @@ interface DefProducto {
   precioCarta?: number; // para tramos de demanda
   bajoDemanda?: boolean;
 }
+/** Formato de venta de una bebida: parte del escandallo (o unidades de otro producto, el mágnum). */
+interface DefFormato {
+  nombre: string;
+  precio: number;
+  cantidad: number;
+  clave?: string; // producto propio del formato (mágnum); vacío = el escandallo
+  servPorSemana: number;
+}
 interface DefItem {
   seccion: string;
   nombre: string;
@@ -137,7 +152,9 @@ interface DefItem {
   ingredientes: [string, number][]; // clave de producto, cantidad por servicio
   alergenos: string[];
   etiquetas: string[];
-  servPorSemana: number; // ventas estimadas por semana en RZ-PRU
+  servPorSemana: number; // ventas estimadas por semana en RZ-PRU (sin formatos)
+  formatos?: DefFormato[];
+  magnumDe?: string; // mágnum que puede pasar a ser formato del vino en botella del mismo nombre
 }
 
 // [clave, nombre, familia, unidad, caja, coste, iva, proveedor, alérgenos]
@@ -378,20 +395,108 @@ function ventasVino(v: VinoCarta, precio: number): number {
   const base = v.formato === "magnum" ? 0.4 : precio <= 30 ? 6 : precio <= 40 ? 3.5 : precio <= 60 ? 1.6 : precio <= 100 ? 0.7 : precio <= 200 ? 0.25 : 0.08;
   return r2(base * f);
 }
-/** Parte de botella que lleva una copa de la carta de copas. */
+/** Parte de botella que lleva una copa de la carta de copas (generosos 7,5 cl de 75; Oremus 6 cl de 50). */
 const copaDe = (v: VinoCarta) => (/oremo/i.test(v.nombre) ? 0.12 : 0.1);
+/** Copa de 15 cl de una botella de 75 cl. */
+const COPA_15 = 0.2;
+/** Vinos en botella que además se venden por copa (inventado: los blancos, rosados y tintos de 30 € o menos). */
+const porCopaTambien = (v: VinoCarta) => v.formato === "botella" && (v.precio ?? 99) <= 30 && !/Espumosos|Proyecto/.test(v.seccion);
+const precioCopa = (botella: number) => Math.ceil(botella / 4.5 / 0.5) * 0.5;
 
+/** Lo que va en la descripción del plato: solo notas de la carta (lo demás está en la ficha de vino). */
 function descripcionVino(v: VinoCarta): string | null {
-  const partes: string[] = [];
-  if (v.do) partes.push(/^(Argentina|California|Bourgogne)$/.test(v.do) ? v.do : `D.O. ${v.do}`);
-  if (v.bodega) partes.push(v.bodega);
-  if (v.uva) partes.push(v.uva);
-  if (v.anada) partes.push(`Añada ${v.anada}`);
-  if (v.formato === "magnum") partes.push("Mágnum 1,5 l");
-  if (v.formato === "copa") partes.push("Por copa");
   const notas = (v as VinoCarta & { notas?: string | null }).notas;
-  if (notas && !/paréntesis/.test(notas)) partes.push(notas);
-  return partes.length ? partes.join(" · ") : null;
+  return notas && !/paréntesis|bajo demanda/i.test(notas) ? notas : null;
+}
+
+const MARIDAJE: Record<string, string> = {
+  TINTO: "Carnes rojas a la parrilla y maduradas",
+  BLANCO: "Entrantes, verduras, pescados y mariscos",
+  ROSADO: "Aperitivo, ensaladas y arroces",
+  ESPUMOSO: "Aperitivo, ibéricos, mariscos y celebraciones",
+  GENEROSO: "Jamón, gildas, almendras y aperitivo",
+  DULCE: "Postres de chocolate y quesos azules",
+};
+
+/** Ficha de vino a partir de la carta: tipo por sección, D.O. de la carta o de la sección, crianza por el nombre. */
+function fichaDe(v: VinoCarta) {
+  const tipo =
+    v.seccion === "Blancos" || /chardonnay/i.test(v.nombre)
+      ? "BLANCO"
+      : v.seccion === "Espumosos"
+        ? "ESPUMOSO"
+        : v.seccion === "Rosados"
+          ? "ROSADO"
+          : v.seccion.startsWith("Generosos")
+            ? "GENEROSO"
+            : v.seccion.startsWith("Vinos dulces")
+              ? "DULCE"
+              : "TINTO";
+  const porSeccion: Record<string, string> = { "Tintos Ribera del Duero": "Ribera del Duero", "Tintos Rioja": "Rioja", "Tintos Toro": "Toro" };
+  const porSubseccion: Record<string, string> = { "A.O.C. Champagne": "Champagne", "Corpinnat y cava": "Corpinnat y cava", Rueda: "Rueda", "Rías Baixas": "Rías Baixas" };
+  const crianza = /gran reserva/i.test(v.nombre) ? "Gran reserva" : /reserva/i.test(v.nombre) ? "Reserva" : /crianza/i.test(v.nombre) ? "Crianza" : /^(Manzanilla|Fino)/.test(v.nombre) ? "Biológica" : null;
+  const anada = v.anada ? Number(v.anada) : null;
+  return {
+    bodega: v.bodega,
+    denominacion: v.do ?? porSeccion[v.seccion] ?? (v.subseccion ? porSubseccion[v.subseccion] : undefined) ?? null,
+    uva: v.uva ?? (/chardonnay/i.test(v.nombre) ? "Chardonnay" : /verdejo/i.test(v.nombre) ? "Verdejo" : /cabernet franc/i.test(v.nombre) ? "Cabernet franc" : /pinot noir/i.test(v.nombre) ? "Pinot noir" : null),
+    anada: anada && Number.isInteger(anada) ? anada : null,
+    capacidadCl: v.formato === "magnum" ? 150 : /oremo/i.test(v.nombre) ? 50 : 75,
+    tipo: tipo as "TINTO" | "BLANCO" | "ROSADO" | "ESPUMOSO" | "GENEROSO" | "DULCE",
+    crianza,
+    notasCata: null,
+    maridaje: MARIDAJE[tipo],
+    argumentoVenta: /Proyecto 100/.test(v.seccion) ? "Vino de 100 puntos Parker: se pide al distribuidor con 48 h" : null,
+  };
+}
+
+/** Clave y referencia de cada vino de la carta (la misma regla en la carga y al completar una carga anterior). */
+function claveVino(v: VinoCarta) {
+  return `V:${v.nombre}${v.formato === "magnum" ? " (mágnum)" : ""}`;
+}
+function referenciaVino(v: VinoCarta, i: number, existentes: Map<string, unknown>) {
+  const ref = v.formato === "magnum" ? REUTILIZAR_MAGNUM[v.nombre] : REUTILIZAR[v.nombre];
+  return ref && existentes.has(ref) ? ref : `${PREFIJO.bebida}V${String(i + 1).padStart(3, "0")}`;
+}
+
+/** Nombres de las secciones de bebidas de la carta (para marcarlas como del área Bebidas). */
+function seccionesDeBebidas(ctx: ContextoPruebas): string[] {
+  return Array.from(new Set([...ctx.carta.bebidas.map((v) => (v.subseccion ? `${v.seccion} · ${v.subseccion}` : v.seccion)), ...ITEMS_OTROS.map((i) => i[0])]));
+}
+
+/**
+ * Completa, sin duplicar, lo que una carga anterior no tenía: la «Carta Raza Pruebas» pasa a ser del local
+ * RZ-PRU (y sus platos también), sus secciones de bebidas son del área Bebidas y cada vino tiene su ficha.
+ */
+async function completarCargaAnterior(prisma: PrismaClient, ctx: ContextoPruebas) {
+  const t = ctx.tenantId;
+  const local = ctx.centroPruebas;
+  const carta = await prisma.carta.findFirst({ where: { tenantId: t, marcaId: ctx.marcas.RAZA, nombre: "Carta Raza Pruebas" } });
+  if (carta) {
+    if (carta.centroId !== local) await prisma.carta.update({ where: { id: carta.id }, data: { centroId: local } });
+    const nombres = seccionesDeBebidas(ctx);
+    await prisma.cartaSeccion.updateMany({ where: { cartaId: carta.id, nombre: { in: nombres } }, data: { area: "BEBIDAS" } });
+    await prisma.cartaPlato.updateMany({ where: { tenantId: t, centroId: null, lineas: { some: { seccion: { cartaId: carta.id } } } }, data: { centroId: local } });
+    await prisma.cartaPlato.updateMany({ where: { tenantId: t, area: "COMIDAS", lineas: { some: { seccion: { cartaId: carta.id, nombre: { in: nombres } } } } }, data: { area: "BEBIDAS" } });
+  }
+  await sembrarFichasVino(prisma, ctx);
+}
+
+/** Ficha de vino de cada vino de la carta (si el producto ya la tiene, no se toca). */
+async function sembrarFichasVino(prisma: PrismaClient, ctx: ContextoPruebas) {
+  const t = ctx.tenantId;
+  const refsReusadas = [...Object.values(REUTILIZAR), ...Object.values(REUTILIZAR_MAGNUM)];
+  const existentes = new Map((await prisma.producto.findMany({ where: { tenantId: t, referencia: { in: refsReusadas } }, select: { referencia: true } })).map((p) => [p.referencia, p]));
+  const refs = ctx.carta.bebidas.map((v, i) => referenciaVino(v, i, existentes));
+  const ids = new Map((await prisma.producto.findMany({ where: { tenantId: t, referencia: { in: refs } }, select: { id: true, referencia: true } })).map((p) => [p.referencia, p.id]));
+  const vistos = new Set<string>();
+  const data = ctx.carta.bebidas.flatMap((v, i) => {
+    const productoId = ids.get(refs[i]);
+    if (!productoId || vistos.has(productoId)) return [];
+    vistos.add(productoId);
+    return [{ tenantId: t, productoId, ...fichaDe(v) }];
+  });
+  await prisma.fichaVino.createMany({ data, skipDuplicates: true });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -817,7 +922,8 @@ export async function sembrar(prisma: PrismaClient, ctx: ContextoPruebas) {
   const ob = ctx.centros.OB;
   if (!ob) throw new Error("No existe el obrador (OB): carga antes la semilla general");
   if (await prisma.producto.findFirst({ where: { tenantId: t, referencia: { startsWith: `${PREFIJO.bebida}V` } }, select: { id: true } })) {
-    console.log("Bebidas de Raza Pruebas ya cargadas: no se repiten");
+    await completarCargaAnterior(prisma, ctx);
+    console.log("Bebidas de Raza Pruebas ya cargadas: no se repiten (solo se completan carta del local, áreas y fichas de vino)");
     return;
   }
 
@@ -846,10 +952,9 @@ export async function sembrar(prisma: PrismaClient, ctx: ContextoPruebas) {
   const defs: DefProducto[] = [];
   const items: DefItem[] = [];
   ctx.carta.bebidas.forEach((v, i) => {
-    const clave = `V:${v.nombre}${v.formato === "magnum" ? " (mágnum)" : ""}`;
+    const clave = claveVino(v);
     const precioBotella = v.precio ?? (v.precio_copa ? r2(v.precio_copa / copaDe(v)) : 30);
-    const ref = v.formato === "magnum" ? REUTILIZAR_MAGNUM[v.nombre] : REUTILIZAR[v.nombre];
-    const reusado = ref ? existentes.get(ref) : undefined;
+    const reusado = existentes.get(referenciaVino(v, i, existentes));
     const coste = reusado ? Number(reusado.costeUnitario) : r2(precioBotella * (0.3 + 0.1 * hash01(`coste|${v.nombre}`)));
     const bajoDemanda = /Proyecto 100/.test(v.seccion);
     const nombre = v.formato === "magnum" ? `${v.nombre} mágnum 1,5 l` : /oremo/i.test(v.nombre) ? `${v.nombre} 50 cl` : v.nombre;
@@ -871,17 +976,37 @@ export async function sembrar(prisma: PrismaClient, ctx: ContextoPruebas) {
     });
     const claveProducto = defs[defs.length - 1].clave;
     const seccion = v.subseccion ? `${v.seccion} · ${v.subseccion}` : v.seccion;
+    const ventas = ventasVino(v, precioBotella);
+    // Una bebida por vino; el escandallo es la botella entera y cada formato dice qué parte se vende
+    const formatos: DefFormato[] =
+      v.formato === "copa"
+        ? [{ nombre: "Copa", precio: v.precio_copa ?? 0, cantidad: copaDe(v), servPorSemana: ventas }]
+        : v.formato === "magnum"
+          ? [{ nombre: "Mágnum", precio: v.precio ?? 0, cantidad: 1, servPorSemana: ventas }]
+          : [
+              { nombre: "Botella", precio: v.precio ?? 0, cantidad: 1, servPorSemana: ventas },
+              ...(porCopaTambien(v) ? [{ nombre: "Copa", precio: precioCopa(v.precio ?? 0), cantidad: COPA_15, servPorSemana: 10 }] : []),
+            ];
     items.push({
       seccion,
-      nombre: v.formato === "magnum" ? `${v.nombre} (mágnum)` : v.nombre,
+      nombre: v.nombre,
       descripcion: descripcionVino(v),
-      precio: v.formato === "copa" ? (v.precio_copa ?? 0) : (v.precio ?? 0),
-      ingredientes: [[claveProducto, v.formato === "copa" ? copaDe(v) : 1]],
+      precio: formatos[0].precio,
+      ingredientes: [[claveProducto, 1]],
       alergenos: ["SULFITOS"],
       etiquetas: bajoDemanda ? ["bajo demanda"] : [],
-      servPorSemana: ventasVino(v, precioBotella),
+      servPorSemana: 0,
+      formatos,
+      magnumDe: v.formato === "magnum" ? v.nombre : undefined,
     });
   });
+  // El mágnum de un vino que también está en botella (Malleolus, Mauro) es un formato de esa bebida, no otra
+  for (const m of items.filter((x) => x.magnumDe)) {
+    const botella = items.find((x) => !x.magnumDe && x.nombre === m.magnumDe && x.formatos?.some((f) => f.nombre === "Botella"));
+    if (!botella) continue;
+    botella.formatos!.push({ nombre: "Mágnum", precio: m.precio, cantidad: 1, clave: m.ingredientes[0][0], servPorSemana: m.formatos![0].servPorSemana });
+    items.splice(items.indexOf(m), 1);
+  }
   for (const [clave, nombre, familia, unidad, caja, coste, iva, proveedor, alergenos] of OTRAS) {
     const origen: Origen = proveedor === P_LICORES ? "OB" : "LOCAL";
     defs.push({ clave, referencia: `${PREFIJO.bebida}B${clave}`, nombre, familia, unidad, caja, coste, iva, proveedor, origen, alergenos });
@@ -893,9 +1018,15 @@ export async function sembrar(prisma: PrismaClient, ctx: ContextoPruebas) {
   }
   for (const [seccion, nombre, descripcion, precio, ingredientes, alergenos, etiquetas, serv] of ITEMS_OTROS) items.push({ seccion, nombre, descripcion, precio, ingredientes, alergenos, etiquetas, servPorSemana: serv });
 
+  // lo que se vende de verdad: cada formato con su parte del escandallo (o su producto propio)
+  const itemsSim = items.flatMap((it) =>
+    it.formatos
+      ? it.formatos.map((f) => ({ ingredientes: (f.clave ? [[f.clave, f.cantidad]] : it.ingredientes.map(([c, q]) => [c, r4(q * f.cantidad)])) as [string, number][], servPorSemana: f.servPorSemana }))
+      : [{ ingredientes: it.ingredientes, servPorSemana: it.servPorSemana }],
+  );
   // demanda semanal de cada producto en RZ-PRU (ventas × escandallo)
   const demanda = new Map<string, number>();
-  for (const it of items) for (const [clave, q] of it.ingredientes) demanda.set(clave, (demanda.get(clave) ?? 0) + it.servPorSemana * q);
+  for (const it of itemsSim) for (const [clave, q] of it.ingredientes) demanda.set(clave, (demanda.get(clave) ?? 0) + it.servPorSemana * q);
 
   // --- Alta de productos nuevos y ajustes de los reutilizados ---
   const nuevos = defs.filter((d) => !d.reutiliza);
@@ -1004,7 +1135,6 @@ export async function sembrar(prisma: PrismaClient, ctx: ContextoPruebas) {
   const todosOBContables = todosOB.filter((p) => !sinOB.has(p.id));
 
   // --- Simulación en dos pasadas: contar documentos, reservar números, generar ---
-  const itemsSim = items.map((it) => ({ ingredientes: it.ingredientes, servPorSemana: it.servPorSemana }));
   const conteo = new Numerador();
   simular(t, ob, local, sims, itemsSim, stockInicial, todosOBContables, proveedores, usuarios, ctx.hoy, conteo);
   const numerador = new Numerador();
@@ -1033,13 +1163,17 @@ export async function sembrar(prisma: PrismaClient, ctx: ContextoPruebas) {
     if (nuevo !== undefined && Math.abs(nuevo - s.coste) > 0.00005) await prisma.producto.update({ where: { id: s.id }, data: { costeUnitario: nuevo } });
   }
 
-  // --- Carta de bebidas («Carta Raza Pruebas», marca Raza) ---
+  // --- Fichas de vino ---
+  await sembrarFichasVino(prisma, ctx);
+
+  // --- Carta de bebidas («Carta Raza Pruebas», marca Raza, solo del local RZ-PRU) ---
   const marcaId = ctx.marcas.RAZA;
   let carta = await prisma.carta.findFirst({ where: { tenantId: t, marcaId, nombre: "Carta Raza Pruebas" } });
-  if (!carta) carta = await prisma.carta.create({ data: { tenantId: t, marcaId, nombre: "Carta Raza Pruebas", tipo: "PERMANENTE" } });
+  if (!carta) carta = await prisma.carta.create({ data: { tenantId: t, marcaId, centroId: local, nombre: "Carta Raza Pruebas", tipo: "PERMANENTE" } });
+  else if (carta.centroId !== local) carta = await prisma.carta.update({ where: { id: carta.id }, data: { centroId: local } });
   const ordenSeccion = (await prisma.cartaSeccion.aggregate({ where: { cartaId: carta.id }, _max: { orden: true } }))._max.orden ?? 0;
   const nombresSeccion = Array.from(new Set(items.map((i) => i.seccion)));
-  const secciones = nombresSeccion.map((nombre, i) => ({ id: randomUUID(), cartaId: carta!.id, nombre, orden: ordenSeccion + 1 + i }));
+  const secciones = nombresSeccion.map((nombre, i) => ({ id: randomUUID(), cartaId: carta!.id, area: "BEBIDAS" as const, nombre, orden: ordenSeccion + 1 + i }));
   const idSeccion = new Map(secciones.map((s) => [s.nombre, s.id]));
   const idProducto = new Map(defs.map((d) => [d.clave, idPorRef.get(d.referencia)!.id]));
   const platos = items.map((it) => ({ id: randomUUID(), it }));
@@ -1049,6 +1183,8 @@ export async function sembrar(prisma: PrismaClient, ctx: ContextoPruebas) {
       id,
       tenantId: t,
       marcaId,
+      centroId: local,
+      area: "BEBIDAS" as const,
       nombre: it.nombre,
       descripcion: it.descripcion,
       precio: it.precio,
@@ -1061,6 +1197,11 @@ export async function sembrar(prisma: PrismaClient, ctx: ContextoPruebas) {
   });
   await prisma.cartaPlatoIngrediente.createMany({
     data: platos.flatMap(({ id, it }) => it.ingredientes.map(([clave, cantidad], i) => ({ platoId: id, productoId: idProducto.get(clave)!, cantidad, mermaPct: 0, orden: i + 1 }))),
+  });
+  await prisma.cartaPlatoFormato.createMany({
+    data: platos.flatMap(({ id, it }) =>
+      (it.formatos ?? []).map((f, i) => ({ platoId: id, nombre: f.nombre, precio: f.precio, cantidad: f.cantidad, productoId: f.clave ? idProducto.get(f.clave)! : null, orden: i + 1 })),
+    ),
   });
   const ordenEn = new Map<string, number>();
   await prisma.cartaLinea.createMany({
@@ -1076,6 +1217,7 @@ export async function sembrar(prisma: PrismaClient, ctx: ContextoPruebas) {
     reutilizados: defs.filter((d) => d.reutiliza).length,
     productosNuevos: nuevos.length,
     platosCarta: platos.length,
+    formatos: platos.reduce((s, p) => s + (p.it.formatos?.length ?? 0), 0),
     pedidosInternos: r.pedidos.length,
     compras: r.compras.length,
     inventarios: r.inventarios.length,
