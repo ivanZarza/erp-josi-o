@@ -10,6 +10,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient as PrismaNode, Prisma } from "../src/generated/prisma-node/client";
 import type { PrismaClient } from "../src/generated/prisma/client";
 import { SEMILLAS_MODULOS } from "./semillas";
+import { sembrarPruebasRaza } from "./semillas/pruebas-raza";
 
 // Los scripts usan el cliente en modo Node; se presenta con el tipo del cliente de la app
 const prisma = new PrismaNode({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }) }) as unknown as PrismaClient;
@@ -229,6 +230,8 @@ async function main() {
     await sembrar(prisma, contexto);
     console.log(`Semilla del módulo ${nombre}: hecha`);
   }
+  // Local de pruebas con la carta real de Raza (prisma/semillas/pruebas-raza)
+  await sembrarPruebasRaza(prisma, contexto);
   console.log("Semilla cargada: Grupo Raza (16 locales + obrador, 103 bebidas) y Cafeterías Ejemplo.");
 }
 
