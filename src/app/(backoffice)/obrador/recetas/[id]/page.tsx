@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { exigir } from "@/kernel/contexto";
-import { euros, numero } from "@/kernel/formato";
+import { euros, numero, numeroCampo } from "@/kernel/formato";
 import { AreaTexto, Boton, BotonEnlace, Cabecera, Campo, Cifra, Entrada, Etiqueta, Rejilla, Selector, Tabla, Tarjeta } from "@/ui";
 import { ALERGENOS, nombreAlergeno } from "@/modulos/comidas/carta-alergenos";
 import { catalogoParaRecetas, fichaReceta } from "@/modulos/obrador/servicio";
@@ -80,8 +80,8 @@ export default async function FichaReceta({ params, searchParams }: { params: Pr
                       <form action={actualizarLineaReceta} className="flex items-center gap-2">
                         <input type="hidden" name="id" value={l.id} />
                         <input type="hidden" name="volver" value={volver} />
-                        <Entrada name="cantidad" defaultValue={String(l.cantidad)} inputMode="decimal" className="w-24" aria-label="Cantidad neta" />
-                        <Entrada name="mermaPct" defaultValue={String(l.mermaPct)} inputMode="decimal" className="w-16" aria-label="Merma %" />
+                        <Entrada name="cantidad" defaultValue={numeroCampo(l.cantidad)} inputMode="decimal" className="w-24" aria-label="Cantidad neta" />
+                        <Entrada name="mermaPct" defaultValue={numeroCampo(l.mermaPct)} inputMode="decimal" className="w-16" aria-label="Merma %" />
                         <Boton type="submit" variante="secundario">
                           Guardar
                         </Boton>
@@ -153,10 +153,10 @@ export default async function FichaReceta({ params, searchParams }: { params: Pr
             </Campo>
             <div className="grid grid-cols-2 gap-3">
               <Campo etiqueta={`Rendimiento (${unidad(r.unidad)})`}>
-                <Entrada name="rendimiento" defaultValue={String(r.rendimiento)} inputMode="decimal" required disabled={!puedeEditar} />
+                <Entrada name="rendimiento" defaultValue={numeroCampo(r.rendimiento)} inputMode="decimal" required disabled={!puedeEditar} />
               </Campo>
               <Campo etiqueta="Vida útil (días)">
-                <Entrada name="vidaUtilDias" defaultValue={String(r.vidaUtilDias)} inputMode="numeric" required disabled={!puedeEditar} />
+                <Entrada name="vidaUtilDias" defaultValue={numeroCampo(r.vidaUtilDias)} inputMode="numeric" required disabled={!puedeEditar} />
               </Campo>
             </div>
             <div className="grid grid-cols-2 gap-3">
@@ -164,7 +164,7 @@ export default async function FichaReceta({ params, searchParams }: { params: Pr
                 <Entrada name="conservacion" defaultValue={r.conservacion ?? ""} disabled={!puedeEditar} />
               </Campo>
               <Campo etiqueta="Tiempo (min)">
-                <Entrada name="tiempoMinutos" defaultValue={r.tiempoMinutos ? String(r.tiempoMinutos) : ""} inputMode="numeric" disabled={!puedeEditar} />
+                <Entrada name="tiempoMinutos" defaultValue={numeroCampo(r.tiempoMinutos)} inputMode="numeric" disabled={!puedeEditar} />
               </Campo>
             </div>
             <Campo etiqueta="Pasos">

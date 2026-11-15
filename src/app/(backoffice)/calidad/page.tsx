@@ -10,12 +10,13 @@ export default async function TareasDeHoy({ searchParams }: { searchParams: Busq
   const ctx = await exigir("calidad", "calidad:ver");
   const sp = await searchParams;
   const puedeRegistrar = ctx.puede("calidad:registrar");
-  const [{ hoy, filas }, historial] = await Promise.all([tareasDeHoy(ctx), historialListas(ctx, 7)]);
+  const [{ hoy, cortes, filas }, historial] = await Promise.all([tareasDeHoy(ctx), historialListas(ctx, 7)]);
+  const corte = cortes.length === 1 ? `la jornada acaba a las ${cortes[0]}` : "cada centro cierra la jornada a su hora de corte";
   const pendientes = filas.filter((f) => !f.ejecucion).length;
 
   return (
     <>
-      <Cabecera titulo="Calidad · tareas de hoy" subtitulo={`Listas de comprobación APPCC de la jornada del ${fecha(hoy)} (la jornada acaba a las 05:00).`} />
+      <Cabecera titulo="Calidad · tareas de hoy" subtitulo={hoy ? `Listas de comprobación APPCC de la jornada del ${fecha(hoy)} (${corte}).` : `Listas de comprobación APPCC de la jornada en curso de cada centro (${corte}).`} />
       <Mensajes sp={sp} />
       <Indicadores ctx={ctx} pendientesHoy={pendientes} />
 
@@ -27,7 +28,7 @@ export default async function TareasDeHoy({ searchParams }: { searchParams: Busq
           id: f.clave,
           tono: f.ejecucion && !f.ejecucion.todoCorrecto ? ("error" as const) : undefined,
           celdas: [
-            f.centro,
+            hoy ? f.centro : `${f.centro} · jornada del ${fecha(f.jornada)}`,
             f.plantilla.nombre,
             TIPOS_LISTA[f.plantilla.tipo],
             numero(f.plantilla.puntos.length),

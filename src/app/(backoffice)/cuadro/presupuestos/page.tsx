@@ -1,13 +1,13 @@
 import { exigir } from "@/kernel/contexto";
-import { euros, numero } from "@/kernel/formato";
+import { euros, numero, numeroCampo } from "@/kernel/formato";
 import { Cabecera, Boton, BotonEnlace, Campo, Entrada, AreaTexto, Etiqueta } from "@/ui";
 import { TablaDesplegable, DatosDetalle } from "@/ui/tabla-desplegable";
 import { presupuestosMes, mesValido, nombreMes, mesDesplazado, redondear } from "@/modulos/cuadro/servicio";
 import { accionGuardarPresupuesto, accionCopiarPresupuesto } from "@/modulos/cuadro/acciones";
 import { Avisos, param, type ParametrosBusqueda } from "../_comun";
 
-const formatoCampo = new Intl.NumberFormat("es-ES", { maximumFractionDigits: 2, useGrouping: false });
-const campo = (v: { toString(): string } | null | undefined) => (v === null || v === undefined ? "" : formatoCampo.format(Number(v.toString())));
+/** Valor de la casilla: «12500,5», sin separador de miles (numeroCampo del núcleo). */
+const campo = (v: { toString(): string } | null | undefined) => numeroCampo(v);
 
 export default async function Presupuestos({ searchParams }: { searchParams: ParametrosBusqueda }) {
   const ctx = await exigir("cuadro", "cuadro:ver");

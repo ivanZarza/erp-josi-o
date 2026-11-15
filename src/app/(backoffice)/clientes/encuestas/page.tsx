@@ -5,7 +5,7 @@ import { Cabecera, Cifra, Rejilla, Boton, BotonEnlace, Entrada, Selector, Etique
 import { TablaDesplegable, DatosDetalle } from "@/ui/tabla-desplegable";
 import { listarEncuestas, NOTA_AVISO, NOTA_RESENA } from "@/modulos/clientes/servicio";
 import { responderEncuestaAccion, gestionarEncuestaAccion } from "@/modulos/clientes/acciones";
-import { AvisosUrl, PestanasClientes, Estrellas, param, type Busqueda } from "@/modulos/clientes/ui";
+import { AvisosUrl, PestanasClientes, Estrellas, param, tonoNota, type Busqueda } from "@/modulos/clientes/ui";
 
 const ESTADOS = { PENDIENTE: "Sin respuesta", RESPONDIDA: "Respondida", GESTIONADA: "Gestionada" } as const;
 
@@ -26,7 +26,7 @@ export default async function Encuestas({ searchParams }: { searchParams: Busque
       <AvisosUrl sp={sp} />
       <div className="mb-6">
         <Rejilla columnas={4}>
-          <Cifra etiqueta="Nota media" valor={media === null ? "—" : `${numero(media, 1)} / 5`} detalle={`${numero(respuestas)} respuestas`} tono={media === null ? "normal" : media >= 4 ? "ok" : media <= 2.5 ? "error" : "aviso"} />
+          <Cifra etiqueta="Nota media" valor={media === null ? "—" : `${numero(media, 1)} / 5`} detalle={`${numero(respuestas)} respuestas`} tono={tonoNota(media)} />
           <Cifra etiqueta="Sin respuesta" valor={numero(encuestas.filter((e) => e.estado === "PENDIENTE").length)} href="/clientes/encuestas?estado=PENDIENTE" />
           <Cifra etiqueta="Notas bajas por atender" valor={numero(bajasSinGestionar)} tono={bajasSinGestionar ? "error" : "ok"} href="/clientes/encuestas?estado=RESPONDIDA" />
           <Cifra etiqueta="Invitados a reseña" valor={numero(invitaciones)} />

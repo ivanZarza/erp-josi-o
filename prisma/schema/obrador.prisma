@@ -123,6 +123,9 @@ model ObradorTarifa {
   modo           ModoTarifaObrador @default(COSTE_MAS_PORCENTAJE)
   porcentaje     Decimal?          @db.Decimal(6, 2)
   precioFijo     Decimal?          @db.Decimal(12, 4)
+  /// Último precio que escribió el obrador en ProductoCentro.precioVenta. Si al recalcular el precio
+  /// del local ya no es este, alguien lo cambió a mano (Stock): se respeta y la tarifa pasa a precio fijo.
+  precioAplicado Decimal?          @db.Decimal(12, 4)
   actualizadoPor String?
   createdAt      DateTime          @default(now())
   updatedAt      DateTime          @updatedAt

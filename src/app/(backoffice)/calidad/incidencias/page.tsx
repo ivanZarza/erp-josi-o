@@ -2,7 +2,7 @@ import { exigir, centrosFiltro } from "@/kernel/contexto";
 import { fecha, fechaHora } from "@/kernel/formato";
 import { AreaTexto, Boton, Cabecera, Campo, Entrada, Etiqueta, Pestanas, Selector, Tarjeta } from "@/ui";
 import { DatosDetalle, TablaDesplegable } from "@/ui/tabla-desplegable";
-import { listarIncidencias, responsablesPosibles } from "@/modulos/calidad/servicio";
+import { listarIncidencias, responsablesPosibles, veCentro } from "@/modulos/calidad/servicio";
 import { crearIncidencia, gestionarIncidencia } from "@/modulos/calidad/acciones";
 import { ESTADOS_INCIDENCIA, Indicadores, Mensajes, param, TIPOS_INCIDENCIA, type Busqueda } from "../_comun";
 
@@ -17,6 +17,9 @@ export default async function Incidencias({ searchParams }: { searchParams: Busq
   const puedeGestionar = ctx.puede("calidad:incidencias:gestionar");
   const volver = "/calidad/incidencias";
   const centros = ctx.centros.filter((c) => centrosFiltro(ctx).includes(c.id));
+  // Responsables: solo quien ve el centro de la incidencia
+  const usuariosDe = (centroId: string) => usuarios.filter((u) => veCentro(u, centroId));
+  const centroNueva = centros.length === 1 ? centros[0].id : null;
 
   return (
     <>
@@ -69,7 +72,7 @@ export default async function Incidencias({ searchParams }: { searchParams: Busq
                 ]}
               />
               {i.descripcion && <p className="whitespace-pre-line text-sm text-slate-700">{i.descripcion}</p>}
-              {puedeGestionar ? (
+              {puedeGestionar && (i.estado === "ABIERTA" || i.estado === "EN_CURSO") ? (
                 <form action={gestionarIncidencia} className="grid grid-cols-1 items-end gap-3 md:grid-cols-4">
                   <input type="hidden" name="id" value={i.id} />
                   <input type="hidden" name="volver" value={volver} />
@@ -92,7 +95,7 @@ export default async function Incidencias({ searchParams }: { searchParams: Busq
                   <Campo etiqueta="Responsable">
                     <Selector name="responsableId" defaultValue={i.responsableId ?? ""}>
                       <option value="">Sin asignar</option>
-                      {usuarios.map((u) => (
+                      {usuariosDe(i.centroId).map((u) => (
                         <option key={u.id} value={u.id}>
                           {u.nombre}
                         </option>
@@ -103,14 +106,14 @@ export default async function Incidencias({ searchParams }: { searchParams: Busq
                     <Entrada type="date" name="plazo" defaultValue={i.plazo ? i.plazo.toISOString().slice(0, 10) : ""} />
                   </Campo>
                   <div className="md:col-span-3">
-                    <Campo etiqueta="Solución">
-                      <AreaTexto name="solucion" rows={2} defaultValue={i.solucion ?? ""} placeholder="Qué se ha hecho para resolverla" />
+                    <Campo etiqueta="Solución o motivo" ayuda="Obligatoria para dar por resuelta (qué se ha hecho) o para anular (por qué)">
+                      <AreaTexto name="solucion" rows={2} defaultValue={i.solucion ?? ""} placeholder="Qué se ha hecho para resolverla, o por qué se anula" />
                     </Campo>
                   </div>
                   <Boton type="submit">Guardar</Boton>
                 </form>
               ) : (
-                i.solucion && <p className="text-sm">Solución: {i.solucion}</p>
+                i.solucion && <p className="text-sm">{i.estado === "ANULADA" ? "Motivo de la anulación" : "Solución"}: {i.solucion}</p>
               )}
             </div>
           ),
@@ -159,7 +162,7 @@ export default async function Incidencias({ searchParams }: { searchParams: Busq
               <Campo etiqueta="Responsable">
                 <Selector name="responsableId" defaultValue="">
                   <option value="">Sin asignar</option>
-                  {usuarios.map((u) => (
+                  {(centroNueva ? usuariosDe(centroNueva) : usuarios).map((u) => (
                     <option key={u.id} value={u.id}>
                       {u.nombre}
                     </option>

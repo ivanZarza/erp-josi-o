@@ -75,9 +75,9 @@ export const AYUDA_BEBIDAS: AyudaArea = {
           },
           {
             nombre: "Referencias",
-            queEs: "Cuántos productos distintos se controlan en esos centros. Debajo, las unidades totales.",
+            queEs: "Cuántos productos distintos se controlan en esos centros. Debajo, cuánto hay en total por unidad (por ejemplo «812 botellas · 40 latas · 12 litros»).",
             logica:
-              "Cuenta los productos que tienen stock o mínimo en algún centro (en obradores y almacenes cuentan todos). Los desactivados solo cuentan si aún tienen stock. Las unidades suman solo los totales positivos.",
+              "Cuenta los productos que tienen stock o mínimo en algún centro (en obradores y almacenes cuentan todos). Los desactivados solo cuentan si aún tienen stock. Debajo se suman solo los totales positivos y cada unidad por separado (no se suman botellas con litros); salen las tres unidades con más cantidad.",
           },
           {
             nombre: "Bajo mínimo",
@@ -104,13 +104,13 @@ export const AYUDA_BEBIDAS: AyudaArea = {
           {
             nombre: "Compras por recibir",
             queEs: "Compras a proveedor enviadas y todavía sin recibir del todo.",
-            logica: "Cuenta las compras «Enviada · por recibir» y «Recibida en parte». Al pulsarla se abre el listado filtrado solo por «Enviadas, por recibir».",
+            logica: "Cuenta las compras «Enviada · por recibir» y «Recibida en parte». Al pulsarla se abre el listado de compras filtrado por «Por recibir», que enseña esas mismas dos.",
           },
           {
             nombre: "Inventarios abiertos",
             queEs: "Inventarios sin cerrar: los que se están contando y los pendientes de aprobación.",
             logica:
-              "Si hay alguno pendiente de aprobación, debajo lo dice y la cifra sale en ámbar. Si no, debajo sale el número de movimientos de stock de los últimos 7 días (es un dato aparte, no de inventarios).",
+              "Debajo, cuántos se están contando y cuántos esperan aprobación (o «ninguno sin cerrar»). Si hay alguno pendiente de aprobación, la cifra sale en ámbar. Los cancelados no cuentan.",
           },
         ],
       },
@@ -184,7 +184,7 @@ export const AYUDA_BEBIDAS: AyudaArea = {
         titulo: "Cifras de arriba",
         campos: [
           { nombre: "Valor", queEs: "Lo que vale lo que sale en la tabla (con los filtros puestos).", logica: "Suma de stock × coste medio de cada producto." },
-          { nombre: "Referencias", queEs: "Número de productos de la tabla. Debajo, las unidades (solo suma totales positivos)." },
+          { nombre: "Referencias", queEs: "Número de productos de la tabla. Debajo, cuánto hay por unidad (botellas, latas, litros…, cada una por separado; solo totales positivos)." },
           { nombre: "Bajo mínimo", queEs: "Productos de la tabla con menos de su mínimo en algún centro." },
           { nombre: "Sin stock", queEs: "Productos de la tabla con 0 o menos en algún centro donde se controlan." },
         ],
@@ -330,7 +330,7 @@ export const AYUDA_BEBIDAS: AyudaArea = {
           {
             nombre: "Importe",
             queEs: "Lo que vale el pedido a precio de tarifa.",
-            logica: "Antes de servir: cantidad pedida × precio. Servido o recibido: cantidad servida × precio. El precio es la tarifa del obrador para ese local o, si no hay, el coste medio.",
+            logica: "Antes de servir: cantidad pedida × precio. Servido: cantidad servida × precio. Recibido: lo servido más lo que llegó de más (lo que faltó sigue contando: salió del obrador). El precio es la tarifa del obrador para ese local o, si no hay, el coste medio.",
           },
           { nombre: "Fecha", queEs: "Día en que se hizo." },
           {
@@ -380,7 +380,8 @@ export const AYUDA_BEBIDAS: AyudaArea = {
         campos: [
           {
             nombre: "Pedir a…",
-            queEs: "Obrador o almacén central al que se pide. Solo sale si la cadena tiene más de uno; si no, se usa el único.",
+            queEs: "Obrador o almacén central al que se pide. Solo sale si hay más de uno; si no, se usa el único.",
+            logica: "Salen los obradores y almacenes centrales abiertos que tienen activada el área de Bebidas (un obrador que solo hace comida no sale aquí).",
           },
           { nombre: "Cambiar", queEs: "Vuelve a cargar la lista con lo que hay en el centro elegido." },
         ],
@@ -430,7 +431,7 @@ export const AYUDA_BEBIDAS: AyudaArea = {
         titulo: "Datos del pedido",
         campos: [
           { nombre: "Estado", queEs: "Por servir, Servido · por confirmar, Recibido, Rechazado o Cancelado." },
-          { nombre: "Importe", queEs: "Antes de servir: pedido × precio. Después: servido × precio." },
+          { nombre: "Importe", queEs: "Antes de servir: pedido × precio. Servido: servido × precio. Recibido: lo servido más lo que llegó de más, × precio." },
           { nombre: "Albarán de salida", queEs: "Número ALB-S-… que se crea al servir." },
           { nombre: "Servido", queEs: "Fecha y hora en que se sirvió." },
           { nombre: "Notas", queEs: "Notas del local, motivo de rechazo y nota de la recepción." },
@@ -455,7 +456,7 @@ export const AYUDA_BEBIDAS: AyudaArea = {
             nombre: "Servir y hacer albarán",
             queEs: "Manda la mercancía: pone el pedido en «Servido · por confirmar» y crea el albarán ALB-S-….",
             logica:
-              "Por cada línea con cantidad crea dos movimientos: «Salida a local» (resta en el obrador) y «Entrada de pedido» (suma en el local), los dos valorados al coste medio. El importe del pedido se calcula con la tarifa. Si no queda nada que servir, no deja: hay que rechazarlo.",
+              "Por cada línea con cantidad crea dos movimientos: «Salida a local» (resta en el obrador) y «Entrada de pedido» (suma en el local), los dos valorados al coste medio del producto (uno solo para toda la cadena). El importe del pedido (la venta del obrador al local) se calcula con la tarifa; la tarifa no cambia el coste del producto en el local. Si no queda nada que servir, no deja: hay que rechazarlo.",
             influye:
               "Stock del obrador y del local; Cuadro de mando (la mercancía de cada centro: lo recibido suma y lo servido a otro centro resta) y aviso a Contabilidad para la venta del obrador entre sociedades.",
           },
@@ -471,13 +472,13 @@ export const AYUDA_BEBIDAS: AyudaArea = {
             nombre: "Recibido",
             queEs: "Lo que ha llegado de verdad. Viene puesto lo servido.",
             logica:
-              "Si cambias la cantidad, se crea una «Entrada de pedido» en el local por la diferencia (negativa si llegó menos, positiva si llegó más). El stock del obrador no se toca.",
+              "Si llega MENOS de lo servido, lo que falta se da de baja en el local como merma (movimiento «Merma» con el motivo «Falta al recibir…» y la nota): salió del obrador y no ha llegado, así la pérdida se ve en las mermas. Si llega MÁS, la diferencia sale también del obrador («Salida a local») y entra en el local («Entrada de pedido»): el obrador mandó más de lo apuntado. Todo al coste medio.",
           },
-          { nombre: "Nota sobre la recepción", queEs: "Por ejemplo «2 botellas rotas». Se guarda en las notas del pedido." },
+          { nombre: "Nota sobre la recepción", queEs: "Por ejemplo «2 botellas rotas». Se guarda en las notas del pedido y en el motivo de la merma o de la sobra." },
           {
             nombre: "Confirmar recepción",
             queEs: "Pone el pedido en «Recibido». Es el último paso; no se puede deshacer.",
-            influye: "Stock del local si hubo diferencias.",
+            influye: "Stock del local (y del obrador si llegó de más); mermas del local si faltó algo; importe del pedido si llegó de más.",
           },
         ],
       },
@@ -517,7 +518,12 @@ export const AYUDA_BEBIDAS: AyudaArea = {
     secciones: [
       {
         titulo: "Filtro",
-        campos: [{ nombre: "Estado", queEs: "Todas, Sin enviar, Enviadas por recibir, Recibidas en parte, Recibidas o Canceladas." }],
+        campos: [
+          {
+            nombre: "Estado",
+            queEs: "Todas, Por recibir (enviadas y recibidas en parte: lo que aún puede llegar), Sin enviar, Enviadas por recibir, Recibidas en parte, Recibidas o Canceladas.",
+          },
+        ],
       },
       {
         titulo: "Tabla",
@@ -526,7 +532,12 @@ export const AYUDA_BEBIDAS: AyudaArea = {
           { nombre: "Proveedor", queEs: "A quién se compra." },
           { nombre: "Recibe", queEs: "Centro donde se recibe la mercancía." },
           { nombre: "Líneas", queEs: "Productos distintos." },
-          { nombre: "Importe", queEs: "Valor de la compra.", logica: "Suma de cantidad pedida × precio de cada línea (el precio es el último apuntado: el del pedido o el del albarán si ya se recibió)." },
+          {
+            nombre: "Importe",
+            queEs: "Valor de la compra.",
+            logica:
+              "Sin recibir: cantidad pedida × precio de cada línea. Recibida (en parte o del todo): cantidad RECIBIDA × precio, donde el precio de la línea es el medio de lo recibido (si llegó en dos entregas a precios distintos, la media de las dos).",
+          },
           { nombre: "Fecha", queEs: "Día en que se preparó." },
           { nombre: "Estado", queEs: "Sin enviar, Enviada · por recibir, Recibida en parte, Recibida o Cancelada." },
         ],
@@ -543,7 +554,10 @@ export const AYUDA_BEBIDAS: AyudaArea = {
         ],
       },
     ],
-    logica: ["Salen las compras de los centros que ves (como mucho, las 200 más recientes).", "Recorrido: Sin enviar → Enviada · por recibir → Recibida en parte → Recibida. Se puede cancelar mientras no se ha recibido nada."],
+    logica: [
+      "Salen las compras de los centros que ves (como mucho, las 200 más recientes).",
+      "Recorrido: Sin enviar → Enviada · por recibir → Recibida en parte → Recibida. Se puede cancelar mientras no se ha recibido nada; una recibida en parte se cierra sin lo que falta desde su ficha.",
+    ],
     influye: [
       { texto: "Nueva compra", ruta: "/bebidas/compras/nueva" },
       { texto: "Las facturas de proveedor se cruzan con las compras recibidas", ruta: "/contabilidad/recibidas" },
@@ -580,7 +594,7 @@ export const AYUDA_BEBIDAS: AyudaArea = {
             nombre: "Rellenar con lo que está bajo mínimo",
             queEs: "Pone sola la cantidad de lo que en el centro que recibe está por debajo de su mínimo.",
             logica:
-              "Cantidad propuesta = máximo del centro − stock (o mínimo − stock si no hay máximo), redondeado hacia arriba. Mínimo: el del centro en Stock; si no hay, en obradores y almacenes el mínimo general del producto. Si no hay nada bajo mínimo, lo avisa.",
+              "Cantidad propuesta = máximo del centro − stock (o mínimo − stock si no hay máximo), redondeado hacia arriba a formatos de compra completos («Unidades por formato de compra» del producto: con cajas de 6, si faltan 7 se proponen 12). Mínimo: el del centro en Stock; si no hay, en obradores y almacenes el mínimo general del producto. Si no hay nada bajo mínimo, lo avisa.",
           },
           { nombre: "Cambiar proveedor", queEs: "Vuelve al paso 1." },
         ],
@@ -623,17 +637,24 @@ export const AYUDA_BEBIDAS: AyudaArea = {
         titulo: "Datos de la compra",
         campos: [
           { nombre: "Estado", queEs: "Sin enviar, Enviada · por recibir, Recibida en parte, Recibida o Cancelada." },
-          { nombre: "Importe", queEs: "Suma de cantidad pedida × precio de cada línea." },
+          {
+            nombre: "Importe / Importe recibido e Importe pedido",
+            queEs: "Sin recibir: lo pedido × precio. Ya recibida (en parte o del todo): «Importe recibido» = lo recibido × precio medio de lo recibido, e «Importe pedido» = lo pedido × ese precio.",
+          },
           { nombre: "Enviada", queEs: "Cuándo y por qué vía." },
           { nombre: "Albaranes de entrada", queEs: "ALB-E-… de cada recepción." },
           { nombre: "Contacto, Correo, Días de reparto, Pedido mínimo", queEs: "Datos del proveedor (se cambian en Proveedores)." },
-          { nombre: "Aviso de pedido mínimo", queEs: "Sale si el importe no llega al pedido mínimo del proveedor. Es solo un aviso: deja seguir." },
+          { nombre: "Aviso de pedido mínimo", queEs: "Sale mientras la compra no se ha recibido si el importe no llega al pedido mínimo del proveedor. Es solo un aviso: deja seguir." },
         ],
       },
       {
         titulo: "Enviar al proveedor (sin enviar o enviada)",
         campos: [
-          { nombre: "Texto del pedido", queEs: "Mensaje ya escrito: saludo al contacto, número de compra, centro, cada producto con cantidad y referencia, y las notas." },
+          {
+            nombre: "Texto del pedido",
+            queEs: "Mensaje ya escrito: saludo al contacto, número de compra, centro, cada producto con cantidad y referencia, y las notas.",
+            logica: "Si el producto tiene «Unidades por formato de compra» mayor que 1, al lado de la cantidad sale en formatos: 14 botellas con 6 por caja → «(2 × 6 + 2)».",
+          },
           {
             nombre: "Abrir WhatsApp con el pedido",
             queEs: "Abre WhatsApp con el mensaje escrito para el teléfono del proveedor. Hay que darle a enviar en WhatsApp.",
@@ -649,7 +670,7 @@ export const AYUDA_BEBIDAS: AyudaArea = {
       {
         titulo: "Recibir mercancía (enviada, sin enviar o recibida en parte)",
         campos: [
-          { nombre: "Pedido", queEs: "Lo que se pidió." },
+          { nombre: "Pedido", queEs: "Lo que se pidió (y en formatos de compra si el producto los tiene, por ejemplo «(2 × 6)»)." },
           { nombre: "Ya recibido", queEs: "Lo recibido en recepciones anteriores." },
           { nombre: "Llega ahora", queEs: "Lo que llega en esta entrega. Viene lo que falta; vacío o 0 = no ha llegado." },
           { nombre: "€/ud", queEs: "Precio real del albarán por unidad. Viene el precio de la compra." },
@@ -658,20 +679,35 @@ export const AYUDA_BEBIDAS: AyudaArea = {
             nombre: "Entra en",
             queEs: "Almacén del centro donde entra todo. «Cada producto en su almacén» = cada uno a su sitio. Solo sale si el centro tiene almacenes.",
           },
-          { nombre: "Cerrar la compra aunque falte algo", queEs: "Marca la compra como «Recibida» aunque no haya llegado todo." },
+          {
+            nombre: "Cerrar la compra aunque falte algo",
+            queEs: "Marca la compra como «Recibida» aunque no haya llegado todo: lo que falta ya no se espera.",
+            logica: "En una compra «Recibida en parte» sirve también sin que llegue nada en esta entrega (deja todo a 0 y marca la casilla).",
+          },
           {
             nombre: "Guardar recepción",
             queEs: "Suma al stock lo que ha llegado y crea el albarán de entrada ALB-E-….",
             logica:
-              "Cada producto recibido genera un movimiento «Entrada de compra» al precio del albarán. Coste medio nuevo = (stock de toda la cadena × coste actual + recibido × precio) ÷ (stock + recibido); si el stock era 0 o negativo, el coste nuevo es el precio de esta compra. Si falta algo y no marcas «Cerrar», queda «Recibida en parte» y se puede recibir otra vez. Hay que recibir al menos una unidad.",
+              "Cada producto recibido genera un movimiento «Entrada de compra» al precio del albarán. Coste medio nuevo = (stock de toda la cadena × coste actual + recibido × precio) ÷ (stock + recibido); si el stock era 0 o negativo, o el producto no tenía coste, el coste nuevo es el precio de esta compra. Si el coste cambia, se recalculan solas las tarifas del obrador «A coste» y «Coste + %» de ese producto. Solo cambia el precio de las líneas que reciben algo: su €/ud pasa a ser el precio medio de todo lo recibido de esa línea; las que no reciben nada conservan el suyo. Si falta algo y no marcas «Cerrar», queda «Recibida en parte» y se puede recibir otra vez. Hay que recibir al menos una unidad (salvo para cerrar una compra recibida en parte).",
             influye:
-              "Stock y valor del stock; coste medio del producto (y con él el coste de la carta, el % de coste de la Bodega, los mínimos valorados y los inventarios); Cuadro de mando (mercancía comprada) y cruce con la factura del proveedor en Contabilidad.",
+              "Stock y valor del stock; coste medio del producto (y con él el coste de la carta, el % de coste de la Bodega, los mínimos valorados y los inventarios); tarifas del obrador a los locales que van a coste; Cuadro de mando (mercancía comprada) y cruce con la factura del proveedor en Contabilidad.",
+          },
+        ],
+      },
+      {
+        titulo: "Cerrar la compra sin lo que falta (recibida en parte)",
+        campos: [
+          { nombre: "Motivo", queEs: "Opcional: por qué no va a llegar lo que falta. Se guarda en las notas de la compra." },
+          {
+            nombre: "Cerrar la compra sin lo que falta",
+            queEs: "Deja la compra «Recibida» con lo que ya llegó. No mueve stock ni cambia costes.",
+            logica: "Una compra recibida en parte no se puede cancelar (ya entró mercancía): se cierra así.",
           },
         ],
       },
       {
         titulo: "Líneas (compras recibidas o canceladas, o sin permiso de recibir)",
-        campos: [{ nombre: "Producto, Pedido, Recibido, €/ud, Importe", queEs: "Resumen de cada línea. Importe = pedido × precio." }],
+        campos: [{ nombre: "Producto, Pedido, Recibido, €/ud, Importe", queEs: "Resumen de cada línea. Importe = recibido × precio si la compra está recibida (en parte o del todo); si no, pedido × precio." }],
       },
       {
         titulo: "Cambiar la compra (sin enviar o enviada)",
@@ -707,9 +743,9 @@ export const AYUDA_BEBIDAS: AyudaArea = {
             nombre: "Qué se cuenta",
             queEs: "Un centro entero («todos los almacenes») o solo un almacén de un centro («solo Barra»).",
             logica:
-              "Al empezar se guarda lo que debería haber (stock teórico) y el coste medio de ese momento. En un local salen los productos con stock o con mínimo propio; en obrador y almacén, todos los activos. Si es de un almacén, salen los que tienen stock allí o lo tienen como su sitio. No puede haber dos inventarios sin cerrar del mismo almacén, ni uno del centro y otro de un almacén a la vez.",
+              "Al empezar se guarda lo que debería haber (stock teórico) y el coste medio de ese momento. En un local salen los productos con stock o con mínimo propio; en obrador y almacén, todos los activos. Si es de un almacén, salen los que tienen stock allí o lo tienen como su sitio. No puede haber dos inventarios sin cerrar del mismo almacén, ni uno del centro y otro de un almacén a la vez: si uno se quedó a medias, se cancela desde su ficha.",
           },
-          { nombre: "Nombre", queEs: "Viene «Semana N · año». Si es de un almacén, se le pone delante el nombre del almacén." },
+          { nombre: "Nombre", queEs: "Viene «Semana N · año» (semana de hoy en Madrid). Si es de un almacén, se le pone delante el nombre del almacén." },
           { nombre: "Empezar a contar", queEs: "Crea el inventario INV-… «Contando» y abre la pantalla de recuento." },
         ],
       },
@@ -721,17 +757,18 @@ export const AYUDA_BEBIDAS: AyudaArea = {
           { nombre: "Contadas", queEs: "Líneas contadas de todas las del inventario." },
           {
             nombre: "Diferencia",
-            queEs: "Lo que sobra (verde) o falta (rojo) en euros.",
-            logica: "Suma de (contado − teórico) × coste de las líneas contadas.",
+            queEs: "Lo que sobra (verde) o falta (rojo) en euros. Mientras se cuenta pone «a ciegas»; en uno cancelado, «—».",
+            logica: "Suma de (contado − teórico) × coste de las líneas contadas. Solo se enseña cuando el recuento ha terminado (pendiente de aprobación o cerrado), para que nadie cuente mirando el descuadre.",
           },
           { nombre: "Fecha", queEs: "Día en que se empezó." },
-          { nombre: "Estado", queEs: "Contando, Pendiente de aprobación o Cerrado." },
+          { nombre: "Estado", queEs: "Contando, Pendiente de aprobación, Cerrado o Cancelado." },
         ],
       },
       {
         titulo: "Detalle de la fila",
         campos: [
-          { nombre: "Número, Abierto, Cerrado", queEs: "Número INV-… y fechas." },
+          { nombre: "Número, Abierto, Cerrado (o Cancelado)", queEs: "Número INV-… y fechas." },
+          { nombre: "Diferencias", queEs: "Mientras se cuenta o si está cancelado, en vez de las cifras de abajo sale por qué no se ven." },
           { nombre: "Líneas con diferencia", queEs: "Productos contados que no cuadran." },
           { nombre: "Diferencia en unidades", queEs: "Suma con signo de lo que sobra y falta." },
           { nombre: "Diferencia en €", queEs: "Suma con signo: lo que sobra resta a lo que falta." },
@@ -752,7 +789,7 @@ export const AYUDA_BEBIDAS: AyudaArea = {
     area: AREA,
     paraQue: "Pantalla para contar desde el móvil, terminar el inventario y, si el descuadre es grande, aprobarlo o devolverlo a recuento.",
     quien:
-      "Verla: «Ver inventarios de bebida» y ver el centro. Contar y terminar: «Hacer inventarios de bebida». Ver las diferencias, aprobar y devolver a recuento: «Cerrar inventarios de bebida».",
+      "Verla: «Ver inventarios de bebida» y ver el centro. Contar, terminar y cancelar uno que se está contando: «Hacer inventarios de bebida». Ver las diferencias de uno pendiente, aprobar, devolver a recuento y cancelar uno pendiente: «Cerrar inventarios de bebida».",
     secciones: [
       {
         titulo: "Cabecera y avisos",
@@ -788,7 +825,7 @@ export const AYUDA_BEBIDAS: AyudaArea = {
         ],
       },
       {
-        titulo: "Cifras y diferencias (con permiso de cerrar, o cuando ya está cerrado)",
+        titulo: "Cifras y diferencias (pendiente de aprobación con permiso de cerrar, o ya cerrado)",
         campos: [
           { nombre: "Diferencia", queEs: "Suma con signo en euros de lo que sobra y falta." },
           { nombre: "Descuadre sin signo", queEs: "Suma de las diferencias en euros sin signo. En ámbar si pasa de 500 €." },
@@ -807,8 +844,23 @@ export const AYUDA_BEBIDAS: AyudaArea = {
           { nombre: "Devolver a recuento", queEs: "Lo vuelve a «Contando» para revisar las líneas con más diferencia. No mueve stock." },
         ],
       },
+      {
+        titulo: "Cancelar el inventario (contando o pendiente de aprobación)",
+        campos: [
+          { nombre: "Motivo", queEs: "Opcional: por qué se cancela (se empezó mal, hay que repetirlo…). Queda en el registro de cambios." },
+          {
+            nombre: "Cancelar sin ajustar el stock",
+            queEs: "Deja el inventario «Cancelado»: no crea ningún ajuste y deja empezar otro en ese centro o almacén. Lo contado se conserva para el historial.",
+            logica: "Contando: quien hace inventarios. Pendiente de aprobación: solo quien puede cerrarlos. No se puede deshacer.",
+          },
+        ],
+      },
     ],
-    logica: ["Un inventario cerrado no se puede reabrir ni anular.", "El teórico y el coste de cada línea se fijan al empezar el inventario."],
+    logica: [
+      "Es a ciegas: mientras se cuenta nadie ve el teórico ni las diferencias (tampoco quien puede cerrar). Se ven al terminar, si queda pendiente de aprobación, o ya cerrado.",
+      "Un inventario cerrado no se puede reabrir ni anular.",
+      "El teórico y el coste de cada línea se fijan al empezar el inventario.",
+    ],
     influye: [
       { texto: "Stock ajustado a lo contado", ruta: "/bebidas/stock" },
       { texto: "Movimientos de ajuste", ruta: "/bebidas/movimientos" },
@@ -827,10 +879,14 @@ export const AYUDA_BEBIDAS: AyudaArea = {
         campos: [
           {
             nombre: "Centro",
-            queEs: "Centro donde se traspasa. Solo salen centros con dos almacenes o más (y solo si hay más de uno).",
+            queEs: "Centro donde se traspasa. Solo salen centros con almacenes (y el selector solo si hay más de uno).",
             logica: "Viene propuesto el elegido arriba o el primer local.",
           },
-          { nombre: "De", queEs: "Almacén del que sale. Viene la Bodega si existe." },
+          {
+            nombre: "De",
+            queEs: "Almacén del que sale, o «Sin ubicar». Viene la Bodega si existe (en un centro con un solo almacén, «Sin ubicar»).",
+            logica: "«Sin ubicar» es el stock del centro que no está en ningún almacén (lo que entró antes de que el centro tuviera almacenes): así se coloca en su sitio.",
+          },
           { nombre: "A", queEs: "Almacén al que entra. Viene la Barra si existe." },
           { nombre: "Ver productos", queEs: "Carga la lista de lo que hay en el almacén de origen." },
         ],
@@ -887,7 +943,7 @@ export const AYUDA_BEBIDAS: AyudaArea = {
             queEs: "Deja un tipo: Entrada de compra, Salida a local, Entrada de pedido, Consumo en producción, Entrada de producción, Merma, Ajuste de inventario, Consumo del local, Venta en caja, Carga inicial o Traspaso entre almacenes.",
           },
           { nombre: "Todos los almacenes", queEs: "Deja un almacén por nombre, o «Sin ubicar»." },
-          { nombre: "Desde / Hasta", queEs: "Fechas, las dos incluidas." },
+          { nombre: "Desde / Hasta", queEs: "Fechas, las dos incluidas.", logica: "Días de Madrid: «desde» empieza a las 00:00 y «hasta» acaba a las 24:00, hora de Madrid (en verano y en invierno)." },
           { nombre: "Filtrar", queEs: "Aplica los filtros." },
           {
             nombre: "Solo un producto",
@@ -965,13 +1021,18 @@ export const AYUDA_BEBIDAS: AyudaArea = {
         titulo: "Detalle y formulario de cambio (al abrir la fila)",
         campos: [
           { nombre: "Unidad, Por formato de compra, IVA, Mínimo general", queEs: "Datos que no salen en la fila." },
+          { nombre: "Por qué no tiene coste", queEs: "Solo en los marcados «Sin coste»: el motivo guardado." },
           { nombre: "Referencia", queEs: "Obligatoria. No puede repetirse con otro producto." },
           { nombre: "Nombre", queEs: "Obligatorio (al menos 2 letras)." },
           { nombre: "Familia", queEs: "Grupo del producto.", influye: "Decide a qué almacén va si no se elige otro (vinos a la Bodega, cervezas y refrescos a la Barra) y si sale en la Bodega (familias de vino)." },
           { nombre: "O familia nueva", queEs: "Si la escribes, se crea (o se usa la que ya tenga ese nombre) y manda sobre la elegida." },
           { nombre: "Proveedor habitual", queEs: "A quién se compra normalmente.", influye: "En «Nueva compra» salen por defecto los productos de ese proveedor; en Stock y Resumen se enseña." },
           { nombre: "Unidad de stock", queEs: "Cómo se cuenta: botellas, unidades, litros, cajas, latas, barriles…", influye: "Todas las cantidades (stock, pedidos, compras, inventarios, escandallos) van en esta unidad." },
-          { nombre: "Unidades por formato de compra", queEs: "Por ejemplo, 6 botellas por caja. Mínimo 0,001.", logica: "Se guarda como dato del producto; hoy las compras se piden en la unidad de stock." },
+          {
+            nombre: "Unidades por formato de compra",
+            queEs: "Por ejemplo, 6 botellas por caja. Mínimo 0,001.",
+            logica: "Las compras se piden en la unidad de stock, pero «Rellenar con lo que está bajo mínimo» redondea hacia arriba a cajas completas (faltan 7 con cajas de 6 → 12) y el texto del pedido al proveedor dice cuántas cajas son («14 bot. (2 × 6 + 2)»).",
+          },
           {
             nombre: "Coste por unidad (€)",
             queEs: "Coste medio. Obligatorio salvo que se marque «Sin coste».",
@@ -981,7 +1042,11 @@ export const AYUDA_BEBIDAS: AyudaArea = {
           { nombre: "IVA", queEs: "0, 4, 10 o 21 %." },
           { nombre: "Mínimo general", queEs: "Mínimo en obradores y almacenes. En cada local se pone en Stock." },
           { nombre: "Código de barras", queEs: "Opcional; sirve para buscar." },
-          { nombre: "Sin coste (muestra, regalo…)", queEs: "Para productos que de verdad no cuestan nada. Hay que escribir el motivo cada vez que se guarda." },
+          {
+            nombre: "Sin coste (muestra, regalo…) y motivo",
+            queEs: "Para productos que de verdad no cuestan nada. El motivo es obligatorio y se guarda en el producto (sale en la casilla y en el detalle).",
+            logica: "Si se quita la marca, el motivo se borra. Al recibir una compra con precio, el producto deja de estar «sin coste» solo.",
+          },
           { nombre: "Guardar cambios", queEs: "Guarda el producto. Queda apuntado quién lo cambió y qué había antes." },
           {
             nombre: "Desactivar / Volver a activar",
@@ -1016,12 +1081,12 @@ export const AYUDA_BEBIDAS: AyudaArea = {
           { nombre: "O familia nueva", queEs: "Si la escribes, se crea y se usa en vez de la elegida." },
           { nombre: "Proveedor habitual", queEs: "Opcional." },
           { nombre: "Unidad de stock", queEs: "Viene «botellas»." },
-          { nombre: "Unidades por formato de compra", queEs: "Viene 1. Por ejemplo, 6 si se compra en cajas de 6." },
+          { nombre: "Unidades por formato de compra", queEs: "Viene 1. Por ejemplo, 6 si se compra en cajas de 6: la propuesta de compra pedirá cajas completas." },
           { nombre: "Coste por unidad (€)", queEs: "Obligatorio y no negativo, salvo «Sin coste». Después se recalcula solo con las compras." },
           { nombre: "IVA", queEs: "Viene 21 %." },
           { nombre: "Mínimo general", queEs: "Viene 0. Se aplica en obradores y almacenes." },
           { nombre: "Código de barras", queEs: "Opcional." },
-          { nombre: "Sin coste y motivo", queEs: "Si se marca, el motivo es obligatorio." },
+          { nombre: "Sin coste y motivo", queEs: "Si se marca, el motivo es obligatorio y queda guardado en el producto." },
           {
             nombre: "Dar de alta",
             queEs: "Crea el producto activo y vuelve a Productos.",
@@ -1109,8 +1174,12 @@ export const AYUDA_BEBIDAS: AyudaArea = {
         titulo: "Detalle de la fila",
         campos: [
           { nombre: "IVA", queEs: "IVA de la bebida." },
-          { nombre: "Objetivo de la marca", queEs: "% de coste máximo que quiere la marca (30 % si no se ha puesto). Se cambia en Cartas." },
-          { nombre: "Coste al último precio", queEs: "Coste del escandallo con el último precio de compra de cada ingrediente en vez del medio." },
+          { nombre: "Objetivo de la marca", queEs: "% de coste máximo de bebidas de la marca (si no tiene, el de sus comidas; si tampoco, 30 %). Se cambia en Cartas." },
+          {
+            nombre: "Coste al último precio",
+            queEs: "Coste con el último precio de entrada (compra, producción o carga) en vez del medio.",
+            logica: "Si el formato principal vende otro producto (mágnum…), es el último precio de ese producto, no el del escandallo.",
+          },
           { nombre: "Margen bruto", queEs: "Precio sin IVA − coste.", logica: "Usa el precio del local elegido si tiene uno propio." },
           { nombre: "Alérgenos declarados, Trazas, Del escandallo sin declarar", queEs: "Situación de los 14 alérgenos." },
           { nombre: "En cartas", queEs: "Cartas en las que está." },
@@ -1149,7 +1218,7 @@ export const AYUDA_BEBIDAS: AyudaArea = {
     area: AREA,
     paraQue: "Las cartas de cada marca o de cada local, con sus secciones de bebidas y las bebidas de cada sección. Aquí se crean cartas y secciones, se ponen y quitan bebidas y se fija el objetivo de coste de cada marca.",
     quien:
-      "Ver: «Ver la carta de bebidas…». Cambiar secciones y bebidas: «Editar la carta de bebidas…». Crear o cambiar cartas y el objetivo de la marca: permiso de editar la carta de Bebidas o la de Comidas.",
+      "Ver: «Ver la carta de bebidas…». Cambiar secciones, bebidas y el objetivo de coste de bebidas: «Editar la carta de bebidas…». Crear o cambiar cartas: permiso de editar la carta de Bebidas o la de Comidas.",
     secciones: [
       {
         titulo: "Filtro",
@@ -1174,7 +1243,11 @@ export const AYUDA_BEBIDAS: AyudaArea = {
         titulo: "Detalle de la carta",
         campos: [
           { nombre: "Cada sección", queEs: "Nombre (y en inglés) con sus bebidas: formatos y precios, alérgenos, precio de la marca y % de coste." },
-          { nombre: "Quitar sección", queEs: "Borra la sección y sus enlaces. Las bebidas no se borran." },
+          {
+            nombre: "Confirmo quitarla y Quitar sección",
+            queEs: "Quita la sección de la carta. Hay que marcar la casilla. No se borra: queda en «Secciones quitadas» con sus bebidas y se puede recuperar. No toca las secciones de comidas.",
+          },
+          { nombre: "Secciones quitadas y Recuperar", queEs: "Secciones de bebidas quitadas de esta carta, con cuántas bebidas guardan. «Recuperar» la vuelve a poner como estaba." },
           { nombre: "Quitar (bebida)", queEs: "Saca la bebida de esa sección." },
           {
             nombre: "Añadir una bebida…",
@@ -1190,8 +1263,10 @@ export const AYUDA_BEBIDAS: AyudaArea = {
           { nombre: "Bebidas que pueden ir y no están", queEs: "Cuántas bebidas de la marca faltan en esta carta." },
           {
             nombre: "Desactivar carta / Activar carta",
-            queEs: "Apaga o enciende la carta entera.",
-            influye: "Afecta también a sus secciones de comidas. Una carta de marca desactivada deja de verse en los locales.",
+            queEs: "Apaga o enciende la carta entera (es la misma que ve Comidas).",
+            logica:
+              "Si la carta tiene secciones de comidas, sale la casilla «También tiene N sección(es) de comidas: dejarán de verse», que hay que marcar; y solo puede hacerlo quien edite también la carta de Comidas. Para apagar solo lo de bebidas, usa «Quitar sección» en cada una.",
+            influye: "Una carta de marca desactivada deja de verse en los locales.",
           },
         ],
       },
@@ -1206,12 +1281,13 @@ export const AYUDA_BEBIDAS: AyudaArea = {
         ],
       },
       {
-        titulo: "Objetivo de coste por marca",
+        titulo: "Objetivo de coste de bebidas por marca",
         campos: [
           {
             nombre: "% de cada marca y Guardar",
-            queEs: "% de coste máximo que quiere la marca (entre 1 y 100). Si no se ha puesto, 30 %.",
-            influye: "Es el mismo objetivo para bebidas y comidas: decide qué sale en rojo («sobre el objetivo») en las dos cartas.",
+            queEs: "% de coste máximo que quiere la marca para sus bebidas (entre 1 y 100, admite decimales con coma). Vacío = el mismo que las comidas de la marca (que sale en gris).",
+            logica: "Cada marca tiene un objetivo para comidas y otro para bebidas. El de comidas se cambia en Comidas → Carta → Cartas.",
+            influye: "Decide qué bebida sale en rojo («sobre el objetivo») en la Carta de bebidas, en sus fichas y en la Bodega.",
           },
         ],
       },
@@ -1236,9 +1312,17 @@ export const AYUDA_BEBIDAS: AyudaArea = {
       {
         titulo: "Cifras",
         campos: [
-          { nombre: "Precio", queEs: "Precio de la marca con IVA (con formatos, el del primero). Debajo, sin IVA." },
-          { nombre: "Coste", queEs: "Coste del escandallo (con formatos, el del primero). Debajo, el coste al último precio de compra." },
-          { nombre: "% de coste", queEs: "Coste ÷ precio sin IVA de la marca. Debajo, el objetivo de la marca." },
+          {
+            nombre: "Precio",
+            queEs: "Precio con IVA (con formatos, el del primero). Debajo, sin IVA.",
+            logica: "Si arriba tienes elegido un local con precio propio, es el de ese local (y debajo, el de la marca); si no, el de la marca. El % de coste, el margen y el aviso usan este mismo precio.",
+          },
+          {
+            nombre: "Coste",
+            queEs: "Coste del escandallo (con formatos, el del primero). Debajo, el coste al último precio de entrada.",
+            logica: "Si el formato principal vende otro producto (mágnum…), el coste al último precio es el de ese producto.",
+          },
+          { nombre: "% de coste", queEs: "Coste ÷ precio sin IVA (el de la cifra «Precio»). Debajo, el objetivo de bebidas de la marca." },
           { nombre: "Margen bruto", queEs: "Precio sin IVA − coste." },
           { nombre: "Avisos", queEs: "«Coste por encima del objetivo» y «Ingredientes sin coste en el catálogo» (el coste sale más bajo de lo real)." },
         ],
@@ -1346,7 +1430,7 @@ export const AYUDA_BEBIDAS: AyudaArea = {
           { nombre: "Vinos", queEs: "Vinos de la lista. Debajo, cuántos no tienen ficha o la tienen sin tipo o sin D.O." },
           { nombre: "Valor en bodega", queEs: "Stock × coste medio (el stock negativo cuenta como 0)." },
           { nombre: "En la carta", queEs: "Vinos que se venden en alguna carta que veas. Debajo, la media del % de coste de la botella." },
-          { nombre: "Coste alto", queEs: "Vinos cuya botella cuesta más del 40 % de su precio sin IVA." },
+          { nombre: "Coste alto", queEs: "Vinos cuya botella pasa del objetivo de coste de bebidas de su marca (el mismo de la Carta de bebidas)." },
         ],
       },
       {
@@ -1368,7 +1452,7 @@ export const AYUDA_BEBIDAS: AyudaArea = {
           { nombre: "Vino", queEs: "Nombre y, debajo, bodega, tipo, crianza y capacidad si no es 75 cl. «Sin ficha» en ámbar si falta." },
           { nombre: "D.O.", queEs: "Denominación de origen o región." },
           { nombre: "Añada", queEs: "Año de la cosecha, si se controla." },
-          { nombre: "Stock", queEs: "Botellas en el centro elegido arriba o en todos tus centros." },
+          { nombre: "Stock", queEs: "Botellas en el centro elegido arriba o en todos tus centros. Solo cuentan los centros con el área de Bebidas activada." },
           { nombre: "Coste", queEs: "Coste medio de la botella." },
           {
             nombre: "En carta",
@@ -1378,7 +1462,7 @@ export const AYUDA_BEBIDAS: AyudaArea = {
           {
             nombre: "% coste",
             queEs: "Coste de la botella ÷ precio de la botella sin IVA.",
-            logica: "Verde hasta el 33 %, ámbar hasta el 40 %, rojo por encima.",
+            logica: "Verde hasta el objetivo de coste de bebidas de la marca de la carta donde se vende la botella; rojo por encima (el mismo criterio que la Carta de bebidas).",
           },
           { nombre: "Copa", queEs: "Precio de la copa (formato llamado «copa» o que vende menos de media botella)." },
         ],
@@ -1387,7 +1471,7 @@ export const AYUDA_BEBIDAS: AyudaArea = {
         titulo: "Detalle de la fila",
         campos: [
           { nombre: "Referencia, Familia, Uva, Capacidad", queEs: "Datos del producto y de la ficha." },
-          { nombre: "Stock por centro", queEs: "Botellas en cada centro que ves." },
+          { nombre: "Stock por centro", queEs: "Botellas en cada centro que ves con el área de Bebidas activada." },
           { nombre: "Copa", queEs: "Precio de la copa y sus centilitros." },
           { nombre: "Maridaje, Para recomendarlo, notas de cata", queEs: "Textos de la ficha para los camareros." },
           { nombre: "En la carta · Formato · Precio · Botellas", queEs: "Cada bebida y formato donde se vende el vino, su precio y qué parte de botella gasta." },
@@ -1423,10 +1507,10 @@ export const AYUDA_BEBIDAS: AyudaArea = {
       {
         titulo: "Cifras",
         campos: [
-          { nombre: "Stock", queEs: "Botellas en el centro elegido arriba o en todos tus centros." },
+          { nombre: "Stock", queEs: "Botellas en el centro elegido arriba o en todos tus centros. Solo cuentan los centros con el área de Bebidas activada." },
           { nombre: "Coste de la botella", queEs: "Coste medio de compra." },
           { nombre: "Precio en carta", queEs: "Precio de la botella entera en la carta. Debajo, el de la copa." },
-          { nombre: "% de coste", queEs: "Coste de la botella ÷ precio sin IVA. Ámbar desde el 33 %, rojo desde el 40 %." },
+          { nombre: "% de coste", queEs: "Coste de la botella ÷ precio sin IVA. Rojo si pasa del objetivo de coste de bebidas de la marca (sale debajo)." },
         ],
       },
       {
@@ -1453,7 +1537,7 @@ export const AYUDA_BEBIDAS: AyudaArea = {
         campos: [
           { nombre: "Bebida y formato", queEs: "Dónde se vende (con enlace a la ficha de la bebida) y sus centilitros." },
           { nombre: "Precio", queEs: "Precio con IVA de ese formato." },
-          { nombre: "% coste", queEs: "Coste de la parte de botella ÷ precio sin IVA. Rojo por encima del 40 %." },
+          { nombre: "% coste", queEs: "Coste de la parte de botella ÷ precio sin IVA. Rojo si pasa del objetivo de coste de bebidas de la marca de esa carta." },
         ],
       },
       {

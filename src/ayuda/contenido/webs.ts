@@ -28,7 +28,7 @@ export const AYUDA_WEBS: AyudaArea = {
           { nombre: "Web", queEs: "Dirección web de la marca, o «—» si no tiene.", influye: "Se cambia en la ficha de la marca, en Organización." },
           {
             nombre: "Locales",
-            queEs: "Número de centros de la marca que no están cerrados.",
+            queEs: "Número de locales de la marca que no están cerrados. No cuenta obradores ni almacenes, que no tienen página en la web.",
           },
           { nombre: "Estado", queEs: "Siempre «Por generar» mientras el área esté en preparación." },
         ],
@@ -40,7 +40,7 @@ export const AYUDA_WEBS: AyudaArea = {
           {
             nombre: "Páginas que se generarán",
             queEs:
-              "Las páginas comunes de la marca (inicio, carta, locales, eventos, historia, contacto) y, por cada local, su página y su página de reservar, con la dirección del edificio.",
+              "Las páginas comunes de la marca (inicio, carta, locales, eventos, historia, contacto) y, por cada local (no salen obradores ni almacenes), su página y su página de reservar, con la dirección del edificio.",
             logica: "La dirección de cada página de local sale del código del centro en minúsculas. Si el local no tiene edificio con dirección, sale «sin dirección».",
           },
         ],

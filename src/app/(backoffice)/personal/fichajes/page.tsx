@@ -85,7 +85,7 @@ export default async function Fichajes({ searchParams }: { searchParams: Busqued
               </Boton>
             ))}
           </form>
-          <p className="mt-2 text-xs text-slate-500">Si la persona tiene PIN en su ficha, se le pide. El sistema comprueba el orden: entrada, pausas y salida.</p>
+          <p className="mt-2 text-xs text-slate-500">Cada persona escribe su PIN (se pone en su ficha). A quien no tiene PIN solo le puede fichar quien tenga «Corregir fichajes», y queda registrado. El sistema comprueba el orden: entrada, pausas y salida.</p>
         </Tarjeta>
       ) : (
         <Aviso tono="info">Elige un centro arriba para fichar desde la tableta del local.</Aviso>

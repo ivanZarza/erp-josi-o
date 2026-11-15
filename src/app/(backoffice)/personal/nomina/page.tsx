@@ -102,7 +102,8 @@ export default async function CostesNomina({ searchParams }: { searchParams: Bus
               </Selector>
             </Campo>
             <Boton type="submit" variante="secundario">Ver</Boton>
-            <BotonEnlace href={`/personal/nomina/exportar?mes=${mes}${sociedadId ? `&sociedadId=${sociedadId}` : ""}`}>Descargar CSV de horas</BotonEnlace>
+            {/* descarga con el mes y la sociedad escritos en este formulario (aunque no se haya pulsado «Ver») */}
+            <Boton type="submit" formAction="/personal/nomina/exportar">Descargar CSV de horas</Boton>
           </form>
           <Tabla
             filas={variables}
@@ -114,7 +115,7 @@ export default async function CostesNomina({ searchParams }: { searchParams: Bus
               { titulo: "Centro", celda: (f) => f.centro },
               { titulo: "Contrato mes", celda: (f) => horasTexto(f.horasContrato), alinear: "derecha" },
               { titulo: "Fichadas", celda: (f) => horasTexto(f.horasReales), alinear: "derecha" },
-              { titulo: "Extra", celda: (f) => (f.horasExtra ? horasTexto(f.horasExtra) : "—"), alinear: "derecha" },
+              { titulo: "Extra o complementarias", celda: (f) => (f.horasExtra ? horasTexto(f.horasExtra) : "—"), alinear: "derecha" },
               { titulo: "Ausencias", celda: (f) => Object.values(f.ausencias).reduce((t, n) => t + n, 0) || "—", alinear: "derecha" },
               { titulo: "Alta / baja", celda: (f) => [f.alta && `Alta ${fecha(f.alta + "T12:00:00Z")}`, f.baja && `Baja ${fecha(f.baja + "T12:00:00Z")}`].filter(Boolean).join(" · ") },
             ]}

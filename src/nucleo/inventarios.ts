@@ -4,6 +4,7 @@ import { auditar, emitir } from "@/kernel/eventos";
 import { siguienteNumero } from "@/kernel/numeracion";
 import { registrarMovimientos, resolutorAlmacen, type NuevoMovimiento } from "./movimientos";
 import { stockEnCentro } from "./stock";
+import { hoyMadrid } from "@/kernel/fechas";
 import { ErrorNegocio, UMBRAL_APROBACION_INVENTARIO, num, r2, r3, r4, type AreaAlmacen, type Tx } from "./comun-almacen";
 
 /**
@@ -20,6 +21,7 @@ import { ErrorNegocio, UMBRAL_APROBACION_INVENTARIO, num, r2, r3, r4, type AreaA
  * - De todo el centro: el teórico es el total del centro; el ajuste lo reparte el motor (las sobras
  *   entran en el almacén por defecto; las faltas salen del por defecto y, si no basta, de los demás).
  * No puede haber a la vez dos inventarios sin cerrar del mismo almacén, ni uno del centro con otro de un almacén.
+ * Uno sin cerrar se puede CANCELAR (cancelarInventario): no ajusta stock y deja empezar otro.
  */
 
 export async function crearInventario(tx: Tx, tenantId: string, usuarioId: string, area: AreaAlmacen, d: { centroId: string; almacenId?: string | null; nombre?: string | null }) {
@@ -82,9 +84,10 @@ function nombreInventario(nombre: string, almacen?: string): string {
   return `${almacen} · ${nombre}`;
 }
 
-/** «Semana 45 · 2026» (semana ISO). */
+/** «Semana 45 · 2026» (semana ISO del día de hoy en Madrid). */
 export function nombrePorDefecto(hoy = new Date()): string {
-  const d = new Date(Date.UTC(hoy.getFullYear(), hoy.getMonth(), hoy.getDate()));
+  const [anio, mes, diaMes] = hoyMadrid(0, hoy).split("-").map(Number);
+  const d = new Date(Date.UTC(anio, mes - 1, diaMes));
   const dia = d.getUTCDay() || 7;
   d.setUTCDate(d.getUTCDate() + 4 - dia);
   const inicio = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
@@ -207,6 +210,19 @@ export async function reabrirInventario(tx: Tx, tenantId: string, usuarioId: str
   if (inv.estado !== "PENDIENTE_APROBACION") throw new ErrorNegocio("Solo se devuelve a recuento un inventario pendiente de aprobación.");
   await tx.inventario.update({ where: { id }, data: { estado: "ABIERTO" } });
   await auditar(tx, { tenantId, usuarioId, entidad: "Inventario", entidadId: id, accion: "reabrir" });
+}
+
+/**
+ * Cancelar un inventario sin cerrar (contando o pendiente de aprobación): no ajusta nada de stock y deja libre
+ * el centro (o el almacén) para empezar otro. Se conserva con lo contado, para el historial.
+ * Contando: quien puede hacer inventarios. Pendiente de aprobación: solo quien puede cerrarlos (lo mira la acción).
+ */
+export async function cancelarInventario(tx: Tx, tenantId: string, usuarioId: string, area: AreaAlmacen, id: string, motivo?: string | null) {
+  const inv = await inventarioDe(tx, tenantId, area, id);
+  if (inv.estado !== "ABIERTO" && inv.estado !== "PENDIENTE_APROBACION") throw new ErrorNegocio("Solo se cancela un inventario que no esté cerrado.");
+  await tx.inventario.update({ where: { id }, data: { estado: "CANCELADO", cerradoPor: usuarioId, cerradoEn: new Date() } });
+  await auditar(tx, { tenantId, usuarioId, entidad: "Inventario", entidadId: id, accion: "cancelar", antes: { estado: inv.estado }, despues: { motivo: motivo?.trim() || null, ...cuentasInventario(inv.lineas) } });
+  await emitir(tx, tenantId, "almacen.inventario.cancelado", { inventarioId: id, numero: inv.numero, area, centroId: inv.centroId });
 }
 
 export async function listarInventarios(tx: Tx, tenantId: string, area: AreaAlmacen, centroIds: string[]) {

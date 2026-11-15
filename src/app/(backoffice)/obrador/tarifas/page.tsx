@@ -70,7 +70,7 @@ export default async function Tarifas({ searchParams }: { searchParams: Busqueda
     <>
       <Cabecera
         titulo="Tarifas a locales"
-        subtitulo="Precio al que el obrador vende cada artículo a cada local. Es el coste para el local cuando recibe el pedido."
+        subtitulo="Precio al que el obrador vende cada artículo a cada local: es el precio de las líneas del pedido interno (lo que vale el pedido). El stock que entra en el local se valora al coste medio del producto (uno solo en toda la cadena), no a esta tarifa."
         acciones={
           puedeEditar && (
             <form action={recalcularTarifas}>
@@ -89,8 +89,10 @@ export default async function Tarifas({ searchParams }: { searchParams: Busqueda
       )}
       <div className="mb-4">
         <Aviso>
-          «A coste» y «Coste + %» se recalculan solos al cerrar cada producción (el coste es el precio medio del elaborado). «Precio fijo» no cambia hasta que lo edites. Los
-          cambios no avisan todavía a los locales con fecha de entrada en vigor (pendiente).
+          «A coste» y «Coste + %» se recalculan solos al cerrar cada producción (el coste es el precio medio del elaborado) y con «Recalcular con el coste actual». «Precio fijo»
+          no cambia hasta que lo edites. Este precio es el mismo dato que «Tarifa al centro» de Stock → Productos: si alguien lo cambia allí a mano, al recalcular se respeta y la
+          tarifa de ese local pasa a «Precio fijo». Los cambios no avisan todavía a los locales ni tienen fecha de entrada en vigor, y aún no se hace la factura entre sociedades
+          al servir (pendiente).
         </Aviso>
       </div>
 
@@ -143,7 +145,18 @@ export default async function Tarifas({ searchParams }: { searchParams: Busqueda
                   { titulo: "Local", celda: (f) => f.local },
                   { titulo: "Marca", celda: (f) => f.marca },
                   { titulo: "Modo", celda: (f) => (f.modo ? `${MODOS[f.modo]}${f.modo === "COSTE_MAS_PORCENTAJE" ? ` (${porcentaje(f.porcentaje)})` : ""}` : "—") },
-                  { titulo: "Precio", alinear: "derecha", celda: (f) => (f.precio != null ? euros(f.precio, 4) : "—") },
+                  {
+                    titulo: "Precio",
+                    alinear: "derecha",
+                    celda: (f) =>
+                      f.precio != null ? (
+                        <span>
+                          {euros(f.precio, 4)} {f.cambiadoAMano && <Etiqueta tono="aviso">Cambiado a mano</Etiqueta>}
+                        </span>
+                      ) : (
+                        "—"
+                      ),
+                  },
                   { titulo: "Margen", alinear: "derecha", celda: (f) => (f.margenPct != null ? porcentaje(f.margenPct) : "—") },
                 ]}
               />

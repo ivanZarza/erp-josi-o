@@ -62,7 +62,12 @@ export async function crearEquipo(form: FormData) {
 
 export async function desactivarEquipo(form: FormData) {
   const ctx = await exigir("calidad", "calidad:editar");
-  await ejecutar(form, () => s.desactivarEquipo(ctx, String(form.get("id"))));
+  await ejecutar(form, () => s.cambiarActivoEquipo(ctx, String(form.get("id")), false));
+}
+
+export async function reactivarEquipo(form: FormData) {
+  const ctx = await exigir("calidad", "calidad:editar");
+  await ejecutar(form, () => s.cambiarActivoEquipo(ctx, String(form.get("id")), true), () => "Equipo dado de alta otra vez.");
 }
 
 export async function registrarTemperatura(form: FormData) {

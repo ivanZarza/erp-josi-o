@@ -10,6 +10,7 @@ import { DatosDetalle, TablaDesplegable } from "@/ui/tabla-desplegable";
 import { AvisoError, param, PestanasCarta, TarjetaEntrada, type Busqueda } from "@/modulos/comidas/carta-pantallas/comun";
 import { nombreTipoVino, TIPOS_VINO } from "@/modulos/bebidas/fichas";
 import { listarBodega, productosSinFicha } from "@/modulos/bebidas/servicio";
+import { objetivoCosteBotella } from "@/modulos/comidas/carta-servicio";
 
 export default async function Bodega({ searchParams }: { searchParams: Busqueda }) {
   const ctx = await exigir("bebidas", "bebidas:productos:ver");
@@ -28,7 +29,9 @@ export default async function Bodega({ searchParams }: { searchParams: Busqueda 
   const enCarta = vinos.filter((v) => v.ventas.length > 0).length;
   const conPct = vinos.filter((v) => v.pctCoste != null);
   const pctMedio = conPct.length ? conPct.reduce((s, v) => s + (v.pctCoste ?? 0), 0) / conPct.length : 0;
-  const caros = conPct.filter((v) => (v.pctCoste ?? 0) > 40).length;
+  // mismo objetivo de coste que la Carta de bebidas: el de Bebidas de la marca donde se vende la botella
+  const caro = (v: (typeof vinos)[number]) => v.pctCoste != null && v.pctCoste > objetivoCosteBotella(v.ventas);
+  const caros = conPct.filter(caro).length;
   const fichasIncompletas = vinos.filter((v) => !v.ficha || !v.ficha.tipo || !v.ficha.denominacion).length;
 
   const enlace = (t: string) => {
@@ -56,7 +59,7 @@ export default async function Bodega({ searchParams }: { searchParams: Busqueda 
           <Cifra etiqueta="Vinos" valor={numero(vinos.length)} detalle={fichasIncompletas ? `${numero(fichasIncompletas)} con la ficha sin tipo o sin D.O.` : "Todos con ficha"} tono={fichasIncompletas ? "aviso" : "normal"} />
           <Cifra etiqueta="Valor en bodega" valor={euros(valor)} detalle="Stock × coste medio" />
           <Cifra etiqueta="En la carta" valor={numero(enCarta)} detalle={`Coste medio de la botella: ${porcentaje(pctMedio)}`} />
-          <Cifra etiqueta="Coste alto" valor={numero(caros)} detalle="Botellas con más del 40 % de coste" tono={caros ? "error" : "ok"} />
+          <Cifra etiqueta="Coste alto" valor={numero(caros)} detalle="Botellas por encima del objetivo de coste de su marca" tono={caros ? "error" : "ok"} />
         </Rejilla>
       </div>
 
@@ -105,7 +108,7 @@ export default async function Bodega({ searchParams }: { searchParams: Busqueda 
         total={`${numero(vinos.length)} vinos`}
         filas={vinos.map((v) => ({
           id: v.productoId,
-          tono: (v.pctCoste ?? 0) > 40 ? ("error" as const) : !v.ficha ? ("aviso" as const) : undefined,
+          tono: caro(v) ? ("error" as const) : !v.ficha ? ("aviso" as const) : undefined,
           celdas: [
             <span key="n">
               {v.nombre} {!v.ficha && <Etiqueta tono="aviso">Sin ficha</Etiqueta>}
@@ -118,7 +121,7 @@ export default async function Bodega({ searchParams }: { searchParams: Busqueda 
             v.stock ? numero(v.stock, v.stock % 1 ? 2 : 0) : <span key="s" className="text-slate-400">0</span>,
             euros(v.coste),
             v.precioBotella != null ? euros(v.precioBotella) : v.ventas.length ? <span key="p" className="text-xs text-slate-500">Solo por copa</span> : <span key="p" className="text-slate-400">No está</span>,
-            v.pctCoste != null ? <Etiqueta key="pc" tono={v.pctCoste > 40 ? "error" : v.pctCoste > 33 ? "aviso" : "ok"}>{porcentaje(v.pctCoste)}</Etiqueta> : "—",
+            v.pctCoste != null ? <Etiqueta key="pc" tono={caro(v) ? "error" : "ok"}>{porcentaje(v.pctCoste)}</Etiqueta> : "—",
             v.precioCopa != null ? euros(v.precioCopa) : "—",
           ],
           detalle: (

@@ -66,7 +66,7 @@ export const AYUDA_RESERVAS: AyudaArea = {
           {
             nombre: "Encabezado de cada hora (por ejemplo «21:00 · 5 reservas · 18 personas»)",
             queEs: "Las reservas se agrupan por hora en punto: las de 21:00, 21:15 y 21:45 van juntas en el grupo de las 21:00.",
-            logica: "El número de personas del grupo no suma las reservas canceladas.",
+            logica: "El número de reservas cuenta todas las filas de esa hora. Las personas, igual que la cifra «Personas» de arriba, no suman las canceladas ni las no presentadas.",
           },
           { nombre: "Hora", queEs: "Hora a la que llega la reserva." },
           {
@@ -92,6 +92,7 @@ export const AYUDA_RESERVAS: AyudaArea = {
           {
             nombre: "Origen",
             queEs: "Por dónde llegó la reserva: Manual (en el local), Teléfono, Web o CoverManager. Es lo que se eligió al apuntarla.",
+            logica: "Las de la web nacen «Solicitada» (hay que confirmarlas); las demás nacen «Confirmada».",
           },
         ],
       },
@@ -102,7 +103,8 @@ export const AYUDA_RESERVAS: AyudaArea = {
           {
             nombre: "Duración",
             queEs: "Minutos que se guarda la mesa para esta reserva.",
-            logica: "Se toma de la «Duración de mesa» del turno al que pertenece la hora. Si el local no tiene turnos, 90 minutos.",
+            logica:
+              "Si el local tiene rellenada la «Duración de mesa según personas» (Turnos y reglas), se toma de ahí; si no, de la «Duración de mesa» del turno al que pertenece la hora. Si el local no tiene turnos, 90 minutos. Se fija al crear la reserva.",
             influye: "Durante ese tiempo la mesa no se ofrece a otras reservas y en el plano sale ocupada.",
           },
           { nombre: "Zona", queEs: "Espacio de la mesa, o la zona preferida si aún no hay mesa. «Sin preferencia» si no se pidió ninguna." },
@@ -120,14 +122,14 @@ export const AYUDA_RESERVAS: AyudaArea = {
             logica:
               "Desde Solicitada: Confirmada o Cancelada. Desde Confirmada: Ha llegado, Sentada, No presentada o Cancelada. Desde Ha llegado: Sentada o Cancelada. Desde Sentada: Terminada. Desde Cancelada: volver a Confirmada. Desde No presentada: Ha llegado o Confirmada. Una reserva Terminada ya no se puede cambiar.",
             influye:
-              "Al pasar a «Terminada» se apunta una visita en la ficha del cliente (suma una visita y cambia la fecha de última visita) y se crea una encuesta pendiente en Clientes → Encuestas. Cancelada y No presentada dejan libre la mesa para otras reservas.",
+              "Al pasar a «Terminada» se apunta una visita en la ficha del cliente (suma una visita y cambia la fecha de última visita) y se crea una encuesta pendiente en Clientes → Encuestas. Cancelada y No presentada dejan libre la mesa para otras reservas. Si una cancelada o no presentada vuelve a «Confirmada», se comprueba otra vez que haya sitio: que la franja admita sus cubiertos y que su mesa siga libre (si la ha cogido otra reserva, se le asigna otra libre donde quepa); si no hay mesa, sale un aviso y no se cambia. Si una no presentada pasa a «Ha llegado», conserva su mesa si está libre o se le busca otra; si no queda ninguna, pasa sin mesa para asignarla en sala. Lo que se haga con la mesa queda en el historial.",
           },
           {
             nombre: "Selector de mesa y «Cambiar mesa»",
             queEs:
               "Cambia la mesa de la reserva. Con «Asignar automáticamente» el sistema busca la mejor mesa libre; también puedes elegir una mesa concreta del local.",
             logica:
-              "Solo sale en reservas Solicitadas, Confirmadas o que Han llegado. La mesa tiene que estar libre durante toda la duración de la reserva; si no, sale un aviso y no se cambia. La asignación automática sigue las mismas reglas que al crear la reserva (mesa más pequeña donde quepan o dos mesas juntables del mismo espacio). El cambio queda en el historial como «Cambio de mesa».",
+              "Solo sale en reservas Solicitadas, Confirmadas o que Han llegado. La mesa tiene que estar libre durante toda la duración de la reserva y en ella tiene que caber el grupo (su máximo de personas); si no, sale un aviso y no se cambia. La asignación automática sigue las mismas reglas que al crear la reserva (mesa más pequeña donde quepan o dos mesas juntables del mismo espacio). El cambio queda en el historial como «Cambio de mesa».",
           },
           {
             nombre: "Historial",
@@ -206,12 +208,14 @@ export const AYUDA_RESERVAS: AyudaArea = {
           {
             nombre: "Origen",
             queEs: "Por dónde llega la reserva: Teléfono (por defecto), En el local, Web o CoverManager.",
+            logica:
+              "Las de la web se guardan como «Solicitada»: el local aún no ha hablado con el cliente y hay que confirmarlas (botón «Confirmada» en la libreta). Las demás se guardan como «Confirmada» (CoverManager ya las confirma al cliente). En los dos casos la mesa y los cubiertos quedan reservados.",
             influye: "Sale en la columna «Origen» de la libreta.",
           },
           {
             nombre: "Zona preferida",
             queEs: "Espacio que pide el cliente (sala, terraza, reservado…). «Sin preferencia» deja que el sistema elija en cualquier espacio.",
-            logica: "Con zona elegida, la asignación automática solo busca mesas de ese espacio.",
+            logica: "Con zona elegida, la asignación automática solo busca mesas de ese espacio. La zona tiene que ser un espacio activo del local de la reserva; si no, sale un error.",
           },
           {
             nombre: "Mesa",
@@ -246,7 +250,7 @@ export const AYUDA_RESERVAS: AyudaArea = {
           },
           {
             nombre: "Guardar reserva",
-            queEs: "Comprueba todo y guarda la reserva como «Confirmada». Vuelve a la libreta de ese día con el aviso «Reserva guardada» (o «sin mesa»).",
+            queEs: "Comprueba todo y guarda la reserva como «Confirmada» (o «Solicitada» si el origen es Web). Vuelve a la libreta de ese día con el aviso «Reserva guardada» (o que está solicitada, o sin mesa).",
           },
         ],
       },
@@ -272,7 +276,7 @@ export const AYUDA_RESERVAS: AyudaArea = {
     ],
     logica: [
       "Regla de cubiertos: si el local tiene turnos, los cubiertos de la franja más los de la nueva reserva no pueden pasar del «Máx. cubiertos por franja». Si pasan, sale «La franja de las … ya tiene X de Y cubiertos. Prueba otra hora».",
-      "Duración: se toma la «Duración de mesa» del turno (90 minutos si el local no tiene turnos).",
+      "Duración: la de la tabla «Duración de mesa según personas» del local si está rellenada; si no, la «Duración de mesa» del turno (90 minutos si el local no tiene turnos).",
       "Solapes: una mesa está libre si ninguna reserva activa (Solicitada, Confirmada, Ha llegado, Sentada) la ocupa en algún momento entre la hora de llegada y la hora más la duración.",
       "Mesa automática: primero la mesa libre más pequeña donde quepa el grupo (entre su mínimo y su máximo de personas). Si no hay, dos mesas marcadas como «Se puede juntar con otra», del mismo espacio, con la menor capacidad que sume lo necesario.",
       "Si la cadena tiene Clientes, el cliente se busca por teléfono y, si no, por correo; si no existe se crea con origen «Reserva». Si existe, se le completan el correo, el teléfono o las alergias que falten.",
@@ -393,7 +397,8 @@ export const AYUDA_RESERVAS: AyudaArea = {
           {
             nombre: "Desactivar espacio / Volver a activar",
             queEs: "Un espacio no se borra: se desactiva.",
-            logica: "Un espacio desactivado y sus mesas dejan de ofrecerse para reservas nuevas, no salen en el plano y no se pueden elegir en Eventos.",
+            logica:
+              "Un espacio desactivado y sus mesas dejan de ofrecerse para reservas nuevas, no salen en el plano y no se pueden elegir en Eventos. No se deja desactivar si tiene reservas vivas (Solicitada, Confirmada, Ha llegado o Sentada) de hoy en adelante con mesa en él o que lo piden como zona: sale un aviso con cuántas hay y la primera, para cambiarlas antes.",
           },
           {
             nombre: "Nuevo espacio (Nombre, Tipo, Aforo, Ancho, Alto) y «Crear espacio»",
@@ -439,7 +444,7 @@ export const AYUDA_RESERVAS: AyudaArea = {
             nombre: "Desactivar mesa / Volver a activar",
             queEs: "Una mesa no se borra: se desactiva.",
             logica:
-              "Una mesa desactivada deja de ofrecerse para reservas nuevas y no sale en el plano. Las reservas que ya la tenían asignada no se cambian solas: revísalas en la libreta.",
+              "Una mesa desactivada deja de ofrecerse para reservas nuevas y no sale en el plano. No se deja desactivar si tiene reservas vivas (Solicitada, Confirmada, Ha llegado o Sentada) de hoy en adelante: sale un aviso con cuántas hay y la primera, para cambiarlas de mesa en la libreta antes.",
           },
         ],
       },
@@ -468,7 +473,7 @@ export const AYUDA_RESERVAS: AyudaArea = {
           { nombre: "Turno", queEs: "Nombre del turno: Comida, Cena…" },
           { nombre: "Días", queEs: "Días de la semana en que hay ese turno (L M X J V S D)." },
           { nombre: "Entradas", queEs: "Primera y última hora a la que se aceptan llegadas («13:00 – 15:30»)." },
-          { nombre: "Duración", queEs: "Minutos que se guarda la mesa a cada reserva del turno." },
+          { nombre: "Duración", queEs: "Minutos que se guarda la mesa a cada reserva del turno (salvo que el local tenga rellenada la duración según personas)." },
           { nombre: "Cubiertos / franja", queEs: "Máximo de personas que pueden llegar en cada franja («30 cada 15 min»)." },
           { nombre: "Estado", queEs: "Activo o Desactivado." },
           {
@@ -490,6 +495,7 @@ export const AYUDA_RESERVAS: AyudaArea = {
           {
             nombre: "Duración de mesa (min)",
             queEs: "Tiempo que se guarda la mesa (de 15 a 480 minutos). Por defecto 90.",
+            logica: "Si en «Reglas del local» está rellenada la duración según personas, manda esa.",
             influye: "Marca cuándo la mesa vuelve a quedar libre para otra reserva y cuánto tiempo sale ocupada en el plano.",
           },
           {
@@ -525,7 +531,14 @@ export const AYUDA_RESERVAS: AyudaArea = {
             queEs: "Permitirá elegir mesa al reservar por internet.",
             logica: "Se guarda para más adelante; hoy no cambia nada.",
           },
-          { nombre: "Guardar reglas", queEs: "Guarda las tres reglas del local." },
+          {
+            nombre: "Duración de mesa según personas (Hasta (personas) y Duración (min))",
+            queEs: "Opcional. Tabla para que los grupos grandes tengan la mesa más tiempo: cada fila dice hasta cuántas personas y cuántos minutos. Por ejemplo, hasta 2 → 90, hasta 4 → 105, hasta 8 → 120.",
+            logica:
+              "Se busca la primera fila cuyo «Hasta» sea igual o mayor que las personas de la reserva; los grupos más grandes que la última fila usan la de la última. Las filas se ordenan solas; las vacías no cuentan; cada fila tiene que tener las dos casillas y no puede haber dos con las mismas personas. Si se dejan todas vacías, se usa la duración del turno. Salen siempre dos filas vacías de más para añadir.",
+            influye: "Fija la duración de las reservas nuevas (las ya hechas conservan la suya): cuándo vuelve a quedar libre la mesa y cuánto sale ocupada en el plano.",
+          },
+          { nombre: "Guardar reglas", queEs: "Guarda las reglas del local y la tabla de duraciones." },
         ],
       },
     ],

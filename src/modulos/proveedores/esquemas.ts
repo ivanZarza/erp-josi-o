@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { numeroEsOpcional } from "@/kernel/esquemas";
 
 /**
  * Teléfono SIEMPRE en formato internacional (+34…), para que el enlace de WhatsApp funcione.
@@ -51,20 +52,10 @@ export const EsquemaProveedor = z.object({
     .transform((v) => (v === "" ? null : v.toLowerCase())),
   areas: z.array(z.enum(["BEBIDAS", "COMIDAS", "CONSUMIBLES"])).default([]),
   diasReparto: textoOpcional,
-  pedidoMinimo: z
-    .string()
-    .optional()
-    .default("")
-    .transform((v, c) => {
-      const s = v.trim().replace(/\s|€/g, "");
-      if (s === "") return null;
-      const n = Number(s.includes(",") ? s.replace(/\./g, "").replace(",", ".") : s);
-      if (!Number.isFinite(n) || n < 0) {
-        c.addIssue({ code: "custom", message: "El pedido mínimo no es un importe válido." });
-        return z.NEVER;
-      }
-      return n;
-    }),
+  // «150», «150,5», «1.500» (mil quinientos) o «150.5» (numeroEsOpcional del núcleo); vacío = sin pedido mínimo
+  pedidoMinimo: numeroEsOpcional("El pedido mínimo no es un importe válido.")
+    .pipe(z.number().min(0, "El pedido mínimo no es un importe válido.").optional())
+    .transform((v) => v ?? null),
   notas: textoOpcional,
 });
 

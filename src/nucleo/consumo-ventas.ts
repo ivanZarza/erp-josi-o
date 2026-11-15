@@ -186,6 +186,8 @@ export async function platosVendibles(tx: Tx, tenantId: string, centroId: string
     where: { tenantId, activo: true, OR: [{ centroId }, ...(centro.marcaId ? [{ marcaId: centro.marcaId, centroId: null }] : [])] },
     select: {
       secciones: {
+        // una sección quitada de la carta (activo = false) ya no se vende
+        where: { activo: true },
         orderBy: { orden: "asc" },
         select: {
           nombre: true,

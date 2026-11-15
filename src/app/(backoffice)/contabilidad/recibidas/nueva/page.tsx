@@ -1,13 +1,13 @@
 import { exigir } from "@/kernel/contexto";
 import { Cabecera, Tarjeta, Campo, Entrada, Selector, AreaTexto, Boton, BotonEnlace, HuecoIntegracion, Vacio } from "@/ui";
-import { sociedadesVisibles, diccionarios, hoyISO } from "@/modulos/contabilidad/servicio";
+import { sociedadesVisibles, diccionarios, hoyISO, albaranesSinFactura } from "@/modulos/contabilidad/servicio";
 import { accionCrearFacturaRecibida } from "@/modulos/contabilidad/acciones";
 import { Avisos, LineasFormulario, type ParametrosBusqueda } from "../../_comun";
 
 export default async function NuevaFacturaRecibida({ searchParams }: { searchParams: ParametrosBusqueda }) {
   const ctx = await exigir("contabilidad", "contabilidad:facturas:editar");
   const sp = await searchParams;
-  const [sociedades, d] = await Promise.all([sociedadesVisibles(ctx), diccionarios(ctx)]);
+  const [sociedades, d, albaranes] = await Promise.all([sociedadesVisibles(ctx), diccionarios(ctx), albaranesSinFactura(ctx)]);
   const centros = ctx.centros.map((c) => ({ ...c, sociedadId: d.centros.get(c.id)?.sociedadId ?? null }));
 
   return (
@@ -68,9 +68,19 @@ export default async function NuevaFacturaRecibida({ searchParams }: { searchPar
               <Campo etiqueta="Vencimiento">
                 <Entrada type="date" name="vencimiento" />
               </Campo>
-              <Campo etiqueta="Categoría principal">
-                <Selector name="categoriaId" defaultValue="">
-                  <option value="">Sin categoría</option>
+              <Campo etiqueta="Albarán que factura (opcional)" ayuda="Compra recibida en los últimos 90 días que aún no está enlazada a ninguna factura. Si dejas las líneas vacías, se copian las del albarán con su producto.">
+                <Selector name="pedidoCompraId" defaultValue="">
+                  <option value="">Sin albarán</option>
+                  {albaranes.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.texto}
+                    </option>
+                  ))}
+                </Selector>
+              </Campo>
+              <Campo etiqueta="Categoría principal" ayuda="Obligatoria: va a las líneas sin categoría propia y decide dónde suma en el Cuadro de mando">
+                <Selector name="categoriaId" required defaultValue="">
+                  <option value="">Elige…</option>
                   {d.listaCategorias.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.nombre}
@@ -80,7 +90,7 @@ export default async function NuevaFacturaRecibida({ searchParams }: { searchPar
               </Campo>
             </div>
           </Tarjeta>
-          <Tarjeta titulo="Líneas">
+          <Tarjeta titulo="Líneas (vacías = las del albarán elegido)">
             <LineasFormulario categorias={d.listaCategorias} />
           </Tarjeta>
           <Tarjeta titulo="Notas">

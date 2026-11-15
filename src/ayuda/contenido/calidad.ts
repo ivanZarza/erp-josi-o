@@ -19,7 +19,7 @@ const CIFRAS_CALIDAD: SeccionAyuda = {
     },
     {
       nombre: "Mantenimientos vencidos",
-      queEs: "Tareas de mantenimiento activas cuya próxima fecha ya pasó. Rojo si hay alguna. Al pulsarla va a «Mantenimiento».",
+      queEs: "Tareas de mantenimiento activas cuya próxima fecha es anterior a la jornada en curso de su centro. Rojo si hay alguna. Al pulsarla va a «Mantenimiento».",
     },
   ],
 };
@@ -96,7 +96,7 @@ export const AYUDA_CALIDAD: AyudaArea = {
       },
     ],
     logica: [
-      "La jornada termina a las 05:00: lo que se firma de madrugada cuenta para el día anterior.",
+      "Cada centro cierra la jornada a su hora de corte (la de su ficha en Organización; 05:00 si no se ha cambiado), en hora de Madrid: lo que se firma de madrugada, antes de esa hora, cuenta para el día anterior. Si los centros elegidos están en jornadas distintas, cada fila dice la suya.",
       "Salen las listas activas que valen para todos los centros o para cada centro elegido arriba, con sus puntos activos.",
       "Si un día no se firma una lista, queda sin hacer: no se puede firmar después para ese día.",
     ],
@@ -163,7 +163,18 @@ export const AYUDA_CALIDAD: AyudaArea = {
           {
             nombre: "Dar de baja el equipo",
             queEs: "Quita el equipo de la lista. Sus lecturas se conservan.",
-            logica: "No hay botón para volver a darlo de alta: habría que crearlo de nuevo.",
+            logica: "No se borra: pasa a la tabla «Equipos dados de baja», desde donde se puede volver a dar de alta.",
+          },
+        ],
+      },
+      {
+        titulo: "Equipos dados de baja",
+        campos: [
+          { nombre: "Centro, Equipo, Rango, Última lectura", queEs: "Equipos de los centros elegidos arriba que se dieron de baja. Solo sale la tabla si hay alguno y tienes permiso «Editar plan APPCC»." },
+          {
+            nombre: "Volver a dar de alta",
+            queEs: "Devuelve el equipo a la lista con su rango y sus lecturas de antes.",
+            influye: "Vuelve a contar en el estado «Sin lectura en 24 h» y en las alarmas.",
           },
         ],
       },
@@ -216,7 +227,7 @@ export const AYUDA_CALIDAD: AyudaArea = {
           {
             nombre: "Plazo",
             queEs: "Fecha límite para resolverla.",
-            logica: "Si está Abierta o En curso y el plazo ya pasó (según la jornada, que acaba a las 05:00), sale «Vencida» en rojo y la fila en rojo.",
+            logica: "Si está Abierta o En curso y el plazo es anterior a la jornada en curso de su centro (hora de Madrid y hora de corte del centro), sale «Vencida» en rojo y la fila en rojo.",
           },
           {
             nombre: "Estado",
@@ -238,13 +249,13 @@ export const AYUDA_CALIDAD: AyudaArea = {
           { nombre: "Foto", queEs: "Aún no se pueden subir fotos." },
           { nombre: "Descripción", queEs: "Texto de la incidencia (en las automáticas, los puntos fallidos o la temperatura y la acción correctora)." },
           {
-            nombre: "Estado, Prioridad, Responsable, Plazo, Solución y «Guardar»",
-            queEs: "Cambian la incidencia.",
+            nombre: "Estado, Prioridad, Responsable, Plazo, Solución o motivo y «Guardar»",
+            queEs: "Cambian la incidencia. Solo salen mientras está Abierta o En curso.",
             logica:
-              "Para pasarla a «Resuelta» hay que escribir la solución; la fecha de resolución se apunta la primera vez. Si sale de «Resuelta», se borra esa fecha. Se puede volver a abrir una resuelta o anulada. Si se deja el plazo o la solución en blanco, se borran. Cada cambio de estado queda en el registro de cambios.",
+              "Para pasarla a «Resuelta» hay que escribir la solución (se apunta la fecha de resolución); para «Anulada», el motivo en la misma casilla. Una vez Resuelta o Anulada ya no se puede cambiar ni volver a abrir: si el problema vuelve, se abre una incidencia nueva. Dejar el plazo o la solución en blanco no borra lo que ya había. El responsable tiene que ver el centro de la incidencia. Cada cambio de estado queda en el registro de cambios (con el motivo, si se anula).",
             influye: "Cuenta en «Incidencias abiertas» mientras esté Abierta o En curso.",
           },
-          { nombre: "Solución (sin permiso de gestión)", queEs: "Solo se ve el texto de la solución." },
+          { nombre: "Solución / Motivo de la anulación", queEs: "En las resueltas y anuladas, o sin permiso de gestión, solo se ve el texto: la solución o el motivo de la anulación." },
         ],
       },
       {
@@ -255,7 +266,7 @@ export const AYUDA_CALIDAD: AyudaArea = {
           { nombre: "Qué ha pasado", queEs: "Título corto. Obligatorio." },
           { nombre: "Detalle", queEs: "Explicación más larga." },
           { nombre: "Prioridad", queEs: "Alta, Media (por defecto) o Baja." },
-          { nombre: "Responsable", queEs: "Usuario encargado. Salen todos los usuarios activos de la cadena." },
+          { nombre: "Responsable", queEs: "Usuario encargado.", logica: "Con un solo centro elegido arriba, salen los usuarios activos que ven ese centro (los que lo tienen asignado y los que ven todos los centros); con varios, los que ven alguno de ellos. Si eliges a alguien que no ve el centro de la incidencia, sale un aviso y no se guarda." },
           { nombre: "Plazo", queEs: "Fecha límite. Opcional." },
           { nombre: "Abrir incidencia", queEs: "Crea la incidencia en estado Abierta con su número." },
         ],
@@ -264,7 +275,7 @@ export const AYUDA_CALIDAD: AyudaArea = {
     logica: [
       "Solo salen las incidencias de los centros elegidos arriba, las 300 más recientes.",
       "Las incidencias no se borran: se resuelven o se anulan.",
-      "Las automáticas (APPCC, temperatura, lote) se abren con plazo de un día.",
+      "Las automáticas (APPCC, temperatura, lote) se abren con plazo hasta el día siguiente a la jornada en curso de su centro.",
     ],
     influye: [
       { texto: "Llegan solas de las listas APPCC con fallos", ruta: "/calidad" },

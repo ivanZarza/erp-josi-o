@@ -1,4 +1,5 @@
 import "server-only";
+import { hoyMadrid } from "@/kernel/fechas";
 import { db } from "@/kernel/db";
 import { auditar } from "@/kernel/eventos";
 import { centrosFiltro, type Contexto } from "@/kernel/contexto";
@@ -25,6 +26,17 @@ export function normalizarTelefono(t?: string | null): string | null {
 
 function normalizarEmail(e?: string | null): string | null {
   return e ? e.trim().toLowerCase() : null;
+}
+
+export { hoyMadrid } from "@/kernel/fechas";
+/** «aaaa-mm-dd» → fecha a medianoche UTC (como se guardan los campos de día). */
+const diaBD = (s: string) => new Date(`${s}T00:00:00.000Z`);
+
+/** Otro cliente activo con el mismo teléfono o correo (el cliente es único en el grupo). */
+async function comprobarRepetido(tx: Tx, tenantId: string, telefono: string | null, email: string | null, excluirId?: string) {
+  const otro = { tenantId, activo: true, ...(excluirId ? { id: { not: excluirId } } : {}) };
+  if (telefono && (await tx.cliente.findFirst({ where: { ...otro, telefono }, select: { id: true } }))) throw new ErrorClientes("Ya hay un cliente con ese teléfono");
+  if (email && (await tx.cliente.findFirst({ where: { ...otro, email }, select: { id: true } }))) throw new ErrorClientes("Ya hay un cliente con ese correo");
 }
 
 // ---------------------------------------------------------------- uso desde otros módulos
@@ -156,8 +168,7 @@ export async function crearCliente(ctx: Contexto, d: DatosCliente) {
   const prisma = await db();
   const telefono = normalizarTelefono(d.telefono);
   const email = normalizarEmail(d.email);
-  if (telefono && (await prisma.cliente.findFirst({ where: { tenantId: ctx.tenant.id, telefono, activo: true } })))
-    throw new ErrorClientes("Ya hay un cliente con ese teléfono");
+  await comprobarRepetido(prisma, ctx.tenant.id, telefono, email);
   const c = await prisma.cliente.create({
     data: {
       tenantId: ctx.tenant.id, nombre: d.nombre, apellidos: d.apellidos, telefono, email,
@@ -170,10 +181,13 @@ export async function crearCliente(ctx: Contexto, d: DatosCliente) {
 
 export async function actualizarCliente(ctx: Contexto, id: string, d: DatosCliente) {
   const prisma = await db();
+  const telefono = normalizarTelefono(d.telefono);
+  const email = normalizarEmail(d.email);
+  await comprobarRepetido(prisma, ctx.tenant.id, telefono, email, id);
   const r = await prisma.cliente.updateMany({
     where: { tenantId: ctx.tenant.id, id, activo: true },
     data: {
-      nombre: d.nombre, apellidos: d.apellidos ?? null, telefono: normalizarTelefono(d.telefono), email: normalizarEmail(d.email),
+      nombre: d.nombre, apellidos: d.apellidos ?? null, telefono, email,
       fechaNacimiento: d.fechaNacimiento ? new Date(d.fechaNacimiento) : null,
       preferencias: d.preferencias ?? null, alergias: d.alergias ?? null, notas: d.notas ?? null, etiquetas: d.etiquetas,
     },
@@ -314,10 +328,10 @@ export async function listarTarjetas(ctx: Contexto, filtro: { q?: string; estado
   });
 }
 
-/** Marca como caducadas las tarjetas activas con la fecha pasada. */
+/** Marca como caducadas las tarjetas activas con la fecha pasada (valen hasta el final del día de caducidad, hora de Madrid). */
 async function caducarTarjetas(tenantId: string) {
   const prisma = await db();
-  const hoy = new Date(new Date().toISOString().slice(0, 10));
+  const hoy = diaBD(hoyMadrid());
   await prisma.tarjetaRegalo.updateMany({ where: { tenantId, estado: "ACTIVA", caducidad: { lt: hoy } }, data: { estado: "CADUCADA" } });
 }
 
@@ -332,7 +346,7 @@ export async function emitirTarjeta(
     const importe = new Prisma.Decimal(d.importe);
     const t = await tx.tarjetaRegalo.create({
       data: {
-        tenantId: ctx.tenant.id, codigo, importeInicial: importe, saldo: importe, caducidad: new Date(d.caducidad), marcaId: d.marcaId ?? null,
+        tenantId: ctx.tenant.id, codigo, importeInicial: importe, saldo: importe, caducidad: diaBD(d.caducidad), marcaId: d.marcaId ?? null,
         compradorNombre: d.compradorNombre, compradorEmail: normalizarEmail(d.compradorEmail), destinatario: d.destinatario, mensaje: d.mensaje, origen: d.origen ?? "MANUAL",
       },
     });
@@ -348,11 +362,14 @@ export async function canjearTarjeta(ctx: Contexto, d: { tarjetaId: string; impo
     const t = await tx.tarjetaRegalo.findFirst({ where: { tenantId: ctx.tenant.id, id: d.tarjetaId } });
     if (!t) throw new ErrorClientes("Tarjeta no encontrada");
     if (t.estado !== "ACTIVA") throw new ErrorClientes("La tarjeta no está activa");
-    if (t.caducidad < new Date(new Date().toISOString().slice(0, 10))) throw new ErrorClientes("La tarjeta está caducada");
+    if (t.caducidad < diaBD(hoyMadrid())) throw new ErrorClientes("La tarjeta está caducada");
     const importe = new Prisma.Decimal(d.importe);
     if (importe.gt(t.saldo)) throw new ErrorClientes("El importe supera el saldo de la tarjeta");
     const centroId = d.centroId ?? ctx.centroActivo?.id ?? null;
-    if (t.marcaId && centroId) {
+    if (centroId && !ctx.centros.some((c) => c.id === centroId)) throw new ErrorClientes("No tienes acceso a ese local");
+    if (t.marcaId) {
+      // Una tarjeta de una marca solo se canjea en sus locales: hay que decir en cuál
+      if (!centroId) throw new ErrorClientes("Esta tarjeta solo vale en los locales de su marca: elige el local donde se canjea");
       const centro = await tx.centro.findFirst({ where: { tenantId: ctx.tenant.id, id: centroId }, select: { marcaId: true } });
       if (centro?.marcaId !== t.marcaId) throw new ErrorClientes("Esta tarjeta solo vale en los locales de su marca");
     }

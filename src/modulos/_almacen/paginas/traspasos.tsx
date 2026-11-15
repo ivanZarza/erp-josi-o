@@ -3,7 +3,7 @@ import { db } from "@/kernel/db";
 import { euros, numero, fechaHora } from "@/kernel/formato";
 import { Cabecera, Tarjeta, Selector, Boton, Campo, Entrada, Tabla, Vacio } from "@/ui";
 import { TablaDesplegable, DatosDetalle } from "@/ui/tabla-desplegable";
-import { almacenesDeCentros } from "@/nucleo/stock";
+import { almacenesDeCentros, SIN_UBICAR } from "@/nucleo/stock";
 import { catalogoTraspaso, listarTraspasos } from "@/nucleo/traspasos";
 import { normalizarNombre } from "@/nucleo/regla-almacen";
 import { accionTraspaso } from "../acciones";
@@ -31,17 +31,18 @@ export async function PaginaTraspasos({ area, searchParams }: PropsPagina) {
   const quien = new Map(usuarios.map((u) => [u.id, u.nombre]));
   const puede = ctx.puede(`${t.m}:traspasos:crear`);
 
-  // centros con al menos dos almacenes (si no, no hay nada que traspasar)
-  const conDos = centros.filter((c) => almacenes.filter((a) => a.centroId === c.id).length >= 2);
+  // centros con almacenes (con uno solo se puede colocar en él el stock «Sin ubicar»)
+  const conDos = centros.filter((c) => almacenes.some((a) => a.centroId === c.id));
   const centroId = conDos.find((c) => c.id === uno(sp, "centro"))?.id ?? conDos.find((c) => c.id === ctx.centroActivo?.id)?.id ?? conDos.find((c) => c.tipo === "LOCAL")?.id ?? conDos[0]?.id;
   const suyos = almacenes.filter((a) => a.centroId === centroId);
   const buscar = (n: string) => suyos.find((a) => normalizarNombre(a.nombre).includes(n))?.id;
   const [defOrigen, defDestino] = area === "BEBIDAS" ? [buscar("bodega"), buscar("barra")] : [buscar("camara"), buscar("congelador")];
-  const origenId = suyos.find((a) => a.id === uno(sp, "de"))?.id ?? defOrigen ?? suyos[0]?.id;
+  // origen: un almacén o «Sin ubicar» (stock del centro que aún no está en ningún almacén)
+  const origenId = uno(sp, "de") === SIN_UBICAR ? SIN_UBICAR : (suyos.find((a) => a.id === uno(sp, "de"))?.id ?? (suyos.length > 1 ? (defOrigen ?? suyos[0]?.id) : SIN_UBICAR));
   const destinoId = suyos.find((a) => a.id === uno(sp, "a"))?.id ?? (defDestino !== origenId ? defDestino : undefined) ?? suyos.find((a) => a.id !== origenId)?.id;
   const listo = puede && centroId && origenId && destinoId && origenId !== destinoId;
-  const catalogo = listo ? await catalogoTraspaso(prisma, ctx.tenant.id, area, centroId, origenId, destinoId) : [];
-  const nombre = (id?: string) => suyos.find((a) => a.id === id)?.nombre ?? "—";
+  const catalogo = listo ? await catalogoTraspaso(prisma, ctx.tenant.id, area, centroId, origenId === SIN_UBICAR ? null : origenId, destinoId) : [];
+  const nombre = (id?: string) => (id === SIN_UBICAR ? "Sin ubicar" : (suyos.find((a) => a.id === id)?.nombre ?? "—"));
   const volver = rutaVolver(`/${t.m}/traspasos`, sp);
   const propuestas = Object.fromEntries(catalogo.filter((p) => p.propuesta > 0).map((p) => [p.id, p.propuesta]));
 
@@ -52,7 +53,7 @@ export async function PaginaTraspasos({ area, searchParams }: PropsPagina) {
       <div className="space-y-4">
         {puede &&
           (conDos.length === 0 ? (
-            <Vacio>Ninguno de tus centros tiene dos almacenes o más: no hay nada que traspasar.</Vacio>
+            <Vacio>Ninguno de tus centros tiene almacenes: no hay nada que traspasar.</Vacio>
           ) : (
             <Tarjeta titulo="Nuevo traspaso">
               <form method="get" className="mb-4 flex flex-wrap items-end gap-2">
@@ -74,6 +75,7 @@ export async function PaginaTraspasos({ area, searchParams }: PropsPagina) {
                         {a.nombre}
                       </option>
                     ))}
+                    <option value={SIN_UBICAR}>Sin ubicar</option>
                   </Selector>
                 </Campo>
                 <Campo etiqueta="A">
@@ -90,7 +92,7 @@ export async function PaginaTraspasos({ area, searchParams }: PropsPagina) {
                 </Boton>
               </form>
               {!listo ? (
-                <p className="text-sm text-slate-600">Elige dos almacenes distintos.</p>
+                <p className="text-sm text-slate-600">Elige dos almacenes distintos (o «Sin ubicar» como origen).</p>
               ) : catalogo.length === 0 ? (
                 <p className="text-sm text-slate-600">
                   En {nombre(origenId)} no hay stock de {t.productos}.

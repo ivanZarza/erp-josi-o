@@ -69,7 +69,7 @@ const CAMPOS_DATOS_CENTRO = [
     queEs:
       "Si este centro está en el mismo edificio que otro (por ejemplo un local y un almacén en la misma dirección), elige ese edificio. Si no, deja «Dirección propia» y escríbela abajo.",
     logica:
-      "Junto a cada edificio salen los códigos de los centros que ya están en él. Si eliges un edificio, se ignoran los campos de dirección de abajo.",
+      "Junto a cada edificio salen los códigos de los otros centros que ya están en él. Si el centro ya comparte edificio, sale elegido el suyo (marcado «el actual») y al guardar sigue compartiéndolo. Si eliges un edificio, se ignoran los campos de dirección de abajo. Si pasas a «Dirección propia», el centro se separa del edificio compartido con la dirección escrita abajo.",
   },
   {
     nombre: "Dirección, Código postal, Ciudad, Provincia",
@@ -140,7 +140,7 @@ export const AYUDA_ORGANIZACION: AyudaArea = {
           {
             nombre: "Abiertos",
             queEs: "Centros en estado «Abierto» más los de «Temporada».",
-            logica: "Al pulsarla filtra la lista por «Abierto» (los de «Temporada» no aparecen en ese filtro).",
+            logica: "Al pulsarla filtra la lista por «Abiertos y de temporada»: salen los mismos centros que cuenta la cifra.",
           },
           {
             nombre: "En preparación",
@@ -296,6 +296,11 @@ export const AYUDA_ORGANIZACION: AyudaArea = {
         campos: [
           { nombre: "Estado actual", queEs: "Situación del centro.", logica: ESTADOS },
           {
+            nombre: "Aviso «Cerrar un centro no borra nada»",
+            queEs:
+              "Recuerda que cerrar no borra historial, stock, pedidos ni documentos. Un centro «Cerrado» (definitivo) deja de salir en el selector de centros y en los pedidos; uno «Cerrado temporalmente» sigue saliendo.",
+          },
+          {
             nombre: "Nuevo estado",
             queEs: "Los estados a los que puede pasar desde el actual.",
             logica:
@@ -332,7 +337,7 @@ export const AYUDA_ORGANIZACION: AyudaArea = {
     ],
     logica: [
       "Solo puedes abrir la ficha de un centro al que tengas acceso (el administrador y quien tiene «Todos los centros» ven todos).",
-      "El historial muestra los 100 últimos cambios del centro. Los cambios hechos desde Ajustes → Módulos contratados no salen aquí, sino en el Registro de cambios.",
+      "El historial muestra los 100 últimos cambios del centro, también los cambios de áreas hechos desde Ajustes → Módulos contratados (en «Después» pone «desde Módulos contratados»).",
       "Cerrar nunca borra nada.",
     ],
     influye: [
@@ -461,6 +466,8 @@ export const AYUDA_ORGANIZACION: AyudaArea = {
           {
             nombre: "Horario tipo",
             queEs: "Horario de cada día que tendrá el local nuevo. Mismo formato que en la ficha del centro: «13:00-16:00, 20:00-00:30» o «cerrado».",
+            logica:
+              "Los días en blanco no se guardan. Si los dejas todos en blanco, la plantilla no tiene horario y el local nuevo toma el del local modelo (si lo hay).",
           },
           { nombre: "Notas para quien abra un local", queEs: "Texto libre con indicaciones. Máximo 2.000 caracteres." },
           { nombre: "Guardar plantilla", queEs: "Guarda la plantilla.", logica: "Queda en el registro de cambios." },
@@ -533,9 +540,9 @@ export const AYUDA_ORGANIZACION: AyudaArea = {
           { nombre: "Razón social", queEs: "Nombre legal. Obligatorio, mínimo 3 letras." },
           {
             nombre: "CIF",
-            queEs: "Obligatorio. Por ejemplo B88600374.",
+            queEs: "Por ejemplo B88600374. Si aún no lo sabes, déjalo en blanco: se guarda como «PENDIENTE».",
             logica:
-              "Se quitan espacios, puntos y guiones y se pasa a mayúsculas. Se comprueba la forma (letra y cifras), no el dígito de control. No puede repetirse: sale «El CIF … ya es de …».",
+              "Se quitan espacios, puntos y guiones y se pasa a mayúsculas. Se comprueba la forma (letra y cifras), no el dígito de control. No puede repetirse: sale «El CIF … ya es de …» (por eso solo puede haber una sociedad con el CIF pendiente).",
           },
           { nombre: "Domicilio", queEs: "Domicilio fiscal (opcional)." },
           { nombre: "Correo", queEs: "Correo de la sociedad (opcional)." },
@@ -573,9 +580,9 @@ export const AYUDA_ORGANIZACION: AyudaArea = {
           { nombre: "Razón social", queEs: "Nombre legal. Obligatorio, mínimo 3 letras.", influye: "Sale como título de la ficha y en listados y filtros." },
           {
             nombre: "CIF",
-            queEs: "Identificación fiscal. Obligatorio.",
+            queEs: "Identificación fiscal. Si aún no lo sabes, déjalo en blanco: se guarda como «PENDIENTE».",
             logica:
-              "Si está pendiente, el campo sale vacío para que lo escribas. Se comprueba la forma, no el dígito de control. No puede repetirse con otra sociedad.",
+              "Si está pendiente, el campo sale vacío: puedes guardar el resto de datos sin escribirlo. Se comprueba la forma, no el dígito de control. No puede repetirse con otra sociedad.",
           },
           { nombre: "Correo", queEs: "Correo de la sociedad." },
           { nombre: "Domicilio fiscal", queEs: "Dirección fiscal." },
@@ -637,7 +644,7 @@ export const AYUDA_ORGANIZACION: AyudaArea = {
           },
           {
             nombre: "Sociedad",
-            queEs: "Elige una sociedad activa, o deja «Sociedad nueva (escríbela abajo) o pendiente».",
+            queEs: "Elige una sociedad activa, o deja «Sociedad nueva (escríbela abajo) o sin sociedad todavía».",
             logica:
               "Si no eliges ninguna ni escribes una nueva, el local se crea sin sociedad. Se puede poner después, pero sin sociedad no se puede abrir.",
           },
@@ -645,7 +652,7 @@ export const AYUDA_ORGANIZACION: AyudaArea = {
             nombre: "Razón social nueva / CIF",
             queEs: "Para crear una sociedad nueva a la vez que el local.",
             logica:
-              "Hace falta la razón social; si la escribes, el CIF es obligatorio y debe tener formato válido. Si el CIF ya existe sale «Ya existe una sociedad con el CIF …: elígela de la lista».",
+              "Si escribes uno de los dos, hace falta el otro: sin razón social sale «Has escrito un CIF pero falta la razón social…» y sin CIF, «Falta el CIF de la sociedad nueva…». El CIF debe tener formato válido, o escribe «PENDIENTE» si aún no lo sabes (solo puede haber una sociedad pendiente). Si el CIF ya existe sale «Ya existe una sociedad con el CIF …: elígela de la lista».",
           },
           {
             nombre: "¿De dónde parte?",
@@ -756,7 +763,7 @@ export const AYUDA_ORGANIZACION: AyudaArea = {
         titulo: "Paso Horario y espacios",
         campos: [
           ...CAMPOS_HORARIO,
-          { nombre: "Guardar y seguir", queEs: "Guarda y pasa al siguiente paso." },
+          { nombre: "Guardar y seguir", queEs: "Guarda y pasa al siguiente paso.", logica: "Sin el permiso «Editar centros» sale un aviso en lugar del formulario." },
         ],
       },
       {
@@ -769,7 +776,7 @@ export const AYUDA_ORGANIZACION: AyudaArea = {
               "Solo salen las que encajan con el tipo de centro. No se puede activar un área sin la que necesita (por ejemplo Obrador sin Comidas).",
             influye: "Las áreas desactivadas no salen en este local. Desactivar no borra datos.",
           },
-          { nombre: "Guardar y seguir", queEs: "Guarda las áreas y pasa al siguiente paso." },
+          { nombre: "Guardar y seguir", queEs: "Guarda las áreas y pasa al siguiente paso.", logica: "Sin el permiso «Editar centros» sale un aviso en lugar de las casillas." },
         ],
       },
       {
@@ -803,9 +810,15 @@ export const AYUDA_ORGANIZACION: AyudaArea = {
           {
             nombre: "Casillas de usuarios",
             queEs: "Usuarios activos con centros asignados uno a uno (sin contar empleados), con su rol. Marca los que deben ver este local.",
+            logica:
+              "Los que tienen permisos que tú no tienes salen apagados: no puedes cambiar su acceso.",
             influye: "El usuario marcado verá este local en su selector de centros cuando se abra.",
           },
-          { nombre: "Guardar acceso", queEs: "Guarda quién tiene acceso. Queda en el historial del centro." },
+          {
+            nombre: "Guardar acceso",
+            queEs: "Guarda quién tiene acceso. Queda en el historial del centro.",
+            logica: "Solo cambia a los usuarios de la lista: a los desactivados y a los empleados que tengan acceso a este local no se les quita.",
+          },
           { nombre: "Crear un usuario nuevo", queEs: "Abre el alta de usuarios." },
         ],
       },
@@ -826,7 +839,7 @@ export const AYUDA_ORGANIZACION: AyudaArea = {
             nombre: "Lista de comprobación",
             queEs: "Lo que tiene el local y lo que falta, con «Hecho», «Falta» o «Falta (obligatorio)».",
             logica:
-              "Obligatorios (impiden abrir): Marca (solo en locales), Sociedad y Dirección. Recomendados: Teléfono, Correo, Fecha de apertura prevista, Horario, Áreas activas, Productos que puede pedir (si hay Bebidas o Comidas) y Usuarios con acceso al local.",
+              "Obligatorios (impiden abrir): Marca (solo en locales), Sociedad y Dirección. Recomendados: CIF de la sociedad (solo sale si está «PENDIENTE»), Teléfono, Correo, Fecha de apertura prevista, Horario, Áreas activas, Productos que puede pedir (si hay Bebidas o Comidas) y Usuarios con acceso al local.",
           },
           { nombre: "Arreglar", queEs: "Lleva al paso donde se completa lo que falta." },
           {

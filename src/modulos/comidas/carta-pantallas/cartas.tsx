@@ -3,11 +3,11 @@
  * Bebidas) y sus platos. Respeta el local elegido arriba.
  */
 import Link from "next/link";
-import { euros, fecha, numero, porcentaje } from "@/kernel/formato";
+import { euros, fecha, numero, numeroCampo, porcentaje } from "@/kernel/formato";
 import { Boton, Cabecera, Campo, Entrada, Etiqueta, Selector, Tarjeta } from "@/ui";
 import { DatosDetalle, TablaDesplegable } from "@/ui/tabla-desplegable";
 import { alcanceCarta, listarCartas, listarPlatos, localesVisibles, marcasDeLaCadena, type AreaCarta } from "../carta-servicio";
-import { actualizarCarta, anadirPlatoSeccion, cambiarActivoCarta, crearCarta, crearSeccion, fijarObjetivoMarca, quitarPlatoSeccion, quitarSeccion } from "../carta-acciones";
+import { actualizarCarta, anadirPlatoSeccion, cambiarActivoCarta, crearCarta, crearSeccion, fijarObjetivoMarca, quitarPlatoSeccion, quitarSeccion, recuperarSeccion } from "../carta-acciones";
 import { AREA, AvisoError, exigirCarta, listaAlergenos, param, permisoEditar, PestanasCarta, type Busqueda } from "./comun";
 
 export async function PaginaCartas({ area, searchParams }: { area: AreaCarta; searchParams: Busqueda }) {
@@ -21,6 +21,7 @@ export async function PaginaCartas({ area, searchParams }: { area: AreaCarta; se
   const volver = `${A.base}/cartas`;
   const info = new Map(platos.map((p) => [p.id, p]));
   const ejemploSeccion = area === "BEBIDAS" ? { es: "Tintos de Rioja", en: "Rioja reds" } : { es: "Postres", en: "Desserts" };
+  const otraArea = area === "BEBIDAS" ? "comidas" : "bebidas";
 
   return (
     <>
@@ -83,9 +84,12 @@ export async function PaginaCartas({ area, searchParams }: { area: AreaCarta; se
                         {s.nombre} {s.nombreEn && <span className="font-normal text-slate-500">· {s.nombreEn}</span>}
                       </span>
                       {puedeEditar && (
-                        <form action={quitarSeccion}>
+                        <form action={quitarSeccion} className="flex flex-wrap items-center gap-2">
                           <input type="hidden" name="id" value={s.id} />
                           <input type="hidden" name="volver" value={volver} />
+                          <label className="flex items-center gap-1 text-xs text-slate-600">
+                            <input type="checkbox" name="confirmar" required /> Confirmo quitarla
+                          </label>
                           <Boton type="submit" variante="secundario">
                             Quitar sección
                           </Boton>
@@ -144,6 +148,29 @@ export async function PaginaCartas({ area, searchParams }: { area: AreaCarta; se
                     )}
                   </div>
                 ))}
+                {c.seccionesQuitadas.length > 0 && (
+                  <div className="rounded-lg border border-dashed border-slate-300 p-3 text-sm">
+                    <p className="mb-2 text-slate-600">Secciones quitadas (no se ven en la carta; guardan sus {A.platos}):</p>
+                    <ul className="space-y-1">
+                      {c.seccionesQuitadas.map((s) => (
+                        <li key={s.id} className="flex flex-wrap items-center justify-between gap-2">
+                          <span>
+                            {s.nombre} <span className="text-xs text-slate-500">· {numero(s.lineas.length)} {A.platos}</span>
+                          </span>
+                          {puedeEditar && (
+                            <form action={recuperarSeccion}>
+                              <input type="hidden" name="id" value={s.id} />
+                              <input type="hidden" name="volver" value={volver} />
+                              <Boton type="submit" variante="secundario">
+                                Recuperar
+                              </Boton>
+                            </form>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
                 {puedeEditar && (
                   <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                     <form action={crearSeccion} className="flex flex-wrap items-end gap-2">
@@ -188,10 +215,16 @@ export async function PaginaCartas({ area, searchParams }: { area: AreaCarta; se
                     datos={[{ etiqueta: `${A.Plato}s que pueden ir y no están`, valor: numero(paraAnadir.length) }]}
                   />
                   {puedeEditar && (
-                    <form action={cambiarActivoCarta}>
+                    <form action={cambiarActivoCarta} className="flex flex-wrap items-center gap-2">
                       <input type="hidden" name="id" value={c.id} />
                       <input type="hidden" name="activo" value={c.activo ? "false" : "true"} />
+                      <input type="hidden" name="area" value={area} />
                       <input type="hidden" name="volver" value={volver} />
+                      {c.activo && c.seccionesOtraArea > 0 && (
+                        <label className="flex items-center gap-1 text-xs text-slate-600">
+                          <input type="checkbox" name="confirmar" /> También tiene {numero(c.seccionesOtraArea)} sección(es) de {otraArea}: dejarán de verse
+                        </label>
+                      )}
                       <Boton type="submit" variante="secundario">
                         {c.activo ? "Desactivar carta" : "Activar carta"}
                       </Boton>
@@ -254,16 +287,30 @@ export async function PaginaCartas({ area, searchParams }: { area: AreaCarta; se
               <Boton type="submit">Crear carta</Boton>
             </form>
           </Tarjeta>
-          <Tarjeta titulo="Objetivo de coste por marca">
+          <Tarjeta titulo={`Objetivo de coste de ${A.platos} por marca`}>
+            <p className="mb-3 text-sm text-slate-600">
+              {area === "BEBIDAS"
+                ? "% máximo de coste sobre el precio sin IVA para las bebidas (Carta de bebidas y Bodega). Vacío = el mismo que las comidas de la marca."
+                : "% máximo de coste sobre el precio sin IVA para los platos. Las bebidas tienen el suyo en Bebidas → Carta → Cartas."}
+            </p>
             <div className="space-y-2">
               {marcas
                 .filter((m) => !al.marcaId || m.id === al.marcaId)
                 .map((m) => (
                   <form key={m.id} action={fijarObjetivoMarca} className="flex items-end gap-2">
                     <input type="hidden" name="marcaId" value={m.id} />
+                    <input type="hidden" name="area" value={area} />
                     <input type="hidden" name="volver" value={volver} />
                     <span className="flex-1 text-sm">{m.nombre}</span>
-                    <Entrada name="objetivoCostePct" defaultValue={String(m.objetivo)} inputMode="decimal" className="w-24" aria-label={`Objetivo de ${m.nombre} (%)`} />
+                    <Entrada
+                      name="objetivoCostePct"
+                      defaultValue={numeroCampo(area === "BEBIDAS" ? m.objetivoBebidasPropio : m.objetivo)}
+                      placeholder={area === "BEBIDAS" ? `${numeroCampo(m.objetivo)} (comidas)` : undefined}
+                      required={area !== "BEBIDAS"}
+                      inputMode="decimal"
+                      className="w-28"
+                      aria-label={`Objetivo de ${m.nombre} (%)`}
+                    />
                     <span className="text-sm">%</span>
                     <Boton type="submit" variante="secundario">
                       Guardar

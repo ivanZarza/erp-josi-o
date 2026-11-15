@@ -1,4 +1,5 @@
 import "server-only";
+import { hoyMadrid } from "@/kernel/fechas";
 /**
  * Carta y escandallos (sección del módulo Comidas). Lógica de negocio.
  * Ver docs/specs/modulos/comidas/carta-escandallos.md
@@ -10,6 +11,7 @@ import "server-only";
  *  - alergenosDeProductos / fijarAlergenosProducto (Obrador hereda y publica alérgenos de sus elaborados)
  *  - costeYAlergenosEscandallo (cálculo común de coste por ingredientes)
  *  - ventaDeProductos (Bebidas: en qué platos y formatos se vende cada vino, para la vista Bodega)
+ *  - objetivoCosteBotella (Bebidas: objetivo de coste de la marca con el que se colorea la Bodega)
  */
 import { db } from "@/kernel/db";
 import type { Contexto } from "@/kernel/contexto";
@@ -41,9 +43,6 @@ function fechaDeTexto(s?: string): Date | null {
   return s ? new Date(`${s}T00:00:00Z`) : null;
 }
 
-function hoyMadrid(): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Madrid" }).format(new Date());
-}
 
 // ---------------------------------------------------------------------------
 // Alérgenos por producto (los usa también Obrador)
@@ -202,8 +201,20 @@ export async function marcasDeLaCadena(ctx: Contexto) {
     prisma.marca.findMany({ where: { tenantId: ctx.tenant.id, activo: true }, orderBy: { nombre: "asc" }, select: { id: true, nombre: true } }),
     prisma.cartaObjetivoMarca.findMany({ where: { tenantId: ctx.tenant.id } }),
   ]);
-  const obj = new Map(objetivos.map((o) => [o.marcaId, Number(o.objetivoCostePct)]));
-  return marcas.map((m) => ({ ...m, objetivo: obj.get(m.id) ?? OBJETIVO_POR_DEFECTO }));
+  const obj = new Map(objetivos.map((o) => [o.marcaId, o]));
+  return marcas.map((m) => {
+    const o = obj.get(m.id);
+    const objetivo = o ? Number(o.objetivoCostePct) : OBJETIVO_POR_DEFECTO;
+    const objetivoBebidasPropio = o?.objetivoBebidasPct != null ? Number(o.objetivoBebidasPct) : null;
+    // objetivo = el de Comidas; las bebidas usan el suyo y, si la marca no lo tiene, el de Comidas
+    return { ...m, objetivo, objetivoBebidasPropio, objetivoBebidas: objetivoBebidasPropio ?? objetivo };
+  });
+}
+
+/** Objetivo de coste (%) de una marca para un área (Comidas o Bebidas). */
+export function objetivoDeMarca(m: { objetivo: number; objetivoBebidas: number } | undefined, area: AreaCarta): number {
+  if (!m) return OBJETIVO_POR_DEFECTO;
+  return area === "BEBIDAS" ? m.objetivoBebidas : m.objetivo;
 }
 
 /** Marca del centro elegido arriba (para filtrar la carta), o null. */
@@ -260,6 +271,7 @@ export interface FormatoPlato {
   producto: string | null;
   centilitros: number | null; // si se conoce la capacidad del vino
   coste: number;
+  costeUltimo: number; // al último precio de entrada (del producto del formato si lo tiene)
   pctCoste: number;
   sobreObjetivo: boolean;
 }
@@ -338,7 +350,8 @@ export async function listarPlatos(ctx: Contexto, filtro: FiltroPlatos) {
         ingredientes: { orderBy: { orden: "asc" } },
         precios: true,
         formatos: { where: { activo: true }, orderBy: [{ orden: "asc" }, { nombre: "asc" }] },
-        lineas: { include: { seccion: { include: { carta: { select: { id: true, nombre: true, centroId: true, marcaId: true, activo: true } } } } } },
+        // solo las secciones activas («Quitar sección» las desactiva)
+        lineas: { where: { seccion: { activo: true } }, include: { seccion: { include: { carta: { select: { id: true, nombre: true, centroId: true, marcaId: true, activo: true } } } } } },
       },
       orderBy: [{ marcaId: "asc" }, { nombre: "asc" }],
     }),
@@ -354,8 +367,9 @@ export async function listarPlatos(ctx: Contexto, filtro: FiltroPlatos) {
   // Productos de los formatos con producto propio (mágnum…) y capacidad de los vinos (para los centilitros)
   const idsFormato = Array.from(new Set(platos.flatMap((p) => p.formatos.map((f) => f.productoId).filter((x): x is string => !!x))));
   const idsBase = Array.from(new Set(platos.map((p) => p.ingredientes[0]?.productoId).filter((x): x is string => !!x)));
-  const [prodFormato, fichas, locales] = await Promise.all([
+  const [prodFormato, ultimosFormato, fichas, locales] = await Promise.all([
     idsFormato.length ? prisma.producto.findMany({ where: { tenantId: t, id: { in: idsFormato } }, select: { id: true, nombre: true, costeUnitario: true } }) : Promise.resolve([]),
+    ultimosCostes(prisma, t, idsFormato),
     fichasDeProductos(prisma, t, Array.from(new Set([...idsBase, ...idsFormato]))),
     nombresCentros(prisma, t, platos.map((p) => p.centroId)),
   ]);
@@ -374,7 +388,7 @@ export async function listarPlatos(ctx: Contexto, filtro: FiltroPlatos) {
     const precioLocal = ajuste?.precio != null ? Number(ajuste.precio) : null;
     const precio = Number(p.precio);
     const iva = Number(p.iva);
-    const objetivo = m?.objetivo ?? OBJETIVO_POR_DEFECTO;
+    const objetivo = objetivoDeMarca(m, p.area);
     const heredados = unirAlergenos(...lineas.map((l) => l.alergenos));
     const capacidadBase = p.ingredientes.length === 1 ? fichas.get(p.ingredientes[0].productoId)?.capacidadCl ?? null : null;
     const cantidadBase = p.ingredientes.length === 1 ? Number(p.ingredientes[0].cantidad) : null;
@@ -382,6 +396,9 @@ export async function listarPlatos(ctx: Contexto, filtro: FiltroPlatos) {
       const cantidad = Number(f.cantidad);
       const prod = f.productoId ? pf.get(f.productoId) : undefined;
       const costeF = f.productoId ? cantidad * Number(prod?.costeUnitario ?? 0) : cantidad * coste;
+      // al último precio: el del producto propio del formato (mágnum…) o la parte del escandallo
+      const ultimoProducto = f.productoId ? (ultimosFormato.get(f.productoId) ?? Number(prod?.costeUnitario ?? 0)) : 0;
+      const costeUltimoF = f.productoId ? cantidad * ultimoProducto : cantidad * costeUltimo;
       const precioF = i === 0 && precioLocal != null ? precioLocal : Number(f.precio);
       const pctF = porcentajeCoste(costeF, precioF, iva);
       const cap = f.productoId ? fichas.get(f.productoId)?.capacidadCl ?? null : capacidadBase != null && cantidadBase != null ? capacidadBase * cantidadBase : null;
@@ -394,6 +411,7 @@ export async function listarPlatos(ctx: Contexto, filtro: FiltroPlatos) {
         producto: prod?.nombre ?? null,
         centilitros: cap != null ? cap * cantidad : null,
         coste: costeF,
+        costeUltimo: costeUltimoF,
         pctCoste: pctF,
         sobreObjetivo: costeF > 0 && pctF > objetivo,
       };
@@ -418,7 +436,7 @@ export async function listarPlatos(ctx: Contexto, filtro: FiltroPlatos) {
       disponibleLocal: ajuste ? ajuste.disponible : true,
       iva,
       coste: costeMostrado,
-      costeUltimo: formatos.length && !p.formatos[0].productoId ? costeUltimo * formatos[0].cantidad : costeUltimo,
+      costeUltimo: formatos.length ? formatos[0].costeUltimo : costeUltimo,
       pctCoste: pct,
       objetivo,
       sobreObjetivo: (costeMostrado > 0 && pct > objetivo) || formatos.some((f) => f.sobreObjetivo),
@@ -433,7 +451,7 @@ export async function listarPlatos(ctx: Contexto, filtro: FiltroPlatos) {
       activo: p.activo,
       formatos,
       secciones: visibles.map((l) => ({ id: l.seccion.id, nombre: l.seccion.nombre, cartaId: l.seccion.carta.id, carta: l.seccion.carta.nombre, orden: l.orden })),
-      enCartas: Array.from(new Set(p.lineas.map((l) => l.seccion.carta.nombre))),
+      enCartas: Array.from(new Set(p.lineas.map((l) => l.seccion.carta.nombre))), // solo secciones activas
     };
   });
 }
@@ -484,11 +502,14 @@ export async function listarCartas(ctx: Contexto, filtro: { marcaId?: string | n
         ...(marcaId ? { marcaId } : {}),
       },
       include: {
+        // las de esta área, activas y quitadas (las quitadas se pueden recuperar)
         secciones: {
           where: filtro.area ? { area: filtro.area } : {},
           orderBy: { orden: "asc" },
           include: { lineas: { orderBy: { orden: "asc" }, include: { plato: { select: { id: true, nombre: true, precio: true, activo: true, alergenos: true, centroId: true } } } } },
         },
+        // secciones activas de la OTRA área (la carta es compartida entre Comidas y Bebidas)
+        ...(filtro.area ? { _count: { select: { secciones: { where: { activo: true, area: { not: filtro.area } } } } } } : {}),
       },
       orderBy: [{ activo: "desc" }, { tipo: "asc" }, { nombre: "asc" }],
     }),
@@ -502,13 +523,19 @@ export async function listarCartas(ctx: Contexto, filtro: { marcaId?: string | n
     const hasta = c.hasta ? c.hasta.toISOString().slice(0, 10) : null;
     const vigente = c.activo && (c.tipo === "PERMANENTE" || ((!desde || desde <= hoy) && (!hasta || hasta >= hoy)));
     const proxima = c.activo && c.tipo === "TEMPORAL" && !!desde && desde > hoy;
+    const activas = c.secciones.filter((x) => x.activo);
+    const conteo = (c as { _count?: { secciones: number } })._count;
     return {
       ...c,
+      secciones: activas,
+      seccionesQuitadas: c.secciones.filter((x) => !x.activo),
+      /** Secciones activas de la otra área (Comidas si se mira desde Bebidas y al revés) */
+      seccionesOtraArea: conteo?.secciones ?? 0,
       marca: nombres.get(c.marcaId) ?? "—",
       local: c.centroId ? locales.get(c.centroId) ?? "—" : null,
       vigente,
       proxima,
-      totalPlatos: c.secciones.reduce((s, x) => s + x.lineas.length, 0),
+      totalPlatos: activas.reduce((s, x) => s + x.lineas.length, 0),
     };
   });
 }
@@ -588,6 +615,18 @@ export interface VentaProducto {
   precio: number; // con IVA (el del local elegido si lo cambia)
   iva: number;
   cantidad: number; // unidades del producto que se venden en este formato (0,2 = copa de 15 cl)
+  marcaId: string;
+  objetivo: number; // objetivo de coste de Bebidas de la marca del plato (el mismo que usa la Carta)
+}
+
+/**
+ * Objetivo de coste con el que se juzga un vino en la Bodega: el de la marca de la carta donde se
+ * vende la botella entera (si no, el del primer formato; sin ventas, el objetivo por defecto).
+ * Es el mismo que usa la Carta de bebidas para poner en rojo el % de coste.
+ */
+export function objetivoCosteBotella(ventas: VentaProducto[]): number {
+  const botella = ventas.find((v) => Math.abs(v.cantidad - 1) < 0.01) ?? ventas[0];
+  return botella?.objetivo ?? OBJETIVO_POR_DEFECTO;
 }
 
 /**
@@ -598,7 +637,8 @@ export async function ventaDeProductos(ctx: Contexto, productoIds: string[]): Pr
   const mapa = new Map<string, VentaProducto[]>();
   if (productoIds.length === 0) return mapa;
   const prisma = await db();
-  const al = await alcanceCarta(ctx);
+  const [al, marcas] = await Promise.all([alcanceCarta(ctx), marcasDeLaCadena(ctx)]);
+  const objetivos = new Map(marcas.map((m) => [m.id, objetivoDeMarca(m, "BEBIDAS")]));
   const platos = await prisma.cartaPlato.findMany({
     where: {
       tenantId: ctx.tenant.id,
@@ -614,14 +654,15 @@ export async function ventaDeProductos(ctx: Contexto, productoIds: string[]): Pr
     if (ajuste && !ajuste.disponible) continue;
     const iva = Number(p.iva);
     const base = p.ingredientes.length === 1 ? p.ingredientes[0] : null;
+    const marca = { marcaId: p.marcaId, objetivo: objetivos.get(p.marcaId) ?? OBJETIVO_POR_DEFECTO };
     if (p.formatos.length === 0) {
-      if (base) anadir(base.productoId, { platoId: p.id, plato: p.nombre, formato: p.nombre, precio: Number(ajuste?.precio ?? p.precio), iva, cantidad: Number(base.cantidad) });
+      if (base) anadir(base.productoId, { platoId: p.id, plato: p.nombre, formato: p.nombre, precio: Number(ajuste?.precio ?? p.precio), iva, cantidad: Number(base.cantidad), ...marca });
       continue;
     }
     p.formatos.forEach((f, i) => {
       const precio = i === 0 && ajuste?.precio != null ? Number(ajuste.precio) : Number(f.precio);
-      if (f.productoId) anadir(f.productoId, { platoId: p.id, plato: p.nombre, formato: f.nombre, precio, iva, cantidad: Number(f.cantidad) });
-      else if (base) anadir(base.productoId, { platoId: p.id, plato: p.nombre, formato: f.nombre, precio, iva, cantidad: Number(base.cantidad) * Number(f.cantidad) });
+      if (f.productoId) anadir(f.productoId, { platoId: p.id, plato: p.nombre, formato: f.nombre, precio, iva, cantidad: Number(f.cantidad), ...marca });
+      else if (base) anadir(base.productoId, { platoId: p.id, plato: p.nombre, formato: f.nombre, precio, iva, cantidad: Number(base.cantidad) * Number(f.cantidad), ...marca });
     });
   }
   return mapa;
@@ -708,18 +749,46 @@ export async function actualizarPlato(ctx: Contexto, id: string, datos: Record<s
   await comprobarMarca(prisma, ctx, d.marcaId);
   if (antes.centroId && d.marcaId !== antes.marcaId) await comprobarLocal(prisma, ctx, antes.centroId, d.marcaId);
   const conFormatos = (await prisma.cartaPlatoFormato.count({ where: { platoId: id, activo: true } })) > 0;
-  await prisma.cartaPlato.update({
-    where: { id },
-    data: {
-      marcaId: d.marcaId,
-      nombre: d.nombre,
-      nombreEn: d.nombreEn ?? null,
-      descripcion: d.descripcion ?? null,
-      descripcionEn: d.descripcionEn ?? null,
-      ...(conFormatos ? {} : { precio: d.precio }),
-      iva: d.iva,
-      etiquetas: etiquetasDeTexto(d.etiquetas),
-    },
+  const cambiaMarca = d.marcaId !== antes.marcaId;
+  await prisma.$transaction(async (tx) => {
+    await tx.cartaPlato.update({
+      where: { id },
+      data: {
+        marcaId: d.marcaId,
+        nombre: d.nombre,
+        nombreEn: d.nombreEn ?? null,
+        descripcion: d.descripcion ?? null,
+        descripcionEn: d.descripcionEn ?? null,
+        ...(conFormatos ? {} : { precio: d.precio }),
+        iva: d.iva,
+        etiquetas: etiquetasDeTexto(d.etiquetas),
+      },
+    });
+    if (cambiaMarca) {
+      // Un plato solo puede estar en cartas de su marca: sale de las de la marca anterior,
+      // y los precios y «no se sirve» de los locales de la marca anterior dejan de tener sentido.
+      const lineas = await tx.cartaLinea.findMany({
+        where: { platoId: id, seccion: { carta: { tenantId: ctx.tenant.id, marcaId: { not: d.marcaId } } } },
+        include: { seccion: { select: { nombre: true, carta: { select: { nombre: true } } } } },
+      });
+      const localesNuevaMarca = await tx.centro.findMany({ where: { tenantId: ctx.tenant.id, marcaId: d.marcaId }, select: { id: true } });
+      const precios = await tx.cartaPlatoPrecio.findMany({ where: { platoId: id, centroId: { notIn: localesNuevaMarca.map((c) => c.id) } } });
+      if (lineas.length) await tx.cartaLinea.deleteMany({ where: { id: { in: lineas.map((l) => l.id) } } });
+      if (precios.length) await tx.cartaPlatoPrecio.deleteMany({ where: { id: { in: precios.map((x) => x.id) } } });
+      await auditar(tx, {
+        tenantId: ctx.tenant.id,
+        usuarioId: ctx.usuario.id,
+        entidad: "CartaPlato",
+        entidadId: id,
+        accion: "cambiar marca",
+        antes: {
+          marcaId: antes.marcaId,
+          cartas: lineas.map((l) => `${l.seccion.carta.nombre} · ${l.seccion.nombre}`),
+          preciosPorLocal: precios.map((x) => ({ centroId: x.centroId, precio: x.precio != null ? Number(x.precio) : null, disponible: x.disponible })),
+        },
+        despues: { marcaId: d.marcaId },
+      });
+    }
   });
   if ((!conFormatos && Number(antes.precio) !== d.precio) || Number(antes.iva) !== d.iva)
     await auditar(prisma, {
@@ -867,6 +936,7 @@ export async function formatoPrincipal(ctx: Contexto, id: string) {
 
 export async function fijarPrecioCentro(ctx: Contexto, datos: Record<string, unknown>) {
   const d = esquemaPrecioCentro.parse(datos);
+  if (!ctx.centros.some((c) => c.id === d.centroId)) throw new ErrorCarta("No tienes acceso a ese local");
   const prisma = await db();
   const plato = await platoDeLaCadena(prisma, ctx, d.platoId);
   const centro = await prisma.centro.findFirst({ where: { id: d.centroId, tenantId: ctx.tenant.id, marcaId: plato.marcaId } });
@@ -893,12 +963,20 @@ export async function fijarObjetivoMarca(ctx: Contexto, datos: Record<string, un
   const d = esquemaObjetivo.parse(datos);
   const prisma = await db();
   await comprobarMarca(prisma, ctx, d.marcaId);
-  await prisma.cartaObjetivoMarca.upsert({
-    where: { tenantId_marcaId: { tenantId: ctx.tenant.id, marcaId: d.marcaId } },
-    create: { tenantId: ctx.tenant.id, marcaId: d.marcaId, objetivoCostePct: d.objetivoCostePct },
-    update: { objetivoCostePct: d.objetivoCostePct },
+  const clave = { tenantId_marcaId: { tenantId: ctx.tenant.id, marcaId: d.marcaId } };
+  const antes = await prisma.cartaObjetivoMarca.findUnique({ where: clave });
+  // Comidas: objetivoCostePct (obligatorio). Bebidas: objetivoBebidasPct (vacío = usar el de Comidas).
+  const cambio = d.area === "BEBIDAS" ? { objetivoBebidasPct: d.objetivoCostePct ?? null } : { objetivoCostePct: d.objetivoCostePct! };
+  await prisma.cartaObjetivoMarca.upsert({ where: clave, create: { tenantId: ctx.tenant.id, marcaId: d.marcaId, ...cambio }, update: cambio });
+  await auditar(prisma, {
+    tenantId: ctx.tenant.id,
+    usuarioId: ctx.usuario.id,
+    entidad: "CartaObjetivoMarca",
+    entidadId: d.marcaId,
+    accion: d.area === "BEBIDAS" ? "objetivo de coste de bebidas" : "objetivo de coste",
+    antes: antes ? { comidas: Number(antes.objetivoCostePct), bebidas: antes.objetivoBebidasPct != null ? Number(antes.objetivoBebidasPct) : null } : null,
+    despues: { area: d.area, pct: d.objetivoCostePct ?? null },
   });
-  await auditar(prisma, { tenantId: ctx.tenant.id, usuarioId: ctx.usuario.id, entidad: "CartaObjetivoMarca", entidadId: d.marcaId, accion: "objetivo de coste", despues: { pct: d.objetivoCostePct } });
 }
 
 export async function crearCarta(ctx: Contexto, datos: Record<string, unknown>) {
@@ -925,10 +1003,32 @@ export async function actualizarCarta(ctx: Contexto, id: string, datos: Record<s
   await prisma.carta.update({ where: { id }, data: { nombre: d.nombre, tipo: d.tipo, desde: fechaDeTexto(d.desde), hasta: fechaDeTexto(d.hasta) } });
 }
 
-export async function cambiarActivoCarta(ctx: Contexto, id: string, activo: boolean) {
+const NOMBRE_AREA: Record<AreaCarta, { de: string; modulo: string; Modulo: string }> = {
+  COMIDAS: { de: "comidas", modulo: "comidas", Modulo: "Comidas" },
+  BEBIDAS: { de: "bebidas", modulo: "bebidas", Modulo: "Bebidas" },
+};
+
+/**
+ * Activa o desactiva una carta entera. La carta es compartida: si se desactiva desde un área (p. ej.
+ * Bebidas) y tiene secciones activas de la otra, solo puede hacerlo quien edita también la carta de la
+ * otra área, y tiene que confirmarlo (se dejan de ver también esas secciones).
+ */
+export async function cambiarActivoCarta(ctx: Contexto, id: string, activo: boolean, desde: AreaCarta = "COMIDAS", confirmado = false) {
   const prisma = await db();
-  await cartaDeLaCadena(prisma, ctx, id);
+  const c = await cartaDeLaCadena(prisma, ctx, id);
+  if (!activo) {
+    const otra: AreaCarta = desde === "BEBIDAS" ? "COMIDAS" : "BEBIDAS";
+    const n = await prisma.cartaSeccion.count({ where: { cartaId: id, activo: true, area: otra } });
+    if (n > 0) {
+      const A = NOMBRE_AREA[otra];
+      if (!(ctx.tieneModulo(A.modulo) && ctx.puede(`${A.modulo}:carta:editar`)))
+        throw new ErrorCarta(`La carta «${c.nombre}» también tiene ${n} sección(es) de ${A.de}: solo puede desactivarla quien pueda editar la carta de ${A.Modulo}. Si solo quieres quitar las de ${NOMBRE_AREA[desde].de}, usa «Quitar sección».`);
+      if (!confirmado)
+        throw new ErrorCarta(`La carta «${c.nombre}» también tiene ${n} sección(es) de ${A.de}: al desactivarla dejan de verse también. Marca la casilla para confirmarlo.`);
+    }
+  }
   await prisma.carta.update({ where: { id }, data: { activo } });
+  await auditar(prisma, { tenantId: ctx.tenant.id, usuarioId: ctx.usuario.id, entidad: "Carta", entidadId: id, accion: activo ? "activar carta" : "desactivar carta", despues: { nombre: c.nombre, desde } });
 }
 
 export async function crearSeccion(ctx: Contexto, datos: Record<string, unknown>) {
@@ -945,15 +1045,33 @@ async function seccionDeLaCadena(tx: Tx, ctx: Contexto, id: string) {
   return s;
 }
 
-export async function quitarSeccion(ctx: Contexto, id: string) {
+/**
+ * Quita una sección de la carta: se desactiva (no se borra), con sus platos dentro, para poder
+ * recuperarla. Hay que confirmarlo.
+ */
+export async function quitarSeccion(ctx: Contexto, id: string, confirmado: boolean) {
   const prisma = await db();
   const s = await seccionDeLaCadena(prisma, ctx, id);
-  await prisma.cartaSeccion.delete({ where: { id: s.id } }); // borra sus enlaces a platos; los platos se quedan
+  if (!s.activo) throw new ErrorCarta("La sección ya está quitada");
+  if (!confirmado) throw new ErrorCarta(`Marca la casilla para confirmar que quitas la sección «${s.nombre}» de la carta «${s.carta.nombre}».`);
+  const platos = await prisma.cartaLinea.count({ where: { seccionId: s.id } });
+  await prisma.cartaSeccion.update({ where: { id: s.id }, data: { activo: false } });
+  await auditar(prisma, { tenantId: ctx.tenant.id, usuarioId: ctx.usuario.id, entidad: "CartaSeccion", entidadId: s.id, accion: "quitar sección", despues: { carta: s.carta.nombre, seccion: s.nombre, platos } });
+}
+
+/** Vuelve a poner en la carta una sección quitada, con los platos que tenía. */
+export async function recuperarSeccion(ctx: Contexto, id: string) {
+  const prisma = await db();
+  const s = await seccionDeLaCadena(prisma, ctx, id);
+  if (s.activo) return;
+  await prisma.cartaSeccion.update({ where: { id: s.id }, data: { activo: true } });
+  await auditar(prisma, { tenantId: ctx.tenant.id, usuarioId: ctx.usuario.id, entidad: "CartaSeccion", entidadId: s.id, accion: "recuperar sección", despues: { carta: s.carta.nombre, seccion: s.nombre } });
 }
 
 export async function anadirPlatoSeccion(ctx: Contexto, seccionId: string, platoId: string) {
   const prisma = await db();
   const s = await seccionDeLaCadena(prisma, ctx, seccionId);
+  if (!s.activo) throw new ErrorCarta("La sección está quitada: recupérala antes de añadirle platos");
   const plato = await platoDeLaCadena(prisma, ctx, platoId);
   if (plato.marcaId !== s.carta.marcaId) throw new ErrorCarta("El plato es de otra marca");
   if (plato.area !== s.area) throw new ErrorCarta(s.area === "BEBIDAS" ? "En una sección de bebidas solo van bebidas" : "En una sección de comidas solo van platos de comida");

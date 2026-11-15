@@ -15,6 +15,7 @@ import {
   NOMBRE_ESTADO,
   NOMBRE_TIPO,
   obtenerCentro,
+  opcionesEdificio,
 } from "@/modulos/organizacion/servicio";
 import { cambiarEstadoAccion, guardarAreasAccion, guardarDatosCentroAccion, guardarHorarioAccion } from "@/modulos/organizacion/acciones";
 import { AvisosPagina, CamposCentro, CamposHorario, Casilla, EtiquetaEstado, param, textoHorario, textoServicios, type ParametrosPagina } from "@/modulos/organizacion/vistas";
@@ -120,12 +121,14 @@ type CentroFicha = Awaited<ReturnType<typeof obtenerCentro>>;
 
 async function DatosEdicion({ ctxTenant, centro }: { ctxTenant: Ctx; centro: CentroFicha }) {
   const [marcas, sociedades, edificios] = await Promise.all([listarMarcas(ctxTenant), listarSociedades(ctxTenant), listarEdificios(ctxTenant)]);
+  const edificio = opcionesEdificio(edificios, centro);
   return (
     <CamposCentro
       v={centro}
       marcas={marcas.filter((m) => m.activo || m.id === centro.marcaId).map((m) => ({ id: m.id, nombre: m.nombre }))}
       sociedades={sociedades.filter((s) => s.activo || s.id === centro.sociedadId).map((s) => ({ id: s.id, nombre: `${s.razonSocial} (${s.cif})` }))}
-      edificios={edificios.filter((e) => e.id !== centro.edificioId).map((e) => ({ id: e.id, nombre: `${e.direccion}, ${e.ciudad}${e.centros.length ? ` (${e.centros.map((c) => c.codigo).join(", ")})` : ""}` }))}
+      edificios={edificio.opciones}
+      edificioSeleccionado={edificio.seleccionado}
     />
   );
 }
@@ -168,7 +171,8 @@ function EstadoCentroBloque({ centro, puedeAbrir, puedeCerrar, volver }: { centr
         Estado actual: <EtiquetaEstado estado={centro.estado} />
       </div>
       <Aviso>
-        Cerrar un centro <strong>no borra nada</strong>: su historial, stock, pedidos y documentos se conservan. Un centro cerrado deja de salir en el selector de centros y en los pedidos; se puede reabrir.
+        Cerrar un centro <strong>no borra nada</strong>: su historial, stock, pedidos y documentos se conservan. Un centro «Cerrado» (definitivo) deja de salir en el selector de centros y en
+        los pedidos; se puede reabrir. Uno «Cerrado temporalmente» sigue saliendo en el selector (por ejemplo, para hacer inventario o recibir pedidos antes de reabrir).
       </Aviso>
       {centro.estado === "PREPARACION" && (
         <p className="mt-3 text-sm text-suave">Para abrirlo, termina el asistente de apertura: el último paso revisa lo que falta y tiene el botón «Abrir local».</p>

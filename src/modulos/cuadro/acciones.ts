@@ -40,10 +40,11 @@ export async function accionCopiarPresupuesto(form: FormData) {
 }
 
 export async function accionRecalcularIndicadores(form: FormData) {
-  const ctx = await exigir("cuadro", "cuadro:ver");
+  // guardar la foto del mes escribe en la base: hace falta un permiso propio, no basta con ver
+  const ctx = await exigir("cuadro", "cuadro:recalcular");
   const mes = mesValido(String(form.get("mes") ?? ""));
   await ejecutar(`/cuadro/diario?mes=${mes}`, async () => {
     const n = await recalcularIndicadoresMes(ctx, mes);
-    return `Indicadores recalculados: ${n} días de centro.`;
+    return `Indicadores recalculados: ${n.guardados} días de centro guardados${n.borrados ? ` y ${n.borrados} días sin datos borrados` : ""}.`;
   });
 }

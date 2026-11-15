@@ -3,9 +3,9 @@
  * precio por local, alérgenos y datos. La usan /comidas/carta/platos/[id] y /bebidas/carta/platos/[id].
  */
 import { notFound, redirect } from "next/navigation";
-import { euros, numero, porcentaje } from "@/kernel/formato";
+import { euros, numero, numeroCampo, porcentaje } from "@/kernel/formato";
 import { AreaTexto, Aviso, Boton, BotonEnlace, Cabecera, Campo, Cifra, Entrada, Etiqueta, Rejilla, Selector, Tabla, Tarjeta } from "@/ui";
-import { ALERGENOS, porcentajeCoste } from "../carta-alergenos";
+import { ALERGENOS } from "../carta-alergenos";
 import { catalogoIngredientes, fichaPlato, marcasDeLaCadena, type AreaCarta } from "../carta-servicio";
 import {
   actualizarFormato,
@@ -39,8 +39,12 @@ export async function PaginaFichaPlato({ area, params, searchParams }: { area: A
   const [marcas, catalogo] = await Promise.all([marcasDeLaCadena(ctx), puedeEditar ? catalogoIngredientes(ctx, area) : Promise.resolve([])]);
   const grupos = Array.from(new Set(catalogo.map((c) => c.grupo)));
   const volver = `${A.base}/platos/${p.id}`;
-  const precioBase = p.precio / (1 + p.iva / 100);
   const conFormatos = p.formatos.length > 0;
+  // Todas las cifras (precio, % de coste, margen y aviso) con el MISMO precio: el del local elegido
+  // arriba si lo cambia; si no, el de la marca. Es el mismo con el que se calcula p.pctCoste.
+  const precioVigente = conFormatos ? p.formatos[0].precio : (p.precioLocal ?? p.precio);
+  const precioBase = precioVigente / (1 + p.iva / 100);
+  const conPrecioLocal = precioVigente !== p.precio;
 
   return (
     <>
@@ -68,11 +72,15 @@ export async function PaginaFichaPlato({ area, params, searchParams }: { area: A
       <AvisoError error={param(sp, "error")} />
 
       <Rejilla columnas={4}>
-        <Cifra etiqueta={conFormatos ? `Precio (${p.formatos[0].nombre.toLowerCase()})` : "Precio (con IVA)"} valor={euros(p.precio)} detalle={`Sin IVA: ${euros(precioBase)}`} />
+        <Cifra
+          etiqueta={conFormatos ? `Precio (${p.formatos[0].nombre.toLowerCase()})` : "Precio (con IVA)"}
+          valor={euros(precioVigente)}
+          detalle={`Sin IVA: ${euros(precioBase)}${conPrecioLocal ? ` · el de ${ctx.centroActivo?.nombre ?? "este local"} (marca: ${euros(p.precio)})` : ""}`}
+        />
         <Cifra etiqueta={conFormatos ? `Coste (${p.formatos[0].nombre.toLowerCase()})` : "Coste por ración"} valor={euros(p.coste)} detalle={`Al último precio: ${euros(p.costeUltimo)}`} />
         <Cifra
           etiqueta="% de coste"
-          valor={p.coste > 0 ? porcentaje(porcentajeCoste(p.coste, p.precio, p.iva)) : "—"}
+          valor={p.coste > 0 ? porcentaje(p.pctCoste) : "—"}
           detalle={`Objetivo de ${p.marca}: ${porcentaje(p.objetivo)}`}
           tono={p.sobreObjetivo ? "error" : p.coste > 0 ? "ok" : "normal"}
         />
@@ -125,8 +133,8 @@ export async function PaginaFichaPlato({ area, params, searchParams }: { area: A
                       <form action={actualizarFormato} className="flex items-center gap-2">
                         <input type="hidden" name="id" value={f.id} />
                         <input type="hidden" name="volver" value={volver} />
-                        <Entrada name="precio" defaultValue={String(f.precio)} inputMode="decimal" className="w-24" aria-label="Precio con IVA" />
-                        <Entrada name="cantidad" defaultValue={String(f.cantidad)} inputMode="decimal" className="w-20" aria-label="Cantidad" />
+                        <Entrada name="precio" defaultValue={numeroCampo(f === p.formatos[0] ? p.precio : f.precio)} inputMode="decimal" className="w-24" aria-label="Precio con IVA" />
+                        <Entrada name="cantidad" defaultValue={numeroCampo(f.cantidad)} inputMode="decimal" className="w-20" aria-label="Cantidad" />
                         <Boton type="submit" variante="secundario">
                           Guardar
                         </Boton>
@@ -227,8 +235,8 @@ export async function PaginaFichaPlato({ area, params, searchParams }: { area: A
                       <form action={actualizarIngrediente} className="flex items-center gap-2">
                         <input type="hidden" name="id" value={l.id} />
                         <input type="hidden" name="volver" value={volver} />
-                        <Entrada name="cantidad" defaultValue={String(l.cantidad)} inputMode="decimal" className="w-24" aria-label="Cantidad neta" />
-                        <Entrada name="mermaPct" defaultValue={String(l.mermaPct)} inputMode="decimal" className="w-16" aria-label="Merma %" />
+                        <Entrada name="cantidad" defaultValue={numeroCampo(l.cantidad)} inputMode="decimal" className="w-24" aria-label="Cantidad neta" />
+                        <Entrada name="mermaPct" defaultValue={numeroCampo(l.mermaPct)} inputMode="decimal" className="w-16" aria-label="Merma %" />
                         <Boton type="submit" variante="secundario">
                           Guardar
                         </Boton>
@@ -308,7 +316,7 @@ export async function PaginaFichaPlato({ area, params, searchParams }: { area: A
                         <input type="hidden" name="platoId" value={p.id} />
                         <input type="hidden" name="centroId" value={l.id} />
                         <input type="hidden" name="volver" value={volver} />
-                        <Entrada name="precio" inputMode="decimal" defaultValue={l.precioPropio != null ? String(l.precioPropio) : ""} placeholder="El de la marca" className="w-32" aria-label="Precio propio" />
+                        <Entrada name="precio" inputMode="decimal" defaultValue={numeroCampo(l.precioPropio)} placeholder="El de la marca" className="w-32" aria-label="Precio propio" />
                         <label className="flex items-center gap-1 text-sm">
                           <input type="checkbox" name="disponible" defaultChecked={l.disponible} /> Se sirve
                         </label>
@@ -405,16 +413,16 @@ export async function PaginaFichaPlato({ area, params, searchParams }: { area: A
               <div className="grid grid-cols-2 gap-3">
                 {conFormatos ? (
                   <Campo etiqueta="Precio (con IVA)" ayuda="Se cambia en «Formatos de venta»">
-                    <input type="hidden" name="precio" value={String(p.precio)} />
+                    <input type="hidden" name="precio" value={numeroCampo(p.precio)} />
                     <Entrada value={euros(p.precio)} disabled readOnly />
                   </Campo>
                 ) : (
                   <Campo etiqueta="Precio (con IVA)">
-                    <Entrada name="precio" defaultValue={String(p.precio)} inputMode="decimal" required disabled={!puedeEditar} />
+                    <Entrada name="precio" defaultValue={numeroCampo(p.precio)} inputMode="decimal" required disabled={!puedeEditar} />
                   </Campo>
                 )}
                 <Campo etiqueta="IVA %">
-                  <Entrada name="iva" defaultValue={String(p.iva)} inputMode="decimal" required disabled={!puedeEditar} />
+                  <Entrada name="iva" defaultValue={numeroCampo(p.iva)} inputMode="decimal" required disabled={!puedeEditar} />
                 </Campo>
               </div>
               <Campo etiqueta="Etiquetas" ayuda="Separadas por comas: sin gluten, vegetariano, picante…">

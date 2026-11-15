@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { numeroEs } from "@/kernel/esquemas";
 
 /** FormData → objeto plano (las casillas marcadas llegan como "on"). Los campos vacíos se quitan. */
 export function leerFormulario(form: FormData): Record<string, string> {
@@ -36,7 +37,7 @@ export const esquemaConsentimiento = z.object({
 
 export const esquemaRespuestaEncuesta = z.object({
   id: z.string().min(1),
-  nota: z.coerce.number().int().min(1, "La nota va de 1 a 5").max(5, "La nota va de 1 a 5"),
+  nota: numeroEs("La nota va de 1 a 5").pipe(z.number().int("La nota va de 1 a 5").min(1, "La nota va de 1 a 5").max(5, "La nota va de 1 a 5")),
   comentario: z.string().trim().max(2000).optional(),
 });
 
@@ -46,7 +47,7 @@ export const esquemaSeguimientoEncuesta = z.object({
 });
 
 export const esquemaTarjeta = z.object({
-  importe: z.coerce.number().positive("El importe debe ser mayor que 0").max(5000),
+  importe: numeroEs("Importe no válido").pipe(z.number().positive("El importe debe ser mayor que 0").max(5000, "Como máximo 5.000 €")),
   caducidad: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Falta la caducidad"),
   marcaId: z.string().optional(),
   compradorNombre: texto.optional(),
@@ -57,7 +58,7 @@ export const esquemaTarjeta = z.object({
 
 export const esquemaCanje = z.object({
   tarjetaId: z.string().min(1),
-  importe: z.coerce.number().positive("El importe debe ser mayor que 0"),
+  importe: numeroEs("Importe no válido").pipe(z.number().positive("El importe debe ser mayor que 0")),
   centroId: z.string().optional(),
   nota: texto.optional(),
 });

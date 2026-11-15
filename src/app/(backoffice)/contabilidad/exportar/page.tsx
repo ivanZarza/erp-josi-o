@@ -38,7 +38,7 @@ export default async function Exportar({ searchParams }: { searchParams: Paramet
           <div className="mt-4">
             <Aviso>
               Separado por punto y coma, con coma decimal y fechas dd/mm/aaaa (se abre bien en Excel en español). Las facturas recibidas salen en una fila por tipo de IVA. Las ventas diarias solo salen si Caja y
-              ventas está contratado. No incluye anuladas ni facturas emitidas sin número oficial.
+              ventas está contratado. No incluye anuladas ni facturas emitidas sin número oficial. Solo sale lo de los centros que ves en tu selección (arriba) y, si tienes «todos mis centros», también lo de la sociedad sin centro.
             </Aviso>
           </div>
         </Tarjeta>

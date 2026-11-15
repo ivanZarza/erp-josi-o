@@ -1,16 +1,15 @@
-/** Validación (zod) de Calidad. Los números admiten coma decimal española. */
+/** Validación (zod) de Calidad. Los números admiten coma decimal española (numeroEs del kernel). */
 import { z } from "zod";
+import { numeroEs, numeroEsOpcional } from "@/kernel/esquemas";
 
-function aNumeroEs(v: unknown): unknown {
+/** Quita «°C» o «º» que alguien escriba detrás de la temperatura; vacío = sin dato (no cero). */
+const sinGrados = (v: unknown) => {
   if (typeof v !== "string") return v;
-  let s = v.trim().replace(/\s|€|%|°C|º/g, "");
-  if (s === "") return undefined;
-  if (s.includes(",")) s = s.replace(/\./g, "").replace(",", ".");
-  return Number(s);
-}
-
-const numero = (msg: string) => z.preprocess(aNumeroEs, z.number({ error: msg }).finite({ error: msg }));
-const numeroOpcional = (msg: string) => z.preprocess(aNumeroEs, z.number({ error: msg }).finite({ error: msg }).optional());
+  const t = v.replace(/\s*(°C|ºC|°|º)\s*$/i, "").trim();
+  return t === "" ? undefined : t;
+};
+const numero = (msg: string) => z.preprocess(sinGrados, numeroEs(msg));
+const numeroOpcional = (msg: string) => z.preprocess(sinGrados, numeroEsOpcional(msg));
 const texto = (msg: string) => z.string({ error: msg }).trim().min(1, { error: msg });
 const textoOpcional = z.preprocess((v) => (typeof v === "string" && v.trim() === "" ? undefined : v), z.string().trim().optional());
 const fecha = (msg: string) => z.string({ error: msg }).regex(/^\d{4}-\d{2}-\d{2}$/, { error: msg });

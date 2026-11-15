@@ -19,7 +19,9 @@ export default async function ReservasDelDia({ searchParams }: { searchParams: B
   const nombreCentro = Object.fromEntries(ctx.centros.map((c) => [c.id, c.nombre]));
   const volver = `/reservas?fecha=${dia}`;
 
-  const vivas = reservas.filter((r) => r.estado !== "CANCELADA" && r.estado !== "NO_PRESENTADA");
+  // Vivas = las que vienen o han venido: ni canceladas ni no presentadas (igual en las cifras y en cada hora)
+  const esViva = (r: { estado: EstadoReserva }) => r.estado !== "CANCELADA" && r.estado !== "NO_PRESENTADA";
+  const vivas = reservas.filter(esViva);
   const personas = vivas.reduce((a, r) => a + r.personas, 0);
   const enSala = reservas.filter((r) => r.estado === "SENTADA" || r.estado === "LLEGADA").length;
   const noPresentadas = reservas.filter((r) => r.estado === "NO_PRESENTADA").length;
@@ -79,7 +81,7 @@ export default async function ReservasDelDia({ searchParams }: { searchParams: B
           {Array.from(grupos.entries()).map(([hora, lista]) => (
             <section key={hora}>
               <h2 className="mb-2 text-sm font-semibold text-suave">
-                {hora} · {numero(lista.length)} {lista.length === 1 ? "reserva" : "reservas"} · {numero(lista.reduce((a, r) => a + (r.estado === "CANCELADA" ? 0 : r.personas), 0))} personas
+                {hora} · {numero(lista.length)} {lista.length === 1 ? "reserva" : "reservas"} · {numero(lista.filter(esViva).reduce((a, r) => a + r.personas, 0))} personas
               </h2>
               <TablaDesplegable
                 columnas={columnas}

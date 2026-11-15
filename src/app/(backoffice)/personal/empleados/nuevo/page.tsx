@@ -1,6 +1,6 @@
 import { exigir } from "@/kernel/contexto";
 import { Cabecera, Tarjeta, Boton, BotonEnlace, Campo, Entrada } from "@/ui";
-import { listarPuestos, listarConvenios, listarSociedades } from "@/modulos/personal/servicio";
+import { listarPuestos, listarConvenios, listarSociedades, usuariosParaEnlazar } from "@/modulos/personal/servicio";
 import { altaEmpleadoAccion } from "@/modulos/personal/acciones";
 import { hoyMadrid } from "@/modulos/personal/fechas";
 import { CamposEmpleado, CamposContrato } from "../../_componentes/formulario-empleado";
@@ -9,7 +9,7 @@ import { Mensajes, Volver, type Busqueda } from "../../_componentes/comun";
 export default async function NuevoEmpleado({ searchParams }: { searchParams: Busqueda }) {
   const ctx = await exigir("personal", "personal:plantilla:editar");
   const sp = await searchParams;
-  const [puestos, convenios, sociedades] = await Promise.all([listarPuestos(ctx), listarConvenios(ctx), listarSociedades(ctx)]);
+  const [puestos, convenios, sociedades, usuarios] = await Promise.all([listarPuestos(ctx), listarConvenios(ctx), listarSociedades(ctx), usuariosParaEnlazar(ctx)]);
   const hoy = hoyMadrid();
 
   return (
@@ -24,7 +24,7 @@ export default async function NuevoEmpleado({ searchParams }: { searchParams: Bu
               <Entrada type="date" name="fechaAlta" defaultValue={hoy} required />
             </Campo>
           </div>
-          <CamposEmpleado centros={ctx.centros} puestos={puestos} convenios={convenios} sociedades={sociedades} />
+          <CamposEmpleado centros={ctx.centros} puestos={puestos} convenios={convenios} sociedades={sociedades} usuarios={usuarios} />
         </Tarjeta>
         <Tarjeta titulo="Contrato">
           <label className="mb-4 flex items-center gap-2 text-sm">

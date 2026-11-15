@@ -1,16 +1,11 @@
-/** Validación (zod) de Carta y escandallos. Los números admiten coma decimal española. */
+/** Validación (zod) de Carta y escandallos. Los números se leen con numeroEs (de @/kernel/esquemas): «6,5», «1.234,5», «1.500» o «6.5». */
 import { z } from "zod";
+import { numeroEs, numeroEsOpcional } from "@/kernel/esquemas";
 
-function aNumeroEs(v: unknown): unknown {
-  if (typeof v !== "string") return v;
-  let s = v.trim().replace(/\s|€|%/g, "");
-  if (s === "") return undefined;
-  if (s.includes(",")) s = s.replace(/\./g, "").replace(",", ".");
-  return Number(s);
-}
-
-const numero = (msg: string) => z.preprocess(aNumeroEs, z.number({ error: msg }).finite({ error: msg }));
-const numeroOpcional = (msg: string) => z.preprocess(aNumeroEs, z.number({ error: msg }).finite({ error: msg }).optional());
+/** Vacío = sin dato (para que un número obligatorio en blanco dé su mensaje y no se lea como 0). */
+const vacioASinDato = (v: unknown) => (typeof v === "string" && v.trim() === "" ? undefined : v);
+const numero = (msg: string) => z.preprocess(vacioASinDato, numeroEs(msg));
+const numeroOpcional = (msg: string) => numeroEsOpcional(msg);
 const texto = (msg: string) => z.string({ error: msg }).trim().min(1, { error: msg });
 const textoOpcional = z.preprocess((v) => (typeof v === "string" && v.trim() === "" ? undefined : v), z.string().trim().optional());
 const fechaOpcional = z.preprocess(
@@ -73,10 +68,14 @@ export const esquemaSeccion = z.object({
   nombreEn: textoOpcional,
 });
 
-export const esquemaObjetivo = z.object({
-  marcaId: texto("Falta la marca"),
-  objetivoCostePct: numero("Objetivo no válido").pipe(z.number().min(1).max(100, { error: "El objetivo va de 1 a 100 %" })),
-});
+/** Objetivo de coste de una marca para un área. En Bebidas, vacío = usar el de Comidas. */
+export const esquemaObjetivo = z
+  .object({
+    marcaId: texto("Falta la marca"),
+    area: area.default("COMIDAS"),
+    objetivoCostePct: numeroOpcional("Objetivo no válido").pipe(z.number().min(1, { error: "El objetivo va de 1 a 100 %" }).max(100, { error: "El objetivo va de 1 a 100 %" }).optional()),
+  })
+  .refine((o) => o.area === "BEBIDAS" || o.objetivoCostePct !== undefined, { error: "Escribe el objetivo de coste (%)" });
 
 export const esquemaRecargo = z.object({
   centroId: texto("Falta el local"),

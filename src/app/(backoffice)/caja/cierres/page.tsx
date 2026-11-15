@@ -1,5 +1,5 @@
 import { exigir } from "@/kernel/contexto";
-import { euros, fecha, fechaHora, numero } from "@/kernel/formato";
+import { euros, fecha, fechaHora, numero, numeroCampo } from "@/kernel/formato";
 import { Cabecera, Tarjeta, Campo, Entrada, Selector, AreaTexto, Boton, Cifra, Rejilla, Etiqueta, Vacio, HuecoIntegracion } from "@/ui";
 import { TablaDesplegable, DatosDetalle } from "@/ui/tabla-desplegable";
 import { listarCierres, centrosCaja, hoyISO, sumarDias, nombresUsuarios, arqueo } from "@/modulos/caja/servicio";
@@ -107,7 +107,7 @@ export default async function Cierres({ searchParams }: { searchParams: Parametr
                   <input type="hidden" name="centroId" value={centroDia} />
                   <input type="hidden" name="fecha" value={dia} />
                   <Campo etiqueta={caja.apertura ? "Corregir el fondo inicial" : "Abrir la caja con un fondo de"}>
-                    <Entrada name="fondoInicial" required inputMode="decimal" className="w-32 text-right" defaultValue={caja.apertura ? String(Number(caja.apertura.fondoInicial)).replace(".", ",") : "300"} />
+                    <Entrada name="fondoInicial" required inputMode="decimal" className="w-32 text-right" defaultValue={caja.apertura ? numeroCampo(caja.apertura.fondoInicial) : "300"} />
                   </Campo>
                   <Boton type="submit" variante="secundario">
                     {caja.apertura ? "Corregir" : "Abrir caja"}
@@ -164,7 +164,7 @@ export default async function Cierres({ searchParams }: { searchParams: Parametr
             <Campo etiqueta="Efectivo contado">
               <Entrada name="efectivoContado" required inputMode="decimal" className="text-right" />
             </Campo>
-            <Campo etiqueta="Efectivo teórico" ayuda="Vacío = fondo inicial + efectivo de las ventas − retiradas − pagos">
+            <Campo etiqueta="Efectivo teórico" ayuda="Vacío = fondo inicial + efectivo de las ventas + entradas de cambio − retiradas − pagos con caja">
               <Entrada name="efectivoTeorico" inputMode="decimal" className="text-right" />
             </Campo>
             <Campo etiqueta="Tarjeta según el banco" ayuda="Opcional (incluye las propinas con tarjeta)">
@@ -230,7 +230,8 @@ export default async function Cierres({ searchParams }: { searchParams: Parametr
                   datos={[
                     { etiqueta: "Fondo inicial", valor: euros(c.fondoInicial) },
                     { etiqueta: "Efectivo de las ventas", valor: c.efectivoVentas !== null ? euros(c.efectivoVentas) : "—" },
-                    { etiqueta: "Retiradas y pagos con caja", valor: euros(-(Number(c.retiradas) + Number(c.pagosCaja)) + Number(c.entradasCaja)) },
+                    { etiqueta: "Entradas de cambio", valor: euros(c.entradasCaja) },
+                    { etiqueta: "Retiradas y pagos con caja", valor: euros(-(Number(c.retiradas) + Number(c.pagosCaja))) },
                     { etiqueta: "Tarjeta (ventas + propinas)", valor: c.tarjetaTeorico !== null ? `${euros(c.tarjetaTeorico)}${Number(c.propinasTarjeta) ? ` (propinas ${euros(c.propinasTarjeta)})` : ""}` : "—" },
                     { etiqueta: "Propinas en efectivo", valor: euros(c.propinasEfectivo) },
                     { etiqueta: "Tarjeta (banco)", valor: c.tarjetaBanco !== null ? euros(c.tarjetaBanco) : "—" },

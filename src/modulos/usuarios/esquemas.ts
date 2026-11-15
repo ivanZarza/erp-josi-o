@@ -11,15 +11,17 @@ export const contrasena = z
   .max(200)
   .refine((v) => /[A-Za-z]/.test(v) && /\d/.test(v), "La contraseña temporal debe tener letras y números");
 
-export const DatosUsuario = z
-  .object({
-    nombre: z.string().trim().min(2, "Falta el nombre"),
-    email: z.string().trim().toLowerCase().pipe(z.email("Correo no válido")),
-    rol: z.enum(roles, { message: "Rol no válido" }),
-    todosCentros: z.boolean(),
-    centros: z.array(z.string()),
-  })
-  .refine((d) => d.rol === "admin" || d.todosCentros || d.centros.length > 0, "Elige al menos un centro o marca «Todos los centros»");
+/**
+ * Datos de la ficha del usuario. «Al menos un centro» se comprueba en el servicio, con los centros
+ * que ya tenía fuera del alcance de quien edita (esos no salen en el formulario y se conservan).
+ */
+export const DatosUsuario = z.object({
+  nombre: z.string().trim().min(2, "Falta el nombre"),
+  email: z.string().trim().toLowerCase().pipe(z.email("Correo no válido")),
+  rol: z.enum(roles, { message: "Rol no válido" }),
+  todosCentros: z.boolean(),
+  centros: z.array(z.string()),
+});
 export type DatosUsuario = z.infer<typeof DatosUsuario>;
 
 export const AltaUsuario = z.object({ datos: DatosUsuario, contrasena });

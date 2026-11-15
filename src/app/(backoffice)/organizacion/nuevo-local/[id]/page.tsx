@@ -16,10 +16,11 @@ import {
   listarSociedades,
   NOMBRE_TIPO,
   obtenerCentro,
+  opcionesEdificio,
   revisionApertura,
 } from "@/modulos/organizacion/servicio";
 import { AvisosPagina, CamposCentro, CamposHorario, Casilla, EtiquetaEstado, param, type ParametrosPagina } from "@/modulos/organizacion/vistas";
-import { listarIntegraciones, listarUsuarios } from "@/modulos/usuarios/servicio";
+import { elegibleParaCentro, listarIntegraciones, listarUsuarios, motivoNoPuedeGestionar } from "@/modulos/usuarios/servicio";
 
 type Ctx = Awaited<ReturnType<typeof exigir>>;
 type CentroFicha = Awaited<ReturnType<typeof obtenerCentro>>;
@@ -83,14 +84,17 @@ export default async function AsistentePagina({ params, searchParams }: { params
           <Tarjeta titulo={`Paso ${actual.orden} de ${pasos.length} · ${actual.titulo}`}>
             <p className="mb-4 text-sm text-suave">{actual.descripcion}.</p>
             {actual.id === "datos" && <PasoDatos ctx={ctx} centro={centro} volver={volver} />}
-            {actual.id === "horario" && (
-              <form action={guardarHorarioAccion} className="space-y-4">
-                <input type="hidden" name="centroId" value={id} />
-                <input type="hidden" name="volver" value={siguiente ? ruta(siguiente.id) : volver} />
-                <CamposHorario extra={datosExtra(centro.datos)} horaCorte={centro.horaCorte} />
-                <Boton type="submit">Guardar y seguir</Boton>
-              </form>
-            )}
+            {actual.id === "horario" &&
+              (ctx.puede("organizacion:centros:editar") ? (
+                <form action={guardarHorarioAccion} className="space-y-4">
+                  <input type="hidden" name="centroId" value={id} />
+                  <input type="hidden" name="volver" value={siguiente ? ruta(siguiente.id) : volver} />
+                  <CamposHorario extra={datosExtra(centro.datos)} horaCorte={centro.horaCorte} />
+                  <Boton type="submit">Guardar y seguir</Boton>
+                </form>
+              ) : (
+                <Aviso>Para guardar el horario necesitas el permiso «Editar centros (datos, horario, áreas)». Pídeselo a un administrador o sigue con el siguiente paso.</Aviso>
+              ))}
             {actual.id === "areas" && <PasoAreas ctx={ctx} centro={centro} volver={siguiente ? ruta(siguiente.id) : volver} />}
             {actual.id === "productos" && <PasoProductos ctx={ctx} centro={centro} volver={volver} />}
             {actual.id === "usuarios" && <PasoUsuarios ctx={ctx} centro={centro} volver={volver} />}
@@ -127,6 +131,7 @@ export default async function AsistentePagina({ params, searchParams }: { params
 async function PasoDatos({ ctx, centro, volver }: { ctx: Ctx; centro: CentroFicha; volver: string }) {
   if (!ctx.puede("organizacion:centros:editar")) return <Aviso>No tienes permiso para editar los datos del centro.</Aviso>;
   const [marcas, sociedades, edificios] = await Promise.all([listarMarcas(ctx), listarSociedades(ctx), listarEdificios(ctx)]);
+  const edificio = opcionesEdificio(edificios, centro);
   return (
     <form action={guardarDatosCentroAccion} className="space-y-4">
       <input type="hidden" name="centroId" value={centro.id} />
@@ -135,7 +140,8 @@ async function PasoDatos({ ctx, centro, volver }: { ctx: Ctx; centro: CentroFich
         v={centro}
         marcas={marcas.filter((m) => m.activo || m.id === centro.marcaId).map((m) => ({ id: m.id, nombre: m.nombre }))}
         sociedades={sociedades.filter((s) => s.activo || s.id === centro.sociedadId).map((s) => ({ id: s.id, nombre: `${s.razonSocial} (${s.cif})` }))}
-        edificios={edificios.filter((e) => e.id !== centro.edificioId).map((e) => ({ id: e.id, nombre: `${e.direccion}, ${e.ciudad}` }))}
+        edificios={edificio.opciones}
+        edificioSeleccionado={edificio.seleccionado}
       />
       <Boton type="submit">Guardar datos</Boton>
     </form>
@@ -146,6 +152,9 @@ function PasoAreas({ ctx, centro, volver }: { ctx: Ctx; centro: CentroFicha; vol
   const posibles = areasPosibles(ctx.contratados, centro.tipo);
   const activas = areasActivas(centro, ctx.contratados);
   if (!posibles.length) return <Vacio>No hay áreas contratadas que se usen en este tipo de centro.</Vacio>;
+  // mismo requisito que la acción guardarAreasAccion
+  if (!ctx.puede("organizacion:centros:editar"))
+    return <Aviso>Para cambiar las áreas necesitas el permiso «Editar centros (datos, horario, áreas)». Pídeselo a un administrador o sigue con el siguiente paso.</Aviso>;
   return (
     <form action={guardarAreasAccion} className="space-y-4">
       <input type="hidden" name="centroId" value={centro.id} />
@@ -198,9 +207,10 @@ async function PasoProductos({ ctx, centro, volver }: { ctx: Ctx; centro: Centro
 
 async function PasoUsuarios({ ctx, centro, volver }: { ctx: Ctx; centro: CentroFicha; volver: string }) {
   if (!ctx.puede("ajustes:usuarios:editar")) return <Aviso>Para dar acceso a usuarios necesitas el permiso «Crear y editar usuarios».</Aviso>;
-  const usuarios = (await listarUsuarios(ctx, { activos: true })).filter((u) => u.rol !== "empleado");
-  const conTodos = usuarios.filter((u) => u.todosCentros || u.rol === "admin");
-  const elegibles = usuarios.filter((u) => !u.todosCentros && u.rol !== "admin");
+  const usuarios = await listarUsuarios(ctx, { activos: true });
+  const conTodos = usuarios.filter((u) => u.rol !== "empleado" && (u.todosCentros || u.rol === "admin"));
+  // misma regla que guardarUsuariosDeCentro: desactivados y empleados no salen y no se tocan
+  const elegibles = usuarios.filter(elegibleParaCentro);
   return (
     <div className="space-y-4">
       {conTodos.length > 0 && <p className="text-sm text-suave">Ya ven todos los centros: {conTodos.map((u) => u.nombre).join(", ")}.</p>}
@@ -208,12 +218,17 @@ async function PasoUsuarios({ ctx, centro, volver }: { ctx: Ctx; centro: CentroF
         <form action={guardarUsuariosCentroAccion} className="space-y-3">
           <input type="hidden" name="centroId" value={centro.id} />
           <input type="hidden" name="volver" value={volver} />
+          <p className="text-sm text-suave">Solo salen usuarios activos que no son empleados. Al guardar no se toca a nadie más (ni desactivados ni empleados).</p>
           <div className="grid grid-cols-1 gap-x-4 sm:grid-cols-2">
-            {elegibles.map((u) => (
-              <Casilla key={u.id} nombre="usuarios" valor={u.id} marcada={u.centros.some((c) => c.centro.id === centro.id)}>
-                {u.nombre} <span className="text-xs text-suave">· {ROLES[u.rol as keyof typeof ROLES] ?? u.rol}</span>
-              </Casilla>
-            ))}
+            {elegibles.map((u) => {
+              const bloqueo = motivoNoPuedeGestionar(ctx, u);
+              return (
+                <Casilla key={u.id} nombre="usuarios" valor={u.id} marcada={u.centros.some((c) => c.centro.id === centro.id)} deshabilitada={!!bloqueo}>
+                  {u.nombre} <span className="text-xs text-suave">· {ROLES[u.rol as keyof typeof ROLES] ?? u.rol}</span>
+                  {bloqueo && <span className="block text-xs text-suave">Tiene permisos que tú no tienes: no puedes cambiar su acceso.</span>}
+                </Casilla>
+              );
+            })}
           </div>
           <Boton type="submit">Guardar acceso</Boton>
         </form>

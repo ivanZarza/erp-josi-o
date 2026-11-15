@@ -10,7 +10,8 @@ export default async function ResumenPersonal() {
   const ctx = await exigir("personal", "personal:plantilla:ver");
   const [r, centros] = await Promise.all([resumenPersonal(ctx), mapaCentros(ctx)]);
   const errores = r.avisos.filter((a) => a.tono === "error");
-  const vencen = r.avisos.filter((a) => a.tipo === "CONTRATO_VENCE" || a.tipo === "CONTRATO_VENCIDO" || a.tipo === "PERIODO_PRUEBA");
+  // cada aviso sale en una de las dos tablas: contratos (incluidos los «sin contrato») o certificados y documentos
+  const vencen = r.avisos.filter((a) => a.tipo === "SIN_CONTRATO" || a.tipo === "CONTRATO_VENCE" || a.tipo === "CONTRATO_VENCIDO" || a.tipo === "PERIODO_PRUEBA");
   const certificados = r.avisos.filter((a) => a.tipo.startsWith("CERTIFICADO") || a.tipo === "DOCUMENTO_CADUCA");
 
   return (
@@ -37,11 +38,11 @@ export default async function ResumenPersonal() {
       </Rejilla>
 
       <div className="mt-6 grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <Tarjeta titulo="Contratos que vencen (30 días) y periodos de prueba">
+        <Tarjeta titulo="Contratos: sin contrato, vencidos, que vencen (30 días) y periodos de prueba">
           <Tabla
             filas={vencen}
             clave={(a) => `${a.empleadoId}-${a.tipo}-${a.fecha?.toISOString()}`}
-            vacio="Ningún contrato vence en los próximos 30 días."
+            vacio="Todos tienen contrato en vigor y ninguno vence en los próximos 30 días."
             columnas={[
               { titulo: "Empleado", celda: (a) => <Link className="text-acento hover:underline" href={`/personal/empleados/${a.empleadoId}?pestana=contratos`}>{a.empleado}</Link> },
               { titulo: "Centro", celda: (a) => centros.get(a.centroId)?.nombre ?? "—" },

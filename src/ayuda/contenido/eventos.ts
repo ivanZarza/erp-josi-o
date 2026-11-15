@@ -25,7 +25,7 @@ export const AYUDA_EVENTOS: AyudaArea = {
             nombre: "Nueva, Contactada, Presupuesto enviado, Aceptada, Celebrada, Perdida",
             queEs: "Número de solicitudes en cada estado y, debajo, la suma de personas de esas solicitudes.",
             logica:
-              "Cuentan todas las solicitudes que puedes ver, sin tener en cuenta la búsqueda ni el tipo elegidos abajo. «Nueva» sale en naranja si hay alguna sin atender; «Aceptada» en verde; «Perdida» en rojo.",
+              "Cuentan las solicitudes que puedes ver con la búsqueda y el tipo elegidos abajo (el estado no se aplica, porque cada cifra es un estado). «Nueva» sale en naranja si hay alguna sin atender; «Aceptada» en verde; «Perdida» en rojo.",
           },
           {
             nombre: "Pulsar una cifra",
@@ -67,7 +67,7 @@ export const AYUDA_EVENTOS: AyudaArea = {
           { nombre: "Teléfono y Correo", queEs: "Datos de contacto." },
           {
             nombre: "Origen",
-            queEs: "Por dónde llegó, tal como está guardado: TELEFONO, CORREO, WEB, MANUAL (en persona) o RESERVA (grupo grande que venía de Reservas).",
+            queEs: "Por dónde llegó: Teléfono, Correo, Web, A mano (en persona) o Reserva de grupo grande (venía de Reservas).",
           },
           { nombre: "Marca", queEs: "Marca preferida o asignada." },
           { nombre: "Lo que quiere gastar", queEs: "Presupuesto total que indicó el cliente." },
@@ -122,13 +122,13 @@ export const AYUDA_EVENTOS: AyudaArea = {
           {
             nombre: "Marca preferida",
             queEs: "Marca en la que quiere el evento, o «Cualquiera».",
-            logica: "Si no se elige marca pero sí local, se toma la marca del local.",
+            logica: "Si se elige local, la marca es la del local (manda sobre la elegida aquí).",
             influye: "En la ficha, los menús de grupo que se ofrecen para el presupuesto son los de esa marca y los generales.",
           },
-          { nombre: "Local preferido", queEs: "Local concreto, o «Sin decidir». Salen los locales abiertos que tienes asignados." },
+          { nombre: "Local preferido", queEs: "Local concreto, o «Sin decidir». Salen los locales abiertos que tienes asignados.", logica: "Solo se admite un local que tengas asignado; si no, sale «Local no válido o sin acceso»." },
           {
             nombre: "Presupuesto del cliente (€)",
-            queEs: "Lo que el cliente dice que quiere gastar en total. Es solo informativo.",
+            queEs: "Lo que el cliente dice que quiere gastar en total. Es solo informativo. Admite coma decimal y punto de miles (1.500,00).",
             influye: "Sale en la lista con asterisco mientras no haya un presupuesto nuestro.",
           },
           { nombre: "Origen", queEs: "Teléfono (por defecto), Correo, Formulario web o En persona." },
@@ -173,7 +173,7 @@ export const AYUDA_EVENTOS: AyudaArea = {
           { nombre: "Local", queEs: "Local asignado o «Sin asignar»." },
           { nombre: "Espacio", queEs: "Espacio asignado (del área Reservas) con su aforo." },
           { nombre: "Quiere gastar", queEs: "Presupuesto total que indicó el cliente." },
-          { nombre: "Origen", queEs: "Por dónde llegó (TELEFONO, CORREO, WEB, MANUAL o RESERVA)." },
+          { nombre: "Origen", queEs: "Por dónde llegó: Teléfono, Correo, Web, A mano o Reserva de grupo grande (venía de Reservas)." },
           { nombre: "Cliente", queEs: "Enlace «Ver ficha» a la ficha del cliente." },
           { nombre: "Motivo de pérdida", queEs: "Por qué se perdió, si está perdida." },
           { nombre: "Recibida", queEs: "Cuándo se apuntó." },
@@ -209,14 +209,14 @@ export const AYUDA_EVENTOS: AyudaArea = {
           { nombre: "Enviado / Aceptado", queEs: "Fecha y hora en que se marcó como enviado y como aceptado." },
           {
             nombre: "Marcar como enviado",
-            queEs: "Sale en los borradores. Apunta la fecha de envío.",
+            queEs: "Sale en los borradores mientras la solicitud no esté Celebrada ni Perdida. Apunta la fecha de envío.",
             logica: "Si la solicitud estaba en Nueva o Contactada, pasa sola a «Presupuesto enviado» (queda en el historial).",
           },
           {
             nombre: "El cliente lo acepta / El cliente lo rechaza",
-            queEs: "Salen en los presupuestos enviados.",
+            queEs: "Salen en los presupuestos enviados mientras la solicitud no esté Celebrada ni Perdida (con la solicitud cerrada no se puede cambiar ningún presupuesto).",
             logica:
-              "Al aceptar se apunta la fecha y la solicitud pasa sola a «Aceptada» (si no estaba celebrada). Rechazar solo cambia el presupuesto; la solicitud sigue igual.",
+              "Al aceptar se apunta la fecha y la solicitud pasa sola a «Aceptada». Solo puede haber un presupuesto aceptado por solicitud: al aceptar uno, los demás que estuvieran en borrador, enviados o aceptados pasan a «Rechazado» (queda en el registro de cambios como sustituidos). Rechazar solo cambia el presupuesto; la solicitud sigue igual.",
           },
         ],
       },
@@ -229,7 +229,7 @@ export const AYUDA_EVENTOS: AyudaArea = {
             logica: "Si el número de personas es menor que el mínimo del menú, sale un error.",
           },
           { nombre: "Personas", queEs: "Personas a las que se aplica el menú. Viene puesto el número de la solicitud." },
-          { nombre: "Señal (€)", queEs: "Señal que se pide para bloquear la fecha. Opcional." },
+          { nombre: "Señal (€)", queEs: "Señal que se pide para bloquear la fecha. Opcional. Admite coma decimal (300,50)." },
           {
             nombre: "Extras",
             queEs: "Una línea por extra, con este formato: concepto;cantidad;precio con IVA. Ejemplo: Barra libre 1 h;40;12,50",
@@ -255,7 +255,8 @@ export const AYUDA_EVENTOS: AyudaArea = {
           {
             nombre: "Guardar",
             queEs: "Guarda local, espacio, fecha y hora.",
-            logica: "Si se elige local, la marca del evento pasa a ser la del local. Solo se puede mientras la solicitud no esté Celebrada ni Perdida.",
+            logica:
+              "Si se elige local, la marca del evento pasa a ser la del local. El local tiene que ser uno de los tuyos y el espacio, de ese local (sin local no se puede elegir espacio); si no, sale un aviso. Solo se puede mientras la solicitud no esté Celebrada ni Perdida.",
           },
         ],
       },
@@ -331,7 +332,7 @@ export const AYUDA_EVENTOS: AyudaArea = {
             queEs: "Marca del menú o «Todas las marcas».",
             influye: "En la ficha del evento solo se ofrecen los menús de la marca del evento y los de todas las marcas.",
           },
-          { nombre: "Precio por persona (IVA incl.)", queEs: "Precio por comensal. Tiene que ser mayor que cero." },
+          { nombre: "Precio por persona (IVA incl.)", queEs: "Precio por comensal. Tiene que ser mayor que cero. Admite coma decimal (45,50)." },
           { nombre: "IVA %", queEs: "Tipo de IVA del menú (de 0 a 21). Por defecto 10." },
           { nombre: "Mínimo de personas", queEs: "Mínimo de comensales. Por defecto 10." },
           { nombre: "Descripción", queEs: "Frase corta que describe el menú." },

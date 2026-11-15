@@ -1,14 +1,17 @@
 import { exigir } from "@/kernel/contexto";
 import { ROLES } from "@/kernel/permisos";
 import { Aviso, Boton, BotonEnlace, Cabecera, Campo, Entrada, Rejilla, Selector, Tarjeta } from "@/ui";
-import { listarCentros } from "@/modulos/organizacion/servicio";
+import { ambitoCentros, listarCentros } from "@/modulos/organizacion/servicio";
 import { AvisosPagina, Casilla, type ParametrosPagina } from "@/modulos/organizacion/vistas";
 import { crearUsuarioAccion } from "@/modulos/usuarios/acciones";
+import { rolesQuePuedeDar } from "@/modulos/usuarios/servicio";
 
 export default async function NuevoUsuarioPagina({ searchParams }: { searchParams: ParametrosPagina }) {
   const ctx = await exigir("usuarios", "ajustes:usuarios:editar");
   const sp = await searchParams;
-  const centros = await listarCentros(ctx);
+  const [centros, ambito] = await Promise.all([listarCentros(ctx), ambitoCentros(ctx)]);
+  // solo los roles que quien crea puede dar: nadie da permisos que él no tiene
+  const roles = rolesQuePuedeDar(ctx);
 
   return (
     <>
@@ -31,11 +34,11 @@ export default async function NuevoUsuarioPagina({ searchParams }: { searchParam
             <Campo etiqueta="Correo" ayuda="Con él entra en el ERP">
               <Entrada name="email" type="email" required autoComplete="off" />
             </Campo>
-            <Campo etiqueta="Rol" ayuda="Da los permisos de partida; se pueden cambiar después">
-              <Selector name="rol" defaultValue="gerente">
-                {Object.entries(ROLES).map(([id, nombre]) => (
+            <Campo etiqueta="Rol" ayuda="Da los permisos de partida; se pueden cambiar después. Solo salen los roles que tú puedes dar.">
+              <Selector name="rol" defaultValue={roles.includes("gerente") ? "gerente" : roles[0]}>
+                {roles.map((id) => (
                   <option key={id} value={id}>
-                    {nombre}
+                    {ROLES[id]}
                   </option>
                 ))}
               </Selector>
@@ -43,7 +46,11 @@ export default async function NuevoUsuarioPagina({ searchParams }: { searchParam
           </Rejilla>
         </Tarjeta>
         <Tarjeta titulo="Centros que ve">
-          <Casilla nombre="todosCentros">Todos los centros (también los que se abran después)</Casilla>
+          {ambito ? (
+            <p className="text-sm text-suave">Solo puedes darle acceso a los centros que tú ves.</p>
+          ) : (
+            <Casilla nombre="todosCentros">Todos los centros (también los que se abran después)</Casilla>
+          )}
           <div className="mt-2 grid grid-cols-1 gap-x-4 sm:grid-cols-2 lg:grid-cols-4">
             {centros.map((c) => (
               <Casilla key={c.id} nombre="centros" valor={c.id}>

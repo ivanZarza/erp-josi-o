@@ -3,6 +3,7 @@
  * Los formularios llegan como FormData: los campos vacíos se convierten en undefined.
  */
 import { z } from "zod";
+import { numeroEsOpcional } from "@/kernel/esquemas";
 
 const texto = z.preprocess((v) => (typeof v === "string" ? v.trim() : v), z.string());
 const textoOpc = z.preprocess((v) => (typeof v === "string" && v.trim() !== "" ? v.trim() : undefined), z.string().optional());
@@ -11,13 +12,8 @@ const dia = (nombre: string) => texto.pipe(z.string().regex(/^\d{4}-\d{2}-\d{2}$
 const diaOpc = z.preprocess((v) => (typeof v === "string" && v.trim() !== "" ? v.trim() : undefined), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha no válida").optional());
 const hora = (nombre: string) => texto.pipe(z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, `${nombre}: hora no válida (HH:MM)`));
 const horaOpc = z.preprocess((v) => (typeof v === "string" && v.trim() !== "" ? v.trim() : undefined), z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Hora no válida (HH:MM)").optional());
-/** Número escrito en español («1.234,5» o «1234.5»). */
-const numeroOpc = z.preprocess((v) => {
-  if (typeof v !== "string" || v.trim() === "") return undefined;
-  let s = v.trim().replace(/\s|€/g, "");
-  if (s.includes(",")) s = s.replace(/\./g, "").replace(",", ".");
-  return Number(s);
-}, z.number({ error: "Número no válido" }).finite().nonnegative("No puede ser negativo").optional());
+/** Número escrito en español («6,5», «1.234,5», «1.500») o con punto («6.5»): ayudante común de @/kernel/esquemas. */
+const numeroOpc = numeroEsOpcional().pipe(z.number().nonnegative("No puede ser negativo").optional());
 const numero = (nombre: string) => numeroOpc.refine((v) => v !== undefined, `Falta ${nombre}`).transform((v) => v as number);
 const lista = z.preprocess((v) => (Array.isArray(v) ? v : v ? [v] : []), z.array(z.string()));
 
@@ -58,8 +54,8 @@ export const NOMBRE_AUSENCIA: Record<(typeof TIPOS_AUSENCIA)[number], string> = 
   VACACIONES: "Vacaciones",
   ASUNTOS_PROPIOS: "Asuntos propios",
   PERMISO_RETRIBUIDO: "Permiso retribuido",
-  BAJA_ENFERMEDAD: "Baja por enfermedad",
-  BAJA_ACCIDENTE: "Baja por accidente",
+  BAJA_ENFERMEDAD: "Baja por enfermedad o accidente no laboral",
+  BAJA_ACCIDENTE: "Baja por accidente de trabajo",
   NACIMIENTO: "Nacimiento",
   EXCEDENCIA: "Excedencia",
   SIN_JUSTIFICAR: "Sin justificar",
@@ -138,6 +134,8 @@ const camposEmpleado = {
   puestoId: textoOpc,
   categoriaId: textoOpc,
   pin: textoOpc.pipe(z.string().regex(/^\d{4}$/, "El PIN son 4 cifras").optional()),
+  /** Usuario de acceso (Ajustes → Usuarios) enlazado a la ficha: lo necesita el portal «Fichar». */
+  usuarioId: textoOpc,
   notas: textoOpc,
 };
 
@@ -297,6 +295,8 @@ export const esquemaEstadoOferta = z.object({
 
 export const esquemaCandidato = z.object({
   ofertaId: textoOpc,
+  /** Centro de la bolsa (sin oferta). Con oferta se toma el de la oferta. */
+  centroId: textoOpc,
   nombre: obligatorio("el nombre"),
   apellidos: textoOpc,
   email: textoOpc.pipe(z.string().email("Correo no válido").optional()),

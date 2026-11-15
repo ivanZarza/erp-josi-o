@@ -3,7 +3,7 @@ import { moduloPorId } from "@/kernel/registro";
 import { fecha } from "@/kernel/formato";
 import { Aviso, Boton, Cabecera, Etiqueta } from "@/ui";
 import { DatosDetalle, TablaDesplegable } from "@/ui/tabla-desplegable";
-import { areasActivas, listarCentros, NOMBRE_TIPO } from "@/modulos/organizacion/servicio";
+import { ambitoCentros, areasActivas, listarCentros, NOMBRE_TIPO } from "@/modulos/organizacion/servicio";
 import { AvisosPagina, Casilla, type ParametrosPagina } from "@/modulos/organizacion/vistas";
 import { activarModuloAccion, desactivarModuloAccion, guardarCentrosModuloAccion } from "@/modulos/usuarios/acciones";
 import { estadoModulos } from "@/modulos/usuarios/servicio";
@@ -11,7 +11,7 @@ import { estadoModulos } from "@/modulos/usuarios/servicio";
 export default async function ModulosPagina({ searchParams }: { searchParams: ParametrosPagina }) {
   const ctx = await exigir("usuarios", "ajustes:modulos:ver");
   const sp = await searchParams;
-  const [modulos, centros] = await Promise.all([estadoModulos(ctx), listarCentros(ctx)]);
+  const [modulos, centros, ambito] = await Promise.all([estadoModulos(ctx), listarCentros(ctx), ambitoCentros(ctx)]);
   const editar = ctx.puede("ajustes:modulos:editar");
   const nombres = (ids: string[]) => ids.map((i) => moduloPorId(i)?.nombre ?? i).join(", ");
   const vivos = centros.filter((c) => c.estado !== "CERRADO");
@@ -77,6 +77,7 @@ export default async function ModulosPagina({ searchParams }: { searchParams: Pa
                         <form action={guardarCentrosModuloAccion} className="space-y-2 border-t border-slate-100 pt-3">
                           <input type="hidden" name="modulo" value={m.id} />
                           <div className="text-sm font-medium">Centros donde está activo</div>
+                          {ambito && <p className="text-sm text-suave">Solo salen tus centros. En los demás, el área se queda como esté: al guardar no se tocan.</p>}
                           <div className="grid grid-cols-1 gap-x-4 sm:grid-cols-2 lg:grid-cols-4">
                             {aplicables.map((c) => (
                               <Casilla key={c.id} nombre="centros" valor={c.id} marcada={enCentros.some((x) => x.id === c.id)}>

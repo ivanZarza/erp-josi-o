@@ -134,8 +134,10 @@ export async function fijarPrecioCentro(form: FormData) {
 }
 
 export async function fijarObjetivoMarca(form: FormData) {
-  const ctx = await editarCualquiera();
-  await ejecutar(form, () => s.fijarObjetivoMarca(ctx, datos(form)));
+  // el objetivo de cada área lo cambia quien edita la carta de esa área
+  const area = areaDelFormulario(form);
+  const ctx = await editarArea(area);
+  await ejecutar(form, () => s.fijarObjetivoMarca(ctx, { ...datos(form), area }));
 }
 
 export async function crearCarta(form: FormData) {
@@ -151,8 +153,9 @@ export async function actualizarCarta(form: FormData) {
 }
 
 export async function cambiarActivoCarta(form: FormData) {
-  const ctx = await editarCualquiera();
-  await ejecutar(form, () => s.cambiarActivoCarta(ctx, String(form.get("id")), form.get("activo") === "true"));
+  // el área es la de la pantalla desde la que se pulsa; tiene que poder editarla (el servicio mira la otra)
+  const ctx = await editarArea(areaDelFormulario(form));
+  await ejecutar(form, () => s.cambiarActivoCarta(ctx, String(form.get("id")), form.get("activo") === "true", areaDelFormulario(form), form.get("confirmar") === "on"));
 }
 
 export async function crearSeccion(form: FormData) {
@@ -163,7 +166,12 @@ export async function crearSeccion(form: FormData) {
 
 export async function quitarSeccion(form: FormData) {
   const ctx = await editarDato("seccion", String(form.get("id")));
-  await ejecutar(form, () => s.quitarSeccion(ctx, String(form.get("id"))));
+  await ejecutar(form, () => s.quitarSeccion(ctx, String(form.get("id")), form.get("confirmar") === "on"));
+}
+
+export async function recuperarSeccion(form: FormData) {
+  const ctx = await editarDato("seccion", String(form.get("id")));
+  await ejecutar(form, () => s.recuperarSeccion(ctx, String(form.get("id"))));
 }
 
 export async function anadirPlatoSeccion(form: FormData) {

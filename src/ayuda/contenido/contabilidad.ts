@@ -28,13 +28,13 @@ export const AYUDA_CONTABILIDAD: AyudaArea = {
     paraQue:
       "Resume por sociedad lo pendiente de pagar y de cobrar y lo comprado y gastado en el mes. El ERP no lleva la contabilidad oficial: registra facturas y gastos y los prepara para la gestoría.",
     quien:
-      "Permiso «Ver contabilidad». Los botones de arriba salen con «Registrar y validar facturas». " + AMBITO,
+      "Permiso «Ver contabilidad». «Registrar factura recibida» sale con «Registrar y validar facturas» y «Apuntar gasto» con el permiso de gastos. " + AMBITO,
     secciones: [
       {
         titulo: "Botones de arriba",
         campos: [
-          { nombre: "Registrar factura recibida", queEs: "Abre el alta de una factura de proveedor." },
-          { nombre: "Apuntar gasto", queEs: "Abre la pantalla de Gastos para apuntar alquiler, luz, seguros…" },
+          { nombre: "Registrar factura recibida", queEs: "Abre el alta de una factura de proveedor. Solo con permiso para registrar facturas." },
+          { nombre: "Apuntar gasto", queEs: "Abre la pantalla de Gastos para apuntar alquiler, luz, seguros… Solo con permiso para apuntar gastos." },
         ],
       },
       {
@@ -56,14 +56,15 @@ export const AYUDA_CONTABILIDAD: AyudaArea = {
             influye: "Al pulsar, abre Vencimientos.",
           },
           {
-            nombre: "Vence esta semana",
+            nombre: "Pagos que vencen esta semana",
             queEs: "Total con IVA de los pagos que vencen hasta el domingo de esta semana, incluidos los ya vencidos y los que no tienen fecha.",
             logica:
-              "Debajo: número de pagos y cuántos vencimientos de la semana (pagos y cobros) tienen ya la fecha pasada. En rojo si hay alguno vencido; en naranja si hay pagos esta semana.",
+              "Debajo: número de pagos y cuántos de ellos tienen ya la fecha pasada (solo pagos). En rojo si hay algún pago vencido; en naranja si hay pagos esta semana. Los cobros vencidos se avisan en «Pendiente de cobrar».",
           },
           {
             nombre: "Pendiente de cobrar",
             queEs: "Total con IVA de las facturas emitidas en el programa certificado que aún no se han cobrado.",
+            logica: "Si alguna tiene ya el vencimiento pasado, lo dice debajo y sale en naranja (hay que reclamarla).",
           },
           {
             nombre: "Facturas por revisar",
@@ -83,6 +84,17 @@ export const AYUDA_CONTABILIDAD: AyudaArea = {
           },
           { nombre: "Gastos del mes (sin IVA)", queEs: "Base de los gastos apuntados del mes que no están anulados." },
           { nombre: "Facturas pendientes de revisar", queEs: "Aviso si la sociedad tiene facturas sin validar." },
+          {
+            nombre: "Nóminas del mes (Personal)",
+            queEs: "Coste empresa (bruto + Seguridad Social de la empresa) de las nóminas del mes calculadas en Personal para los centros de esta sociedad, y cuántas siguen en borrador.",
+            logica: "Solo si Personal está contratado y tienes permiso para ver nóminas o costes de personal. Es información: no se suma a «Gastos del mes» ni al Cuadro desde aquí (el Cuadro lee las nóminas de Personal), para no contarlas dos veces.",
+            influye: "Enlaza a Personal → Nóminas si tienes permiso.",
+          },
+          {
+            nombre: "Personal apuntado aquí (sin IVA)",
+            queEs: "Gastos y líneas de facturas del mes en categorías de Personal (lo que apunta la gestoría: líquido, IRPF, Seguridad Social…).",
+            logica: "Si hay nóminas y aún no hay nada apuntado, avisa de que faltan por apuntar. Si las dos cifras se separan más de un 1 % (o de 1 €), avisa en naranja para revisarlo con la gestoría.",
+          },
           {
             nombre: "Aviso «Sociedad sin CIF confirmado»",
             queEs: "La sociedad tiene el CIF «PENDIENTE»: hay que revisar en Organización a qué sociedad pertenece cada centro.",
@@ -150,12 +162,13 @@ export const AYUDA_CONTABILIDAD: AyudaArea = {
             nombre: "Aviso «Revisar antes de validar o pagar»",
             queEs: "Solo en facturas pendientes o validadas que tienen algo raro.",
             logica:
-              "Posible duplicada: otra factura no anulada del mismo proveedor y sociedad con el mismo número (sin contar guiones, barras ni espacios) o con el mismo total y fecha a menos de 3 días. No cuadra con los albaranes: solo en facturas cuyas líneas están enlazadas a productos y que tienen proveedor y centro; se comparan con las compras recibidas de ese proveedor y centro desde su factura anterior (o 40 días si no hay anterior, o solo su albarán si está enlazada a una compra). Avisa si el precio difiere más del 0,5 %, si un producto no está en ningún albarán o si la cantidad facturada no es la recibida, y calcula cuánto hay de más o de menos sin IVA.",
+              "Posible duplicada: otra factura no anulada del mismo proveedor y sociedad con el mismo número (sin contar guiones, barras ni espacios) o con el mismo total y fecha a menos de 3 días. No cuadra con los albaranes: en facturas con líneas enlazadas a productos (las que se registran eligiendo un albarán y dejando las líneas vacías), con proveedor y centro, se comparan con las compras recibidas de ese proveedor y centro desde su factura anterior (o 40 días si no hay anterior, o solo su albarán si está enlazada a uno). Avisa si el precio difiere más del 0,5 %, si un producto no está en ningún albarán o si la cantidad facturada no es la recibida, y calcula cuánto hay de más o de menos sin IVA. Si la factura está enlazada a un albarán pero las líneas se escribieron a mano (sin producto), compara el total sin IVA con lo recibido en el albarán (tolerancia del 0,5 %).",
           },
           { nombre: "Número interno", queEs: "Número que da el ERP (serie FR), correlativo." },
           { nombre: "CIF del proveedor", queEs: "CIF del proveedor." },
           { nombre: "Centro", queEs: "Centro al que se carga, o «De la sociedad (sin centro)»." },
-          { nombre: "Categoría", queEs: "Categoría principal de la factura." },
+          { nombre: "Categoría", queEs: "Categoría principal de la factura. Las antiguas sin categoría lo dicen: sus líneas sin categoría propia no suman en el Cuadro." },
+          { nombre: "Albarán enlazado", queEs: "Si la factura se registró con su albarán: entonces se cruza solo con él; si no, por fechas con los albaranes del proveedor." },
           { nombre: "Base", queEs: "Total sin IVA." },
           { nombre: "IVA", queEs: "Cuota de IVA." },
           { nombre: "Origen", queEs: "Alta a mano, Leída con IA o Factura electrónica." },
@@ -232,10 +245,16 @@ export const AYUDA_CONTABILIDAD: AyudaArea = {
           { nombre: "Fecha de la factura", queEs: "Fecha que pone la factura. Por defecto, hoy." },
           { nombre: "Vencimiento", queEs: "Día en que hay que pagarla. Si se deja vacío, sale en Vencimientos como «Sin fecha»." },
           {
+            nombre: "Albarán que factura (opcional)",
+            queEs: "Compra recibida (de los centros de tu selección, últimos 90 días) que aún no está enlazada a ninguna factura.",
+            logica: "Tiene que ser del proveedor elegido (si eliges uno) y del centro elegido (si eliges uno); si no eliges, se toman los del albarán. Un albarán solo puede estar en una factura. Si dejas las líneas vacías, se copian las del albarán (producto, cantidad recibida, precio e IVA del producto).",
+            influye: "Con el albarán, la revisión «No cuadra» compara la factura con él.",
+          },
+          {
             nombre: "Categoría principal",
-            queEs: "Categoría contable de la factura (mercancía, suministros, alquiler…).",
-            influye:
-              "Decide si la factura suma en «Gastos» del Cuadro de mando: solo las de grupo Gasto fijo o Gasto variable. La mercancía no suma ahí (el Cuadro la saca de las compras y los tickets).",
+            queEs: "Categoría contable de la factura (mercancía, suministros, alquiler…). Obligatoria.",
+            logica: "Va a las líneas que no tengan categoría propia.",
+            influye: "Las facturas suman en el Cuadro línea a línea: cada línea con su categoría o, si no tiene, la de la factura; solo las líneas de Gasto fijo o Gasto variable suman en «Gastos» (una factura que mezcla mercancía y una reparación suma solo la reparación). Lo de la sociedad sin centro sale en el Cuadro en una fila aparte «sin centro», sin repartir entre los locales. La mercancía no suma en «Gastos» (el Cuadro la saca de las compras y los tickets).",
           },
         ],
       },
@@ -246,7 +265,7 @@ export const AYUDA_CONTABILIDAD: AyudaArea = {
           {
             nombre: "Categoría",
             queEs: "Categoría de la línea; por defecto «La de la factura».",
-            influye: "Se usa en el archivo para la gestoría. El Cuadro de mando solo mira la categoría principal.",
+            influye: "Se usa en el archivo para la gestoría y en el Cuadro de mando: Las facturas suman en el Cuadro línea a línea: cada línea con su categoría o, si no tiene, la de la factura; solo las líneas de Gasto fijo o Gasto variable suman en «Gastos» (una factura que mezcla mercancía y una reparación suma solo la reparación). Lo de la sociedad sin centro sale en el Cuadro en una fila aparte «sin centro», sin repartir entre los locales.",
           },
         ],
       },
@@ -405,13 +424,13 @@ export const AYUDA_CONTABILIDAD: AyudaArea = {
             nombre: "Categoría",
             queEs: "Categoría contable del gasto. Obligatorio.",
             logica: "Salen las categorías activas que no son de Mercancía ni de Ingreso. Si no hay ninguna, sale un enlace para crearlas.",
-            influye: "Solo los de grupo Gasto fijo o Gasto variable suman en «Gastos» del Cuadro de mando; los de Personal no (el Cuadro saca el personal del área Personal).",
+            influye: "Solo los de grupo Gasto fijo o Gasto variable suman en «Gastos» del Cuadro de mando. Los de Personal solo suman en «Personal» del Cuadro si el área Personal no está contratada; si lo está, el Cuadro usa las nóminas (o las horas) de Personal y no los suma, para no contarlos dos veces. Un gasto sin centro («De la sociedad») sale en el Cuadro en la fila «sin centro» de su sociedad.",
           },
           { nombre: "Concepto", queEs: "Qué es (por ejemplo, «Alquiler de noviembre»). Obligatorio." },
           { nombre: "Proveedor", queEs: "Nombre de quien cobra el gasto (texto libre)." },
           { nombre: "Fecha", queEs: "Fecha del gasto. Por defecto, hoy.", influye: "Decide en qué mes y día cuenta en el Cuadro de mando." },
           { nombre: "Vencimiento", queEs: "Día en que hay que pagarlo." },
-          { nombre: "Importe sin IVA", queEs: "Base del gasto. Obligatorio." },
+          { nombre: "Importe sin IVA", queEs: "Base del gasto. Obligatorio y mayor que cero (los abonos y devoluciones no se apuntan como gasto). Se escribe con coma o punto: 1.250,50 o 1250.5." },
           { nombre: "IVA", queEs: "21 % (por defecto), 10 %, 4 % o 0 % / exento.", logica: "IVA = importe × tipo ÷ 100; total = importe + IVA." },
           { nombre: "Gasto fijo mensual", queEs: "Márcalo si se repite cada mes (alquiler, seguros…) para poder copiarlo al mes siguiente." },
           { nombre: "Guardar gasto", queEs: "Guarda el gasto como «Pendiente de pagar»." },
@@ -491,11 +510,12 @@ export const AYUDA_CONTABILIDAD: AyudaArea = {
         campos: [
           { nombre: "A pagar", queEs: "Total con IVA de los pagos de la lista y cuántos son." },
           {
-            nombre: "Ya vencido",
-            queEs: "Total con IVA de los pagos con la fecha de vencimiento ya pasada.",
-            logica: "Sale en rojo si hay algo vencido en la lista (pago o cobro).",
+            nombre: "Pagos ya vencidos",
+            queEs: "Total con IVA de los pagos con la fecha de vencimiento ya pasada y cuántos son.",
+            logica: "En rojo si hay algún pago vencido.",
           },
           { nombre: "A cobrar", queEs: "Total con IVA de los cobros de la lista y cuántos son." },
+          { nombre: "Cobros ya vencidos", queEs: "Total con IVA de los cobros con la fecha ya pasada (hay que reclamarlos).", logica: "En naranja si hay alguno." },
         ],
       },
       {
@@ -504,7 +524,7 @@ export const AYUDA_CONTABILIDAD: AyudaArea = {
           {
             nombre: "Vence",
             queEs: "Fecha de vencimiento, o «Sin fecha».",
-            logica: "Ordenado por fecha; los que no tienen fecha salen primero. En rojo lo vencido (fecha anterior a hoy).",
+            logica: "Ordenado por fecha; los que no tienen fecha salen primero. En rojo los pagos vencidos (fecha anterior a hoy) y en naranja los cobros vencidos.",
           },
           { nombre: "Tipo", queEs: "Pago o Cobro." },
           { nombre: "Tercero", queEs: "Proveedor o cliente." },
@@ -564,7 +584,7 @@ export const AYUDA_CONTABILIDAD: AyudaArea = {
             nombre: "Grupo",
             queEs: "Mercancía, Personal, Gasto fijo, Gasto variable o Ingreso.",
             influye:
-              "Solo Gasto fijo y Gasto variable suman en «Gastos» del Cuadro de mando. Mercancía no (el Cuadro la saca de compras y tickets) ni Personal (sale del área Personal), para no contar dos veces. Las de Mercancía e Ingreso no salen al apuntar gastos.",
+              "Solo Gasto fijo y Gasto variable suman en «Gastos» del Cuadro de mando. Mercancía no (el Cuadro la saca de compras y tickets). Personal solo suma en «Personal» del Cuadro si el área Personal no está contratada (si lo está, mandan sus nóminas o sus horas), para no contar dos veces. Las de Mercancía e Ingreso no salen al apuntar gastos.",
           },
           { nombre: "Cuenta en la gestoría", queEs: "Opcional. Número de cuenta contable que usa la gestoría (por ejemplo 629).", influye: "Sale en el archivo para la gestoría." },
           { nombre: "Añadir", queEs: "Crea la categoría al final de la lista." },
@@ -598,7 +618,7 @@ export const AYUDA_CONTABILIDAD: AyudaArea = {
     area: AREA,
     paraQue:
       "Descarga un archivo CSV (se abre con Excel) por sociedad y mes con las facturas recibidas, los gastos, las facturas emitidas y las ventas diarias, para mandarlo a la gestoría.",
-    quien: "Permiso «Exportar a la gestoría». Solo salen las sociedades de tus centros.",
+    quien: "Permiso «Exportar a la gestoría». Solo salen las sociedades de tus centros y, de cada una, solo lo de los centros de tu selección (el centro elegido arriba, o todos tus centros); con «todos mis centros» también lo de la sociedad sin centro.",
     secciones: [
       {
         titulo: "Descargar",
@@ -629,7 +649,7 @@ export const AYUDA_CONTABILIDAD: AyudaArea = {
           {
             nombre: "Venta diaria (TPV)",
             queEs: "Una fila por local y día con la venta sin IVA, el IVA y el total.",
-            logica: "Solo si el área Caja y ventas está contratada, y de los locales de esa sociedad que tú puedes ver.",
+            logica: "Solo si el área Caja y ventas está contratada, y de los locales de esa sociedad que están en tu selección.",
           },
         ],
       },

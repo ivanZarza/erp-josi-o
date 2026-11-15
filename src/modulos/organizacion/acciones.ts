@@ -41,11 +41,17 @@ export async function crearLocalAccion(form: FormData) {
   let id = "";
   await intentar("/organizacion/nuevo-local", async () => {
     const razonSocial = texto(form, "sociedadRazon");
+    const cifNuevo = texto(form, "sociedadCif");
+    // sociedad nueva: si se escribe uno de los dos datos, hacen falta los dos (nada se ignora en silencio)
+    if (!texto(form, "sociedadId") && (razonSocial || cifNuevo)) {
+      if (!razonSocial) throw new ErrorNegocio("Has escrito un CIF pero falta la razón social de la sociedad nueva");
+      if (!cifNuevo) throw new ErrorNegocio("Falta el CIF de la sociedad nueva (escribe «PENDIENTE» si aún no lo sabes)");
+    }
     const datos = NuevoLocal.parse({
       marcaId: texto(form, "marcaId"),
       marcaNueva: texto(form, "marcaId") ? undefined : texto(form, "marcaNueva"),
       sociedadId: texto(form, "sociedadId"),
-      sociedadNueva: !texto(form, "sociedadId") && razonSocial ? { razonSocial, cif: texto(form, "sociedadCif") ?? "" } : undefined,
+      sociedadNueva: !texto(form, "sociedadId") && razonSocial ? { razonSocial, cif: cifNuevo ?? "" } : undefined,
       origen: texto(form, "origen") ?? "vacio",
       centroOrigenId: texto(form, "centroOrigenId"),
       codigo: texto(form, "codigo") ?? "",

@@ -196,7 +196,7 @@ export async function PaginaCarta({ area, searchParams }: { area: AreaCarta; sea
               <option value="">Todas las marcas</option>
               {marcas.map((m) => (
                 <option key={m.id} value={m.id}>
-                  {m.nombre} (objetivo {porcentaje(m.objetivo)})
+                  {m.nombre} (objetivo {porcentaje(area === "BEBIDAS" ? m.objetivoBebidas : m.objetivo)})
                 </option>
               ))}
             </Selector>

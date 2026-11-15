@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { exigir } from "@/kernel/contexto";
 import { fecha, numero } from "@/kernel/formato";
-import { Cabecera, Tarjeta, Tabla, Boton, Campo, Entrada, Selector, AreaTexto, Etiqueta, Cifra, Rejilla } from "@/ui";
+import { Cabecera, Tarjeta, Tabla, Boton, Campo, Entrada, Selector, AreaTexto, Etiqueta, Cifra, Rejilla, Aviso } from "@/ui";
 import { TablaDesplegable, DatosDetalle } from "@/ui/tabla-desplegable";
 import * as s from "@/modulos/personal/servicio";
 import * as a from "@/modulos/personal/acciones";
@@ -17,7 +17,7 @@ export default async function Seleccion({ searchParams }: { searchParams: Busque
   const volver = "/personal/seleccion";
   const editar = ctx.puede("personal:seleccion:editar");
   const contratar = editar && ctx.puede("personal:plantilla:editar");
-  const [ofertas, bolsa, puestos, centros] = await Promise.all([s.listarOfertas(ctx), s.bolsaCandidatos(ctx), s.listarPuestos(ctx), s.mapaCentros(ctx)]);
+  const [ofertas, bolsa, puestos, centros, caducados] = await Promise.all([s.listarOfertas(ctx), s.bolsaCandidatos(ctx), s.listarPuestos(ctx), s.mapaCentros(ctx), s.candidatosCaducados(ctx)]);
   const abiertas = ofertas.filter((o) => o.estado === "ABIERTA");
   const enProceso = ofertas.flatMap((o) => o.candidatos).filter((c) => ["ENTREVISTA", "PRUEBA", "OFERTA"].includes(c.estado));
   const hoy = hoyMadrid();
@@ -91,6 +91,21 @@ export default async function Seleccion({ searchParams }: { searchParams: Busque
     <>
       <Cabecera titulo="Selección" subtitulo="Ofertas de empleo, candidatos y bolsa para cubrir bajas y temporada" />
       <Mensajes sp={sp} />
+      {caducados > 0 && (
+        <div className="mb-4">
+          <Aviso tono="aviso" titulo={`${caducados} candidatos han pasado su fecha de borrado`}>
+            Ya no salen en las listas. Sus datos se borran solos la próxima vez que se apunte un candidato, o ahora con el botón.
+            {editar && (
+              <form action={a.borrarCandidatosCaducadosAccion} className="mt-3">
+                <Volver a={volver} />
+                <Boton type="submit" variante="secundario">
+                  Borrar sus datos ahora
+                </Boton>
+              </form>
+            )}
+          </Aviso>
+        </div>
+      )}
       <Rejilla columnas={3}>
         <Cifra etiqueta="Ofertas abiertas" valor={abiertas.length} detalle={`${abiertas.reduce((t, o) => t + o.plazas, 0)} plazas`} />
         <Cifra etiqueta="Candidatos en proceso" valor={enProceso.length} detalle="entrevista, prueba u oferta" />
@@ -185,6 +200,16 @@ export default async function Seleccion({ searchParams }: { searchParams: Busque
         {editar && (
           <form action={a.crearCandidatoAccion} className="mt-4 flex flex-wrap items-end gap-2">
             <Volver a={volver} />
+            <Campo etiqueta="Centro">
+              <Selector name="centroId" required defaultValue={ctx.centroActivo?.id ?? ""}>
+                <option value="">Elige…</option>
+                {ctx.centros.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.nombre}
+                  </option>
+                ))}
+              </Selector>
+            </Campo>
             <Campo etiqueta="Nombre">
               <Entrada name="nombre" required />
             </Campo>
@@ -206,7 +231,7 @@ export default async function Seleccion({ searchParams }: { searchParams: Busque
             <Boton type="submit">Añadir a la bolsa</Boton>
           </form>
         )}
-        <p className="mt-2 text-xs text-slate-500">Protección de datos: con consentimiento se guardan un año; sin él, 90 días. Pasada la fecha se deberán borrar (tarea automática pendiente).</p>
+        <p className="mt-2 text-xs text-slate-500">Protección de datos: con consentimiento se guardan un año; sin él, 90 días. La bolsa es de cada centro: ves la de tus centros. Pasada la fecha («Datos hasta») el candidato deja de salir y sus datos se borran.</p>
       </Tarjeta>
 
       {editar && (

@@ -22,10 +22,12 @@ export default async function DiaADia({ searchParams }: { searchParams: Parametr
         titulo="Día a día"
         subtitulo={`Indicadores guardados de ${nombreMes(mes)} por centro y día. Es una foto: recalcula si se han metido o corregido datos.`}
         acciones={
-          <form action={accionRecalcularIndicadores}>
-            <input type="hidden" name="mes" value={mes} />
-            <Boton type="submit">Recalcular el mes</Boton>
-          </form>
+          ctx.puede("cuadro:recalcular") ? (
+            <form action={accionRecalcularIndicadores}>
+              <input type="hidden" name="mes" value={mes} />
+              <Boton type="submit">Recalcular el mes</Boton>
+            </form>
+          ) : undefined
         }
       />
       <Avisos sp={sp} />
@@ -39,21 +41,20 @@ export default async function DiaADia({ searchParams }: { searchParams: Parametr
       </form>
       <div className="mb-4">
         <Aviso>
-          {ultimo ? `Último cálculo: ${fechaHora(ultimo)}.` : "Este mes aún no se ha calculado."} El cálculo automático cada noche está pendiente (hará falta una tarea programada); mientras tanto, pulsa «Recalcular el mes».
+          {ultimo ? `Último cálculo: ${fechaHora(ultimo)}.` : "Este mes aún no se ha calculado."} El cálculo automático cada noche está pendiente (hará falta una tarea programada); mientras tanto, {ctx.puede("cuadro:recalcular") ? "pulsa «Recalcular el mes»" : "pide a finanzas que lo recalcule"}. Se calcula hasta ayer y los días que se quedan sin datos se borran.
         </Aviso>
       </div>
       <TablaDesplegable
         vacio="Sin indicadores guardados para este mes. Pulsa «Recalcular el mes»."
-        columnas={[{ titulo: "Día" }, { titulo: "Centro" }, { titulo: "Ventas", alinear: "derecha" }, { titulo: "Comensales", alinear: "derecha", secundaria: true }, { titulo: "Mercancía", alinear: "derecha", secundaria: true }, { titulo: "Gastos", alinear: "derecha", secundaria: true }]}
+        columnas={[{ titulo: "Día" }, { titulo: "Centro" }, { titulo: "Ventas", alinear: "derecha" }, { titulo: "Comensales", alinear: "derecha", secundaria: true }, { titulo: "Mercancía", alinear: "derecha", secundaria: true }, { titulo: "Personal", alinear: "derecha", secundaria: true }, { titulo: "Gastos", alinear: "derecha", secundaria: true }]}
         filas={filas.map((f) => ({
           id: f.id,
-          celdas: [fecha(f.fecha), nombre.get(f.centroId) ?? "—", valor(f.ventas), f.comensales === null ? "sin datos" : numero(f.comensales), valor(f.mercancia), valor(f.gastos)],
+          celdas: [fecha(f.fecha), nombre.get(f.centroId) ?? "—", valor(f.ventas), f.comensales === null ? "sin datos" : numero(f.comensales), valor(f.mercancia), valor(f.personal), valor(f.gastos)],
           detalle: (
             <DatosDetalle
               datos={[
                 { etiqueta: "Tickets", valor: f.tickets === null ? "sin datos" : numero(f.tickets) },
                 { etiqueta: "Ticket medio", valor: f.tickets && f.ventas !== null ? euros(Number(f.ventas) / f.tickets) : "—" },
-                { etiqueta: "Personal", valor: valor(f.personal) },
                 { etiqueta: "Calculado", valor: fechaHora(f.calculadoEn) },
               ]}
             />

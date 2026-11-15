@@ -5,6 +5,7 @@ import { Aviso, Boton, BotonEnlace, Cabecera, Campo, Entrada, Rejilla, Tarjeta }
 import { DatosDetalle } from "@/ui/tabla-desplegable";
 import { guardarSociedadAccion } from "@/modulos/organizacion/acciones";
 import { obtenerSociedad } from "@/modulos/organizacion/servicio";
+import { CIF_PENDIENTE } from "@/modulos/organizacion/esquemas";
 import { AvisosPagina, EtiquetaEstado, type ParametrosPagina } from "@/modulos/organizacion/vistas";
 
 export default async function SociedadPagina({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: ParametrosPagina }) {
@@ -28,7 +29,7 @@ export default async function SociedadPagina({ params, searchParams }: { params:
       />
       <AvisosPagina sp={sp} />
       <div className="space-y-4">
-        {s.cif === "PENDIENTE" && <Aviso tono="aviso">Esta sociedad tiene el CIF pendiente: complétalo para poder usarla en facturas.</Aviso>}
+        {s.cif === CIF_PENDIENTE && <Aviso tono="aviso">Esta sociedad tiene el CIF pendiente: complétalo para poder usarla en facturas.</Aviso>}
         <Tarjeta titulo="Datos fiscales">
           {editar ? (
             <form action={guardarSociedadAccion} className="space-y-4">
@@ -37,8 +38,8 @@ export default async function SociedadPagina({ params, searchParams }: { params:
                 <Campo etiqueta="Razón social">
                   <Entrada name="razonSocial" required defaultValue={s.razonSocial} />
                 </Campo>
-                <Campo etiqueta="CIF">
-                  <Entrada name="cif" required defaultValue={s.cif === "PENDIENTE" ? "" : s.cif} />
+                <Campo etiqueta="CIF" ayuda="Si aún no lo sabes, déjalo en blanco: se guarda como pendiente">
+                  <Entrada name="cif" defaultValue={s.cif === CIF_PENDIENTE ? "" : s.cif} />
                 </Campo>
                 <Campo etiqueta="Correo">
                   <Entrada name="email" type="email" defaultValue={s.email ?? ""} />

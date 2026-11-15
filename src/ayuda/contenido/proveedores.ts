@@ -22,12 +22,13 @@ const CAMPOS_FORMULARIO = [
   {
     nombre: "Pedido mínimo (€)",
     queEs: "Importe mínimo que exige el proveedor para servir.",
-    logica: "Cero o más; admite coma decimal.",
+    logica: "Cero o más; con coma o punto: 150, 150,50 o 1.500 (mil quinientos). Vacío = sin pedido mínimo.",
     influye: "Si una compra no llega a este importe, la compra avisa.",
   },
   {
     nombre: "Qué nos sirve",
     queEs: "Áreas que sirve: Bebidas, Comidas y/o Consumibles.",
+    logica: "Consumibles (menaje, limpieza…) todavía no tiene compras propias: se puede marcar, pero hoy solo es informativo y sirve para filtrar esta lista.",
     influye: "En las compras y productos de Bebidas o Comidas salen los proveedores activos de esa área y los que no tienen ninguna área marcada.",
   },
   { nombre: "Notas", queEs: "Comentario libre." },
@@ -45,11 +46,11 @@ export const AYUDA_PROVEEDORES: AyudaArea = {
       {
         titulo: "Cifras de arriba",
         campos: [
-          { nombre: "Proveedores activos", queEs: "Proveedores activos de los que salen con el filtro de abajo." },
-          { nombre: "Sin teléfono", queEs: "Activos sin teléfono: no se les puede pedir por WhatsApp." },
+          { nombre: "Proveedores activos", queEs: "Todos los proveedores activos, sin contar el filtro de abajo. Si hay filtro, debajo dice cuántos de ellos salen con él." },
+          { nombre: "Sin teléfono", queEs: "Activos (todos, sin filtro) sin teléfono: no se les puede pedir por WhatsApp." },
           {
             nombre: "Teléfono mal escrito",
-            queEs: "Activos cuyo teléfono no pasa la comprobación del formato (casi siempre, porque falta el prefijo del país).",
+            queEs: "Activos (todos, sin filtro) cuyo teléfono no pasa la comprobación del formato (casi siempre, porque falta el prefijo del país).",
           },
         ],
       },
@@ -57,7 +58,7 @@ export const AYUDA_PROVEEDORES: AyudaArea = {
         titulo: "Filtros",
         campos: [
           { nombre: "Buscar", queEs: "Busca por parte del nombre, de la persona de contacto o del CIF." },
-          { nombre: "Área", queEs: "Todas las áreas, Bebidas, Comidas o Consumibles (los que tienen marcada esa área)." },
+          { nombre: "Área", queEs: "Todas las áreas, Bebidas, Comidas o Consumibles (los que tienen marcada esa área). Consumibles sale como «aún sin compras»." },
           { nombre: "Ver desactivados", queEs: "Enseña también los proveedores desactivados (tachados)." },
           { nombre: "Filtrar", queEs: "Aplica los filtros." },
         ],

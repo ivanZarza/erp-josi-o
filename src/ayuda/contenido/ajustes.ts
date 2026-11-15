@@ -17,6 +17,11 @@ const ROLES_LLANO =
   "Empleado: solo su portal del empleado. " +
   "Todos menos Empleado pueden ver la Organización. Solo Administrador y Dirección tienen, de partida, permisos de Ajustes y de abrir locales.";
 
+/** Regla contra la escalada de privilegios (src/modulos/usuarios/servicio.ts). */
+const NADIE_DA_LO_QUE_NO_TIENE =
+  "Nadie puede dar un rol ni un permiso que él mismo no tiene: solo un administrador nombra administradores, y en la lista de roles solo salen los que puedes dar. " +
+  "Tampoco puedes cambiar (datos, rol, permisos, contraseña, activar o desactivar) a un administrador si no lo eres, ni a quien tiene permisos que tú no tienes: en su ficha sale el motivo en lugar del formulario.";
+
 export const AYUDA_AJUSTES: AyudaArea = {
   "/ajustes": {
     titulo: "Ajustes",
@@ -74,7 +79,7 @@ export const AYUDA_AJUSTES: AyudaArea = {
           },
           {
             nombre: "Permisos",
-            queEs: "«Los del rol» si usa los permisos de su rol; «A medida» si se le han cambiado casillas; «Todos» para el administrador.",
+            queEs: "«Los del rol» si usa los permisos de su rol; «A medida» si se le han cambiado casillas; «Ninguno» si se le quitaron todos; «Todos» para el administrador.",
           },
           {
             nombre: "Estado",
@@ -90,6 +95,11 @@ export const AYUDA_AJUSTES: AyudaArea = {
           { nombre: "Último acceso", queEs: "Día y hora de la última vez que entró." },
           { nombre: "Alta", queEs: "Cuándo se creó el usuario." },
           { nombre: "Centros", queEs: "Nombres de los centros que ve, o «Todos los centros»." },
+          {
+            nombre: "Aviso en lugar del formulario",
+            queEs: "Sale si no puedes cambiar a esa persona: «Solo un administrador puede cambiar a un administrador» o «Esta persona tiene permisos que tú no tienes…».",
+            logica: NADIE_DA_LO_QUE_NO_TIENE,
+          },
         ],
       },
       {
@@ -105,18 +115,21 @@ export const AYUDA_AJUSTES: AyudaArea = {
             nombre: "Rol",
             queEs: "Su puesto.",
             logica:
-              "Si el usuario tiene permisos a medida, mandan esos y cambiar el rol no los toca. Si usa los del rol, al cambiar de rol cambian sus permisos. No se puede quitar el rol de administrador al único administrador activo, ni quitárselo uno a sí mismo.",
+              "Si el usuario tiene permisos a medida, mandan esos y cambiar el rol no los toca. Si usa los del rol, al cambiar de rol cambian sus permisos. No se puede quitar el rol de administrador al único administrador activo, ni quitárselo uno a sí mismo. Solo salen los roles que tú puedes dar (además del que ya tiene). " +
+              NADIE_DA_LO_QUE_NO_TIENE,
             influye: "Lo que puede ver y hacer en todo el ERP.",
           },
           {
             nombre: "Todos los centros (también los que se abran después)",
             queEs: "Si se marca, ve todos los centros y los nuevos que se abran.",
-            logica: "El administrador siempre tiene todos, aunque no esté marcada.",
+            logica:
+              "El administrador siempre tiene todos, aunque no esté marcada. Solo la ve quien también ve todos los centros: si tú no los ves todos, no puedes darla ni quitarla (si la persona ya la tiene, sale un texto que lo dice y se conserva).",
           },
           {
             nombre: "Casillas de centros",
-            queEs: "Los centros que ve, uno a uno.",
-            logica: "Si no es administrador ni tiene «Todos los centros», hay que marcar al menos uno.",
+            queEs: "Los centros que ve, uno a uno. Solo salen los centros que ves tú.",
+            logica:
+              "Si no es administrador ni tiene «Todos los centros», tiene que quedarle al menos uno. Los centros que tiene y tú no ves no salen aquí y no se tocan al guardar: debajo sale «Además tiene acceso a …, que tú no ves». No puedes darle un centro que tú no ves.",
             influye: "Los centros que le salen en el selector de arriba y los datos que ve en cada área.",
           },
           {
@@ -181,8 +194,8 @@ export const AYUDA_AJUSTES: AyudaArea = {
           },
           {
             nombre: "Rol",
-            queEs: "Su puesto. Da los permisos de partida, que se pueden cambiar después. Por defecto, Gerente de local.",
-            logica: ROLES_LLANO,
+            queEs: "Su puesto. Da los permisos de partida, que se pueden cambiar después. Por defecto, Gerente de local (si puedes darlo).",
+            logica: `${ROLES_LLANO} ${NADIE_DA_LO_QUE_NO_TIENE}`,
           },
         ],
       },
@@ -192,11 +205,12 @@ export const AYUDA_AJUSTES: AyudaArea = {
           {
             nombre: "Todos los centros (también los que se abran después)",
             queEs: "Ve todos los centros de la cadena, también los nuevos.",
-            logica: "Si el rol es Administrador, se marca sola al guardar.",
+            logica:
+              "Si el rol es Administrador, se marca sola al guardar. Solo sale si tú ves todos los centros; si no, sale «Solo puedes darle acceso a los centros que tú ves».",
           },
           {
             nombre: "Casillas de centros",
-            queEs: "Los centros que verá, uno a uno.",
+            queEs: "Los centros que verá, uno a uno (solo salen los que ves tú).",
             logica: "Si no es administrador ni tiene «Todos los centros», hay que marcar al menos uno: si no, sale «Elige al menos un centro o marca «Todos los centros»».",
             influye: "Los centros de su selector y los datos que ve.",
           },
@@ -247,7 +261,13 @@ export const AYUDA_AJUSTES: AyudaArea = {
         campos: [
           {
             nombre: "Rol y modo",
-            queEs: "Debajo del nombre pone su rol y si «Usa los permisos de su rol» o «Tiene permisos a medida (mandan sobre los del rol)».",
+            queEs:
+              "Debajo del nombre pone su rol y si «Usa los permisos de su rol», «Tiene permisos a medida (mandan sobre los del rol)» o «Tiene permisos a medida: ninguno».",
+          },
+          {
+            nombre: "Aviso en lugar de las casillas",
+            queEs: "Si no puedes cambiar a esta persona (es administrador o tiene permisos que tú no tienes), sale el motivo y no hay casillas.",
+            logica: NADIE_DA_LO_QUE_NO_TIENE,
           },
           { nombre: "Volver a usuarios", queEs: "Vuelve a la lista de usuarios." },
           {
@@ -266,7 +286,8 @@ export const AYUDA_AJUSTES: AyudaArea = {
           {
             nombre: "Cada casilla",
             queEs: "Un permiso, con su descripción y, en gris, su clave interna (por ejemplo «organizacion:ver»).",
-            logica: "Sale marcada si la persona tiene hoy ese permiso, ya sea por su rol o porque se le dio a medida.",
+            logica:
+              "Sale marcada si la persona tiene hoy ese permiso, ya sea por su rol o porque se le dio a medida. Las casillas de permisos que tú no tienes salen apagadas: no puedes darlos.",
           },
           {
             nombre: "Etiqueta «del rol»",
@@ -282,13 +303,13 @@ export const AYUDA_AJUSTES: AyudaArea = {
             nombre: "Guardar permisos",
             queEs: "Las casillas marcadas pasan a ser los permisos de esta persona.",
             logica:
-              "Desde ese momento tiene permisos «a medida» y deja de seguir a su rol: si luego cambias el rol, sus permisos no cambian. Los permisos que tuviera de áreas ahora desactivadas se conservan. Queda en el registro de cambios lo de antes y lo de después.",
+              "Desde ese momento tiene permisos «a medida» y deja de seguir a su rol: si luego cambias el rol, sus permisos no cambian. Si desmarcas todas, se queda sin ningún permiso (no vuelve a los de su rol): solo podrá entrar y ver la pantalla de inicio. Los permisos que tuviera de áreas ahora desactivadas se conservan. Si intentas dar un permiso que tú no tienes, sale «No puedes dar permisos que tú no tienes: …». Queda en el registro de cambios lo de antes y lo de después.",
             influye: "Lo que ve en el menú y lo que puede hacer en cada pantalla, desde la siguiente pantalla que abra.",
           },
           {
             nombre: "Volver a los permisos del rol",
             queEs: "Borra los permisos a medida y vuelve a los de su rol.",
-            logica: "Solo sale si tiene permisos a medida.",
+            logica: "Solo sale si tiene permisos a medida (también si se le quitaron todos). Solo funciona si tú tienes todos los permisos de ese rol.",
           },
         ],
       },
@@ -353,7 +374,7 @@ export const AYUDA_AJUSTES: AyudaArea = {
             nombre: "Activar …",
             queEs: "Contrata el área para la cadena.",
             logica:
-              "Si necesita otra área que no está activa, sale el aviso «Antes hay que activar: …» y el botón no funciona. Los centros que ya tenían sus áreas elegidas la reciben activa si encaja con su tipo; los demás la usan sin hacer nada. Queda en el registro de cambios.",
+              "Si necesita otra área que no está activa, sale el aviso «Antes hay que activar: …» y el botón no funciona. Los centros que ya tenían sus áreas elegidas la reciben activa si encaja con su tipo (queda en el historial de cada uno); los demás la usan sin hacer nada. Queda en el registro de cambios.",
             influye: "El área aparece en el menú y en la pantalla de inicio de quien tenga permiso, y sus permisos salen en las casillas de cada usuario.",
           },
           {
@@ -372,12 +393,13 @@ export const AYUDA_AJUSTES: AyudaArea = {
             nombre: "Casillas de centros",
             queEs: "En qué centros se usa esta área. Solo salen si el área está contratada y hay centros donde se puede usar.",
             logica:
-              "Solo salen los centros del tipo adecuado y no cerrados de forma definitiva. No se puede activar en un centro si el área que necesita no está activa allí, ni desactivarla si otra activa en ese centro depende de ella (sale el motivo con el nombre del centro).",
+              "Solo salen los centros del tipo adecuado, no cerrados de forma definitiva y que tú ves. Si no ves todos los centros, sale «Solo salen tus centros…»: en los demás el área se queda como esté. No se puede activar en un centro si el área que necesita no está activa allí, ni desactivarla si otra activa en ese centro depende de ella (sale el motivo con el nombre del centro).",
             influye: "En los centros desmarcados el área deja de salir. No se borra nada.",
           },
           {
             nombre: "Guardar centros",
-            queEs: "Guarda en qué centros queda activa. Queda en el registro de cambios (qué centros cambiaron).",
+            queEs:
+              "Guarda en qué centros queda activa. Queda en el registro de cambios (qué centros cambiaron) y también en el historial de cada centro que cambia (acción «areas», «desde Módulos contratados»).",
           },
         ],
       },

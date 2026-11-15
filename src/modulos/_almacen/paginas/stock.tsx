@@ -10,7 +10,7 @@ import { MOTIVOS_MERMA } from "@/nucleo/mermas";
 import type { Contexto } from "@/kernel/contexto";
 import type { AreaAlmacen } from "@/nucleo/comun-almacen";
 import { accionAjustarCentro, accionMerma } from "../acciones";
-import { EtiquetaStock, Mensajes, Ocultos, paraCampo, rutaVolver, textosArea, uno, unidad, type PropsPagina } from "../comun";
+import { EtiquetaStock, Mensajes, Ocultos, paraCampo, rutaVolver, textoCantidades, textosArea, uno, unidad, type PropsPagina } from "../comun";
 import { centrosDelArea } from "./resumen";
 
 export async function PaginaStock({ area, searchParams }: PropsPagina) {
@@ -43,7 +43,7 @@ export async function PaginaStock({ area, searchParams }: PropsPagina) {
       <div className="space-y-4">
         <Rejilla columnas={4}>
           <Cifra etiqueta="Valor" valor={euros(r.valor)} />
-          <Cifra etiqueta="Referencias" valor={numero(r.referencias)} detalle={`${numero(r.unidades)} unidades`} />
+          <Cifra etiqueta="Referencias" valor={numero(r.referencias)} detalle={textoCantidades(r.cantidades)} />
           <Cifra etiqueta="Bajo mínimo" valor={numero(r.bajoMinimo)} tono={r.bajoMinimo ? "aviso" : "ok"} />
           <Cifra etiqueta="Sin stock" valor={numero(r.sinStock)} tono={r.sinStock ? "error" : "ok"} />
         </Rejilla>

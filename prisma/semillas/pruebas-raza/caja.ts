@@ -705,7 +705,8 @@ export async function sembrar(prisma: PrismaClient, ctx: ContextoPruebas) {
   // Lo mismo que «Recalcular el mes» de /cuadro/diario (src/modulos/cuadro/servicio.ts, cifrasPorCentroYDia):
   // ventas, comensales y tickets de Caja; mercancía = coste teórico de lo vendido desde el primer día con
   // tickets (antes, compras recibidas + recibido de otros centros − servido); personal = horas fichadas (o
-  // del cuadrante si no hay fichaje) × coste/hora del contrato. Gastos: sin datos (se rellenan con «Recalcular el mes»).
+  // del cuadrante si no hay fichaje) × coste/hora del contrato, salvo en los meses con nóminas (manda su coste
+  // empresa repartido por días). Gastos: sin datos (se rellenan con «Recalcular el mes»).
   const yaIndicadores = await prisma.indicadorDiario.count({ where: { tenantId: t, centroId } });
   if (yaIndicadores === 0) {
     const desdeMes = `${primerDia.slice(0, 7)}-01`;
@@ -762,6 +763,19 @@ export async function sembrar(prisma: PrismaClient, ctx: ContextoPruebas) {
       if (!fichadas.has(`${a.empleadoId}|${dia}`)) fila(dia).personal += horasTurno(a) * costeHora(a.empleadoId, dia);
     }
     for (const j of jornadasPersonal) fila(j.dia).personal += j.horas * costeHora(j.empleadoId, j.dia);
+    // Regla del Cuadro (15/11/2026): si el mes tiene nóminas calculadas, manda su coste empresa repartido por igual
+    // entre los días del mes (al céntimo); las horas solo cuentan en los meses sin nóminas.
+    for (const [mesN, coste] of costeNominas) {
+      if (!coste) continue;
+      const [an, me] = mesN.split("-").map(Number);
+      const diasMes = new Date(Date.UTC(an, me, 0)).getUTCDate();
+      const acumulado = (n: number) => r2((coste * n) / diasMes);
+      for (let i = 0; i < diasMes; i++) {
+        const dia = `${mesN}-${String(i + 1).padStart(2, "0")}`;
+        if (dia < desdeMes || dia > ayer) continue;
+        fila(dia).personal = r2(acumulado(i + 1) - acumulado(i));
+      }
+    }
 
     const datos: Prisma.IndicadorDiarioCreateManyInput[] = [...filas]
       .filter(([dia]) => dia >= desdeMes && dia <= ayer)

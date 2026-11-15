@@ -1,19 +1,20 @@
 import { exigir } from "@/kernel/contexto";
-import { ROLES } from "@/kernel/permisos";
+import { leerPermisosGuardados, ROLES } from "@/kernel/permisos";
 import { fechaHora } from "@/kernel/formato";
-import { Boton, BotonEnlace, Cabecera, Campo, Entrada, Etiqueta, Rejilla, Selector, Tarjeta } from "@/ui";
+import { Aviso, Boton, BotonEnlace, Cabecera, Campo, Entrada, Etiqueta, Rejilla, Selector, Tarjeta } from "@/ui";
 import { DatosDetalle, TablaDesplegable } from "@/ui/tabla-desplegable";
-import { listarCentros } from "@/modulos/organizacion/servicio";
+import { ambitoCentros, listarCentros } from "@/modulos/organizacion/servicio";
 import { AvisosPagina, Casilla, param, type ParametrosPagina } from "@/modulos/organizacion/vistas";
 import { actualizarUsuarioAccion, cambiarActivoUsuarioAccion, restablecerContrasenaAccion } from "@/modulos/usuarios/acciones";
-import { listarUsuarios } from "@/modulos/usuarios/servicio";
+import { listarUsuarios, motivoNoPuedeGestionar, rolesQuePuedeDar } from "@/modulos/usuarios/servicio";
 
 export default async function UsuariosPagina({ searchParams }: { searchParams: ParametrosPagina }) {
   const ctx = await exigir("usuarios", "ajustes:usuarios:ver");
   const sp = await searchParams;
   const verInactivos = param(sp, "inactivos") === "1";
-  const [usuarios, centros] = await Promise.all([listarUsuarios(ctx, verInactivos ? undefined : { activos: true }), listarCentros(ctx)]);
+  const [usuarios, centros, ambito] = await Promise.all([listarUsuarios(ctx, verInactivos ? undefined : { activos: true }), listarCentros(ctx), ambitoCentros(ctx)]);
   const editar = ctx.puede("ajustes:usuarios:editar");
+  const rolesDables = rolesQuePuedeDar(ctx);
   const nombreRol = (r: string) => ROLES[r as keyof typeof ROLES] ?? r;
 
   return (
@@ -37,7 +38,10 @@ export default async function UsuariosPagina({ searchParams }: { searchParams: P
         total={`${usuarios.length} usuarios`}
         filas={usuarios.map((u) => {
           const todos = u.todosCentros || u.rol === "admin";
-          const propios = Array.isArray(u.permisos) && (u.permisos as unknown[]).length > 0;
+          const guardados = leerPermisosGuardados(u.permisos);
+          const bloqueo = editar ? motivoNoPuedeGestionar(ctx, u) : null;
+          // centros que tiene y que quien edita no ve: no salen en el formulario y no se tocan al guardar
+          const fuera = ambito ? u.centros.filter((c) => !ambito.includes(c.centro.id)) : [];
           return {
             id: u.id,
             celdas: [
@@ -45,7 +49,13 @@ export default async function UsuariosPagina({ searchParams }: { searchParams: P
               u.email,
               nombreRol(u.rol),
               todos ? "Todos" : u.centros.map((c) => c.centro.codigo).join(", ") || "Ninguno",
-              u.rol === "admin" ? "Todos" : propios ? <Etiqueta key="p" tono="info">A medida</Etiqueta> : "Los del rol",
+              u.rol === "admin" ? (
+                "Todos"
+              ) : guardados ? (
+                <Etiqueta key="p" tono={guardados.length ? "info" : "aviso"}>{guardados.length ? "A medida" : "Ninguno"}</Etiqueta>
+              ) : (
+                "Los del rol"
+              ),
               u.activo ? <Etiqueta key="e" tono="ok">Activo</Etiqueta> : <Etiqueta key="e" tono="error">Desactivado</Etiqueta>,
             ],
             detalle: (
@@ -58,7 +68,8 @@ export default async function UsuariosPagina({ searchParams }: { searchParams: P
                     { etiqueta: "Centros", valor: todos ? "Todos los centros" : u.centros.map((c) => c.centro.nombre).join(", ") || "Ninguno" },
                   ]}
                 />
-                {editar && (
+                {editar && bloqueo && <Aviso tono="aviso">{bloqueo}.</Aviso>}
+                {editar && !bloqueo && (
                   <>
                     <form action={actualizarUsuarioAccion} className="space-y-3 border-t border-slate-100 pt-3">
                       <input type="hidden" name="usuarioId" value={u.id} />
@@ -71,17 +82,25 @@ export default async function UsuariosPagina({ searchParams }: { searchParams: P
                         </Campo>
                         <Campo etiqueta="Rol">
                           <Selector name="rol" defaultValue={u.rol}>
-                            {Object.entries(ROLES).map(([id, nombre]) => (
-                              <option key={id} value={id}>
-                                {nombre}
-                              </option>
-                            ))}
+                            {Object.entries(ROLES)
+                              .filter(([id]) => id === u.rol || rolesDables.includes(id as keyof typeof ROLES))
+                              .map(([id, nombre]) => (
+                                <option key={id} value={id}>
+                                  {nombre}
+                                </option>
+                              ))}
                           </Selector>
                         </Campo>
                       </Rejilla>
-                      <Casilla nombre="todosCentros" marcada={u.todosCentros}>
-                        Todos los centros (también los que se abran después)
-                      </Casilla>
+                      {ambito ? (
+                        // quien no ve todos los centros no puede dar ni quitar «Todos los centros»: se manda tal cual
+                        u.todosCentros && <input type="hidden" name="todosCentros" value="on" />
+                      ) : (
+                        <Casilla nombre="todosCentros" marcada={u.todosCentros}>
+                          Todos los centros (también los que se abran después)
+                        </Casilla>
+                      )}
+                      {ambito && u.todosCentros && <p className="text-sm text-suave">Ve todos los centros. Solo quien también los ve todos puede cambiarlo.</p>}
                       <div className="grid grid-cols-1 gap-x-4 sm:grid-cols-2 lg:grid-cols-4">
                         {centros.map((c) => (
                           <Casilla key={c.id} nombre="centros" valor={c.id} marcada={u.centros.some((x) => x.centro.id === c.id)}>
@@ -89,6 +108,11 @@ export default async function UsuariosPagina({ searchParams }: { searchParams: P
                           </Casilla>
                         ))}
                       </div>
+                      {fuera.length > 0 && (
+                        <p className="text-sm text-suave">
+                          Además tiene acceso a {fuera.map((c) => c.centro.nombre).join(", ")}, que tú no ves: no se tocan al guardar.
+                        </p>
+                      )}
                       <Boton type="submit">Guardar usuario</Boton>
                     </form>
                     <div className="flex flex-wrap items-end gap-2 border-t border-slate-100 pt-3">

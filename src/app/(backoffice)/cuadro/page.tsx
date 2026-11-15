@@ -3,7 +3,7 @@ import { exigir } from "@/kernel/contexto";
 import { euros, fecha, numero } from "@/kernel/formato";
 import { Cabecera, Cifra, Rejilla, Pestanas, Aviso, Campo, Entrada, Boton, BotonEnlace } from "@/ui";
 import { TablaDesplegable, DatosDetalle } from "@/ui/tabla-desplegable";
-import { indicadoresMes, cifrasDelDia, resultado, sobreVentas, mesValido, nombreMes, mesDesplazado, hoyISO, aFecha, criterioMercancia, TEXTO_CRITERIO, type Vista, type FilaCuadro } from "@/modulos/cuadro/servicio";
+import { indicadoresMes, cifrasDelDia, resultado, sobreVentas, mesValido, nombreMes, mesDesplazado, hoyISO, aFecha, criterioMercancia, criterioPersonal, TEXTO_CRITERIO, TEXTO_CRITERIO_PERSONAL, type Vista, type FilaCuadro } from "@/modulos/cuadro/servicio";
 import { Avisos, Importe, Pct, Desviacion, param, type ParametrosBusqueda } from "./_comun";
 
 export default async function CuadroDeMando({ searchParams }: { searchParams: ParametrosBusqueda }) {
@@ -13,9 +13,10 @@ export default async function CuadroDeMando({ searchParams }: { searchParams: Pa
   const vistaParam = param(sp, "vista");
   const vista: Vista = vistaParam === "marca" || vistaParam === "sociedad" ? vistaParam : "centro";
   const ayer = new Date(aFecha(hoyISO()).getTime() - 86400000).toISOString().slice(0, 10);
-  const [{ filas, total, fuentes, presupuestoAFecha }, deAyer] = await Promise.all([indicadoresMes(ctx, mes, vista), cifrasDelDia(ctx, ayer)]);
+  const [{ filas, total, fuentes, presupuestoAFecha, hastaDia }, deAyer] = await Promise.all([indicadoresMes(ctx, mes, vista), cifrasDelDia(ctx, ayer)]);
   const res = resultado(total.cifras);
   const criterio = criterioMercancia(total.cifras);
+  const criterioPers = criterioPersonal(total.cifras);
   const faltan = Object.entries(fuentes).filter(([, f]) => !f.hay);
 
   // enlace al detalle: solo tiene sentido por centro
@@ -25,7 +26,7 @@ export default async function CuadroDeMando({ searchParams }: { searchParams: Pa
     <>
       <Cabecera
         titulo="Cuadro de mando"
-        subtitulo={`${nombreMes(mes)} · ${ctx.centroActivo ? ctx.centroActivo.nombre : `${numero(total.centroIds.length)} centros`}. Cada cifra enlaza a su detalle.`}
+        subtitulo={`${nombreMes(mes)}${hastaDia ? ` hasta ayer (${fecha(hastaDia)}): hoy aún no ha terminado` : ""} · ${ctx.centroActivo ? ctx.centroActivo.nombre : `${numero(total.centroIds.length)} centros`}. Cada cifra enlaza a su detalle.`}
         acciones={
           <>
             <BotonEnlace variante="secundario" href={`/cuadro?mes=${mesDesplazado(mes, -1)}&vista=${vista}`}>
@@ -100,6 +101,7 @@ export default async function CuadroDeMando({ searchParams }: { searchParams: Pa
             { titulo: "Vs. presupuesto", alinear: "derecha" },
             { titulo: "Mercancía", alinear: "derecha", secundaria: true },
             { titulo: "% merc.", alinear: "derecha", secundaria: true },
+            { titulo: "Personal", alinear: "derecha", secundaria: true },
             { titulo: "Gastos", alinear: "derecha", secundaria: true },
             { titulo: "Resultado", alinear: "derecha" },
           ]}
@@ -115,7 +117,8 @@ export default async function CuadroDeMando({ searchParams }: { searchParams: Pa
                 <Desviacion key="d" real={f.cifras.ventas} previsto={f.presupuesto?.ventas} />,
                 <Importe key="m" valor={f.cifras.mercancia} href={enlace(f, "mercancia")} motivo={fuentes.mercancia.motivo} />,
                 <Pct key="pm" valor={sobreVentas(f.cifras.mercancia, f.cifras.ventas)} />,
-                <Importe key="g" valor={f.cifras.gastos} href={enlace(f, "gastos")} motivo={fuentes.gastos.motivo} />,
+                <Importe key="p" valor={f.cifras.personal} href={enlace(f, "personal")} motivo={fuentes.personal.motivo} />,
+                <Importe key="g" valor={f.cifras.gastos} href={enlace(f, "gastos") ?? (f.sociedadId && ctx.tieneModulo("contabilidad") ? `/contabilidad/gastos?sociedad=${f.sociedadId}&mes=${mes}` : undefined)} motivo={fuentes.gastos.motivo} />,
                 <span key="r" title={r.faltan.length ? `Sin ${r.faltan.join(", ")}` : undefined}>
                   {r.valor === null ? "—" : euros(r.valor)}
                   {r.faltan.length > 0 && r.valor !== null ? "*" : ""}
@@ -131,7 +134,9 @@ export default async function CuadroDeMando({ searchParams }: { searchParams: Pa
                       { etiqueta: "Tickets", valor: f.cifras.tickets === null ? "sin datos" : numero(f.cifras.tickets) },
                       { etiqueta: "Ticket medio", valor: f.cifras.tickets && f.cifras.ventas !== null ? euros(f.cifras.ventas / f.cifras.tickets) : "—" },
                       { etiqueta: "Venta por comensal", valor: f.cifras.comensales && f.cifras.ventas !== null ? euros(f.cifras.ventas / f.cifras.comensales) : "—" },
-                      { etiqueta: "Personal", valor: <Importe valor={f.cifras.personal} motivo={fuentes.personal.motivo} /> },
+                      { etiqueta: "Personal", valor: <Importe valor={f.cifras.personal} href={enlace(f, "personal")} motivo={fuentes.personal.motivo} /> },
+                      { etiqueta: "Personal según", valor: criterioPersonal(f.cifras) ? TEXTO_CRITERIO_PERSONAL[criterioPersonal(f.cifras)!] : f.cifras.personal === null ? "sin datos" : "—" },
+                      { etiqueta: "Horas de personal", valor: f.cifras.horasPersonal ? `${numero(f.cifras.horasPersonal)} h` : "—" },
                       { etiqueta: "% personal", valor: <Pct valor={sobreVentas(f.cifras.personal, f.cifras.ventas)} /> },
                       { etiqueta: "% gastos", valor: <Pct valor={sobreVentas(f.cifras.gastos, f.cifras.ventas)} /> },
                       { etiqueta: "Presupuesto de ventas", valor: f.presupuesto ? euros(f.presupuesto.ventas) : "Sin presupuesto" },
@@ -152,7 +157,8 @@ export default async function CuadroDeMando({ searchParams }: { searchParams: Pa
           })}
         />
         <p className="mt-3 text-xs text-slate-500">
-          Ventas sin IVA. Mercancía: en los locales con tickets de Caja, el coste teórico de lo vendido (cada línea × su escandallo, desde el primer día con tickets), que no depende de cuándo se compra; en el resto, compras recibidas + lo recibido de otros centros − lo servido a otros centros (así el obrador no cuenta dos veces). Gastos = gastos de Contabilidad y facturas de categorías de gasto, sin IVA.
+          Ventas sin IVA. Mercancía: en los locales con tickets de Caja, el coste teórico de lo vendido (cada línea × su escandallo, desde el primer día con tickets), que no depende de cuándo se compra; en el resto, compras recibidas + lo recibido de otros centros − lo servido a otros centros (así el obrador no cuenta dos veces). Personal: {fuentes.personal.motivo.charAt(0).toLowerCase() + fuentes.personal.motivo.slice(1)}
+          {criterioPers ? ` (este mes: ${TEXTO_CRITERIO_PERSONAL[criterioPers]})` : ""}. Gastos = gastos de Contabilidad y líneas de facturas de categorías de gasto, sin IVA; lo de la sociedad sin centro va en su propia fila. El mes en curso llega hasta ayer y el presupuesto se compara «a fecha» (hasta ayer).
         </p>
       </div>
     </>

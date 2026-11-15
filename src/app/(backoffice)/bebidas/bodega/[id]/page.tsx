@@ -2,11 +2,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { exigir } from "@/kernel/contexto";
-import { euros, numero, porcentaje } from "@/kernel/formato";
+import { euros, numero, numeroCampo, porcentaje } from "@/kernel/formato";
 import { AreaTexto, Aviso, Boton, BotonEnlace, Cabecera, Campo, Cifra, Entrada, Etiqueta, Rejilla, Selector, Tabla, Tarjeta } from "@/ui";
 import { AvisoError, param, type Busqueda } from "@/modulos/comidas/carta-pantallas/comun";
 import { CRIANZAS, TIPOS_VINO } from "@/modulos/bebidas/fichas";
 import { fichaVinoProducto } from "@/modulos/bebidas/servicio";
+import { objetivoCosteBotella } from "@/modulos/comidas/carta-servicio";
 import { guardarFichaVino } from "@/modulos/bebidas/acciones";
 
 export default async function FichaVino({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Busqueda }) {
@@ -44,8 +45,8 @@ export default async function FichaVino({ params, searchParams }: { params: Prom
         <Cifra
           etiqueta="% de coste"
           valor={datos.pctCoste != null ? porcentaje(datos.pctCoste) : "—"}
-          detalle="Botella, sobre precio sin IVA"
-          tono={datos.pctCoste == null ? "normal" : datos.pctCoste > 40 ? "error" : datos.pctCoste > 33 ? "aviso" : "ok"}
+          detalle={`Botella, sobre precio sin IVA · objetivo ${porcentaje(objetivoCosteBotella(datos.ventas))}`}
+          tono={datos.pctCoste == null ? "normal" : datos.pctCoste > objetivoCosteBotella(datos.ventas) ? "error" : "ok"}
         />
       </Rejilla>
 
@@ -78,7 +79,7 @@ export default async function FichaVino({ params, searchParams }: { params: Prom
                 <Entrada name="anada" defaultValue={f?.anada ? String(f.anada) : ""} inputMode="numeric" placeholder="2020" disabled={!puedeEditar} />
               </Campo>
               <Campo etiqueta="Capacidad (cl)" ayuda="75 normal, 150 mágnum, 37,5 media">
-                <Entrada name="capacidadCl" defaultValue={f ? String(f.capacidadCl) : "75"} inputMode="decimal" disabled={!puedeEditar} />
+                <Entrada name="capacidadCl" defaultValue={f ? numeroCampo(f.capacidadCl) : "75"} inputMode="decimal" disabled={!puedeEditar} />
               </Campo>
               <Campo etiqueta="Crianza">
                 <Entrada name="crianza" list="crianzas" defaultValue={f?.crianza ?? ""} placeholder="Crianza" disabled={!puedeEditar} />
@@ -133,7 +134,7 @@ export default async function FichaVino({ params, searchParams }: { params: Prom
                   ),
                 },
                 { titulo: "Precio", alinear: "derecha", celda: (x) => euros(x.precio) },
-                { titulo: "% coste", alinear: "derecha", celda: (x) => (x.pctCoste != null ? <Etiqueta tono={x.pctCoste > 40 ? "error" : "ok"}>{porcentaje(x.pctCoste)}</Etiqueta> : "—") },
+                { titulo: "% coste", alinear: "derecha", celda: (x) => (x.pctCoste != null ? <Etiqueta tono={x.pctCoste > x.objetivo ? "error" : "ok"}>{porcentaje(x.pctCoste)}</Etiqueta> : "—") },
               ]}
             />
           </Tarjeta>

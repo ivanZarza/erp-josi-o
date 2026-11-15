@@ -25,7 +25,7 @@ import {
 export class ErrorCalidad extends Error {}
 
 const DIA_MS = 24 * 60 * 60 * 1000;
-const HORA_CORTE = 5; // la jornada termina a las 05:00 (Centro.horaCorte por defecto)
+const HORA_CORTE = "05:00"; // Centro.horaCorte por defecto
 
 function fechaDeTexto(s: string): Date {
   return new Date(`${s}T00:00:00Z`);
@@ -33,15 +33,33 @@ function fechaDeTexto(s: string): Date {
 function textoDeFecha(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
+function sumarDias(dia: string, n: number): string {
+  return textoDeFecha(new Date(fechaDeTexto(dia).getTime() + n * DIA_MS));
+}
 
-/** Jornada actual en Madrid: antes de las 05:00 sigue contando el día anterior. */
-export function jornadaHoy(): string {
-  const ahora = new Date();
-  const partes = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Madrid", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", hourCycle: "h23" }).formatToParts(ahora);
+/**
+ * Jornada en curso en Madrid con la hora de corte del centro («05:00» por defecto):
+ * antes de esa hora sigue contando el día anterior.
+ */
+export function jornadaHoy(horaCorte: string = HORA_CORTE, ahora = new Date()): string {
+  const partes = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Madrid", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(ahora);
   const v = (t: string) => partes.find((p) => p.type === t)?.value ?? "00";
   const dia = `${v("year")}-${v("month")}-${v("day")}`;
-  if (Number(v("hour")) < HORA_CORTE) return textoDeFecha(new Date(fechaDeTexto(dia).getTime() - DIA_MS));
-  return dia;
+  const [hc, mc] = (/^\d{1,2}:\d{2}$/.test(horaCorte) ? horaCorte : HORA_CORTE).split(":").map(Number);
+  return Number(v("hour")) * 60 + Number(v("minute")) < hc * 60 + mc ? sumarDias(dia, -1) : dia;
+}
+
+/** Hora de corte de cada centro (Centro.horaCorte, del núcleo). */
+async function cortesDe(tx: Tx, tenantId: string, ids: string[]): Promise<Map<string, string>> {
+  if (ids.length === 0) return new Map();
+  const centros = await tx.centro.findMany({ where: { tenantId, id: { in: ids } }, select: { id: true, horaCorte: true } });
+  return new Map(centros.map((c) => [c.id, c.horaCorte || HORA_CORTE]));
+}
+
+/** Jornada en curso de cada centro, según su hora de corte. */
+async function jornadasDe(tx: Tx, tenantId: string, ids: string[], ahora = new Date()): Promise<Map<string, string>> {
+  const cortes = await cortesDe(tx, tenantId, ids);
+  return new Map(ids.map((id) => [id, jornadaHoy(cortes.get(id), ahora)]));
 }
 
 function exigirCentro(ctx: Contexto, centroId: string) {
@@ -74,7 +92,8 @@ export async function crearIncidenciaAutomatica(
       prioridad: d.prioridad ?? "ALTA",
       origen: d.origen,
       origenId: d.origenId,
-      plazo: fechaDeTexto(textoDeFecha(new Date(Date.now() + DIA_MS))),
+      // Plazo: el día siguiente a la jornada en curso del centro (hora de Madrid)
+      plazo: fechaDeTexto(sumarDias((await jornadasDe(tx, d.tenantId, [d.centroId])).get(d.centroId) ?? jornadaHoy(), 1)),
       creadoPor: d.usuarioId,
       creadoNombre: d.usuarioNombre,
     },
@@ -90,24 +109,28 @@ export async function crearIncidenciaAutomatica(
 export async function tareasDeHoy(ctx: Contexto) {
   const prisma = await db();
   const ids = centrosFiltro(ctx);
-  const hoy = jornadaHoy();
+  const jornadas = await jornadasDe(prisma, ctx.tenant.id, ids);
+  const dias = Array.from(new Set(jornadas.values()));
   const [plantillas, ejecuciones] = await Promise.all([
     prisma.calidadPlantilla.findMany({
       where: { tenantId: ctx.tenant.id, activo: true, OR: [{ centroId: null }, { centroId: { in: ids } }] },
       include: { puntos: { where: { activo: true }, orderBy: { orden: "asc" } } },
       orderBy: [{ orden: "asc" }, { nombre: "asc" }],
     }),
-    prisma.calidadEjecucion.findMany({ where: { tenantId: ctx.tenant.id, centroId: { in: ids }, fecha: fechaDeTexto(hoy) }, include: { respuestas: true } }),
+    prisma.calidadEjecucion.findMany({ where: { tenantId: ctx.tenant.id, centroId: { in: ids }, fecha: { in: dias.map(fechaDeTexto) } }, include: { respuestas: true } }),
   ]);
   const filas = [];
   for (const centroId of ids) {
+    const jornada = jornadas.get(centroId) ?? jornadaHoy();
     for (const p of plantillas) {
       if (p.centroId && p.centroId !== centroId) continue;
-      const ej = ejecuciones.find((e) => e.plantillaId === p.id && e.centroId === centroId) ?? null;
-      filas.push({ clave: `${centroId}:${p.id}`, centroId, centro: nombreCentro(ctx, centroId), plantilla: p, ejecucion: ej });
+      const ej = ejecuciones.find((e) => e.plantillaId === p.id && e.centroId === centroId && textoDeFecha(e.fecha) === jornada) ?? null;
+      filas.push({ clave: `${centroId}:${p.id}`, centroId, centro: nombreCentro(ctx, centroId), jornada, plantilla: p, ejecucion: ej });
     }
   }
-  return { hoy, filas };
+  const cortes = await cortesDe(prisma, ctx.tenant.id, ids);
+  // Jornada que se enseña arriba: la de todos los centros si coincide; si no, la de cada fila
+  return { hoy: dias.length === 1 ? dias[0] : null, cortes: Array.from(new Set(cortes.values())), filas };
 }
 
 export async function registrarLista(ctx: Contexto, form: FormData) {
@@ -122,7 +145,7 @@ export async function registrarLista(ctx: Contexto, form: FormData) {
   });
   if (!plantilla) throw new ErrorCalidad("La lista no existe");
   if (plantilla.centroId && plantilla.centroId !== centroId) throw new ErrorCalidad("Esa lista no es de este centro");
-  const hoy = fechaDeTexto(jornadaHoy());
+  const hoy = fechaDeTexto((await jornadasDe(prisma, ctx.tenant.id, [centroId])).get(centroId) ?? jornadaHoy());
   const ya = await prisma.calidadEjecucion.findUnique({ where: { plantillaId_centroId_fecha: { plantillaId, centroId, fecha: hoy } } });
   if (ya) throw new ErrorCalidad("Esta lista ya está hecha hoy en este centro");
 
@@ -169,7 +192,7 @@ export async function registrarLista(ctx: Contexto, form: FormData) {
 
 export async function historialListas(ctx: Contexto, dias = 7) {
   const prisma = await db();
-  const desde = fechaDeTexto(textoDeFecha(new Date(fechaDeTexto(jornadaHoy()).getTime() - dias * DIA_MS)));
+  const desde = fechaDeTexto(sumarDias(jornadaHoy(), -dias));
   const ejecuciones = await prisma.calidadEjecucion.findMany({
     where: { tenantId: ctx.tenant.id, centroId: { in: centrosFiltro(ctx) }, fecha: { gte: desde } },
     include: { plantilla: { select: { nombre: true, tipo: true } }, respuestas: true },
@@ -260,12 +283,24 @@ export async function crearEquipo(ctx: Contexto, datos: Record<string, unknown>)
   await prisma.calidadEquipo.create({ data: { tenantId: ctx.tenant.id, centroId: d.centroId, nombre: d.nombre, tipo: d.tipo, minimo: d.minimo, maximo: d.maximo } });
 }
 
-export async function desactivarEquipo(ctx: Contexto, id: string) {
+/** Dar de baja un equipo (no se borra: sus lecturas son registro APPCC) o volver a darlo de alta. */
+export async function cambiarActivoEquipo(ctx: Contexto, id: string, activo: boolean) {
   const prisma = await db();
   const e = await prisma.calidadEquipo.findFirst({ where: { id, tenantId: ctx.tenant.id } });
   if (!e) throw new ErrorCalidad("El equipo no existe");
   exigirCentro(ctx, e.centroId);
-  await prisma.calidadEquipo.update({ where: { id }, data: { activo: false } });
+  await prisma.calidadEquipo.update({ where: { id }, data: { activo } });
+}
+
+/** Equipos dados de baja de los centros del usuario (para poder volver a darlos de alta). */
+export async function listarEquiposDeBaja(ctx: Contexto) {
+  const prisma = await db();
+  const equipos = await prisma.calidadEquipo.findMany({
+    where: { tenantId: ctx.tenant.id, centroId: { in: centrosFiltro(ctx) }, activo: false },
+    include: { registros: { orderBy: { createdAt: "desc" }, take: 1 } },
+    orderBy: [{ centroId: "asc" }, { nombre: "asc" }],
+  });
+  return equipos.map((e) => ({ id: e.id, nombre: e.nombre, tipo: e.tipo, minimo: Number(e.minimo), maximo: Number(e.maximo), centro: nombreCentro(ctx, e.centroId), ultimaLectura: e.registros[0]?.createdAt ?? null }));
 }
 
 /** Registra una lectura. Fuera de rango → alarma: incidencia automática y aviso a otros módulos. */
@@ -312,9 +347,37 @@ export async function registrarTemperatura(ctx: Contexto, datos: Record<string, 
 // Incidencias
 // ---------------------------------------------------------------------------
 
+/**
+ * Usuarios activos que pueden ser responsables de incidencias: los que ven algún centro del usuario.
+ * `centros` = null si ven todos los centros (administradores o «todos los centros»).
+ */
 export async function responsablesPosibles(ctx: Contexto) {
   const prisma = await db();
-  return prisma.usuario.findMany({ where: { tenantId: ctx.tenant.id, activo: true }, select: { id: true, nombre: true }, orderBy: { nombre: "asc" } });
+  const ids = ctx.centros.map((c) => c.id);
+  const usuarios = await prisma.usuario.findMany({
+    where: { tenantId: ctx.tenant.id, activo: true, OR: [{ rol: "admin" }, { todosCentros: true }, { centros: { some: { centroId: { in: ids } } } }] },
+    select: { id: true, nombre: true, rol: true, todosCentros: true, centros: { select: { centroId: true } } },
+    orderBy: { nombre: "asc" },
+  });
+  return usuarios.map((u) => ({ id: u.id, nombre: u.nombre, centros: u.rol === "admin" || u.todosCentros ? null : u.centros.map((c) => c.centroId) }));
+}
+
+/** ¿Puede ser responsable de una incidencia de ese centro? (ve el centro) */
+export function veCentro(u: { centros: string[] | null }, centroId: string) {
+  return u.centros === null || u.centros.includes(centroId);
+}
+
+/** El responsable elegido tiene que ser un usuario activo de la cadena que vea el centro de la incidencia. */
+async function responsableDe(tx: Tx, tenantId: string, responsableId: string | undefined, centroId: string) {
+  if (!responsableId) return null;
+  const u = await tx.usuario.findFirst({
+    where: { id: responsableId, tenantId, activo: true },
+    select: { id: true, nombre: true, rol: true, todosCentros: true, centros: { select: { centroId: true } } },
+  });
+  if (!u) throw new ErrorCalidad("El responsable no existe o está dado de baja");
+  if (!veCentro({ centros: u.rol === "admin" || u.todosCentros ? null : u.centros.map((c) => c.centroId) }, centroId))
+    throw new ErrorCalidad(`${u.nombre} no tiene acceso a ese centro: elige a alguien del centro`);
+  return u;
 }
 
 export async function listarIncidencias(ctx: Contexto, estado?: string) {
@@ -329,11 +392,12 @@ export async function listarIncidencias(ctx: Contexto, estado?: string) {
     orderBy: [{ createdAt: "desc" }],
     take: 300,
   });
-  const hoy = jornadaHoy();
+  const jornadas = await jornadasDe(prisma, ctx.tenant.id, Array.from(new Set(incidencias.map((i) => i.centroId))));
   return incidencias.map((i) => ({
     ...i,
     centro: nombreCentro(ctx, i.centroId),
-    vencida: !!i.plazo && (i.estado === "ABIERTA" || i.estado === "EN_CURSO") && textoDeFecha(i.plazo) < hoy,
+    // Vencida: el plazo es anterior a la jornada en curso de su centro
+    vencida: !!i.plazo && (i.estado === "ABIERTA" || i.estado === "EN_CURSO") && textoDeFecha(i.plazo) < (jornadas.get(i.centroId) ?? jornadaHoy()),
   }));
 }
 
@@ -341,7 +405,7 @@ export async function crearIncidencia(ctx: Contexto, datos: Record<string, unkno
   const d = esquemaIncidencia.parse(datos);
   exigirCentro(ctx, d.centroId);
   const prisma = await db();
-  const responsable = d.responsableId ? await prisma.usuario.findFirst({ where: { id: d.responsableId, tenantId: ctx.tenant.id } }) : null;
+  const responsable = await responsableDe(prisma, ctx.tenant.id, d.responsableId, d.centroId);
   await prisma.$transaction(async (tx) => {
     const numero = await siguienteNumero(tx, ctx.tenant.id, "INC");
     const inc = await tx.calidadIncidencia.create({
@@ -370,8 +434,14 @@ export async function gestionarIncidencia(ctx: Contexto, datos: Record<string, u
   const inc = await prisma.calidadIncidencia.findFirst({ where: { id: d.id, tenantId: ctx.tenant.id } });
   if (!inc) throw new ErrorCalidad("La incidencia no existe");
   exigirCentro(ctx, inc.centroId);
-  if (d.estado === "RESUELTA" && !d.solucion) throw new ErrorCalidad("Para dar por resuelta la incidencia escribe la solución");
-  const responsable = d.responsableId ? await prisma.usuario.findFirst({ where: { id: d.responsableId, tenantId: ctx.tenant.id } }) : null;
+  // Resueltas y anuladas quedan cerradas (registro APPCC): si el problema vuelve, se abre otra incidencia
+  if (inc.estado === "RESUELTA" || inc.estado === "ANULADA")
+    throw new ErrorCalidad(`La incidencia está ${inc.estado === "RESUELTA" ? "resuelta" : "anulada"} y ya no se puede cambiar. Si el problema vuelve, abre una nueva.`);
+  // Dejar el plazo o la solución en blanco no borra lo que ya había
+  const solucion = d.solucion ?? inc.solucion;
+  if (d.estado === "RESUELTA" && !solucion) throw new ErrorCalidad("Para dar por resuelta la incidencia escribe la solución");
+  if (d.estado === "ANULADA" && !d.solucion) throw new ErrorCalidad("Para anular la incidencia escribe el motivo en «Solución o motivo»");
+  const responsable = await responsableDe(prisma, ctx.tenant.id, d.responsableId, inc.centroId);
   await prisma.calidadIncidencia.update({
     where: { id: inc.id },
     data: {
@@ -379,13 +449,16 @@ export async function gestionarIncidencia(ctx: Contexto, datos: Record<string, u
       prioridad: d.prioridad,
       responsableId: responsable?.id ?? null,
       responsableNombre: responsable?.nombre ?? null,
-      plazo: d.plazo ? fechaDeTexto(d.plazo) : null,
-      solucion: d.solucion ?? null,
-      resueltaEn: d.estado === "RESUELTA" ? (inc.resueltaEn ?? new Date()) : null,
+      plazo: d.plazo ? fechaDeTexto(d.plazo) : inc.plazo,
+      solucion,
+      resueltaEn: d.estado === "RESUELTA" ? new Date() : null,
     },
   });
   if (inc.estado !== d.estado)
-    await auditar(prisma, { tenantId: ctx.tenant.id, usuarioId: ctx.usuario.id, entidad: "CalidadIncidencia", entidadId: inc.id, accion: "cambiar estado", antes: { estado: inc.estado }, despues: { estado: d.estado } });
+    await auditar(prisma, {
+      tenantId: ctx.tenant.id, usuarioId: ctx.usuario.id, entidad: "CalidadIncidencia", entidadId: inc.id, accion: "cambiar estado",
+      antes: { estado: inc.estado }, despues: { estado: d.estado, ...(d.estado === "ANULADA" ? { motivo: d.solucion } : {}) },
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -399,9 +472,10 @@ export async function listarMantenimiento(ctx: Contexto) {
     include: { hechos: { orderBy: { fecha: "desc" }, take: 5 } },
     orderBy: { proximaVez: "asc" },
   });
-  const hoy = jornadaHoy();
+  const jornadas = await jornadasDe(prisma, ctx.tenant.id, Array.from(new Set(tareas.map((t) => t.centroId))));
   return tareas.map((t) => {
     const prox = textoDeFecha(t.proximaVez);
+    const hoy = jornadas.get(t.centroId) ?? jornadaHoy();
     const dias = Math.round((fechaDeTexto(prox).getTime() - fechaDeTexto(hoy).getTime()) / DIA_MS);
     return { ...t, centro: nombreCentro(ctx, t.centroId), diasParaProxima: dias, vencida: dias < 0, proxima: prox };
   });
@@ -446,10 +520,16 @@ export async function indicadoresCalidad(ctx: Contexto) {
   const prisma = await db();
   const ids = centrosFiltro(ctx);
   const hace24h = new Date(Date.now() - DIA_MS);
+  const jornadas = await jornadasDe(prisma, ctx.tenant.id, ids);
   const [incidencias, alarmas, mantenimientoVencido] = await Promise.all([
     prisma.calidadIncidencia.count({ where: { tenantId: ctx.tenant.id, centroId: { in: ids }, estado: { in: ["ABIERTA", "EN_CURSO"] } } }),
     prisma.calidadTemperatura.count({ where: { tenantId: ctx.tenant.id, centroId: { in: ids }, fueraDeRango: true, createdAt: { gte: hace24h } } }),
-    prisma.calidadMantenimiento.count({ where: { tenantId: ctx.tenant.id, centroId: { in: ids }, activo: true, proximaVez: { lt: fechaDeTexto(jornadaHoy()) } } }),
+    // Vencido: la próxima vez es anterior a la jornada en curso de su centro
+    ids.length === 0
+      ? Promise.resolve(0)
+      : prisma.calidadMantenimiento.count({
+          where: { tenantId: ctx.tenant.id, activo: true, OR: ids.map((id) => ({ centroId: id, proximaVez: { lt: fechaDeTexto(jornadas.get(id) ?? jornadaHoy()) } })) },
+        }),
   ]);
   return { incidencias, alarmas, mantenimientoVencido };
 }

@@ -290,13 +290,13 @@ export const sembrar: Sembrar = async (prisma, ctx) => {
   const borrar = aDia(sumarDias(hoy, 365));
   await prisma.candidato.createMany({
     data: [
-      { tenantId: t, ofertaId: oferta1.id, nombre: "Marina", apellidos: "Costa Planells", telefono: "+34611223344", email: "marina.costa@ejemplo.es", origen: "Web", estado: "ENTREVISTA", consentimientoEn: new Date(), borrarEn: borrar },
-      { tenantId: t, ofertaId: oferta1.id, nombre: "Kevin", apellidos: "Walsh", telefono: "+34622334455", origen: "InfoJobs", estado: "RECIBIDO", consentimientoEn: new Date(), borrarEn: borrar },
-      { tenantId: t, ofertaId: oferta1.id, nombre: "Aina", apellidos: "Ribas Ferrer", telefono: "+34633445566", origen: "Recomendación", estado: "OFERTA", consentimientoEn: new Date(), borrarEn: borrar },
-      { tenantId: t, ofertaId: oferta2.id, nombre: "Rafael", apellidos: "Ortiz Luna", telefono: "+34644556677", email: "rafa.ortiz@ejemplo.es", origen: "Web", estado: "PRUEBA", consentimientoEn: new Date(), borrarEn: borrar },
-      { tenantId: t, ofertaId: oferta2.id, nombre: "Silvia", apellidos: "Mena Pardo", telefono: "+34655667788", origen: "InfoJobs", estado: "DESCARTADO", borrarEn: aDia(sumarDias(hoy, 90)) },
-      { tenantId: t, nombre: "Luis", apellidos: "Calvo Ramos", telefono: "+34666778899", origen: "Currículum en mano", notas: "Parrillero con experiencia, disponible fines de semana", estado: "RECIBIDO", consentimientoEn: new Date(), borrarEn: borrar },
-      { tenantId: t, nombre: "Estefanía", apellidos: "Prado Gil", email: "estefania.prado@ejemplo.es", origen: "Web", notas: "Ayudante de cocina, busca jornada parcial", estado: "RECIBIDO", consentimientoEn: new Date(), borrarEn: borrar },
+      { tenantId: t, ofertaId: oferta1.id, centroId: centro("VA-IBI"), nombre: "Marina", apellidos: "Costa Planells", telefono: "+34611223344", email: "marina.costa@ejemplo.es", origen: "Web", estado: "ENTREVISTA", consentimientoEn: new Date(), borrarEn: borrar },
+      { tenantId: t, ofertaId: oferta1.id, centroId: centro("VA-IBI"), nombre: "Kevin", apellidos: "Walsh", telefono: "+34622334455", origen: "InfoJobs", estado: "RECIBIDO", consentimientoEn: new Date(), borrarEn: borrar },
+      { tenantId: t, ofertaId: oferta1.id, centroId: centro("VA-IBI"), nombre: "Aina", apellidos: "Ribas Ferrer", telefono: "+34633445566", origen: "Recomendación", estado: "OFERTA", consentimientoEn: new Date(), borrarEn: borrar },
+      { tenantId: t, ofertaId: oferta2.id, centroId: centro("OB"), nombre: "Rafael", apellidos: "Ortiz Luna", telefono: "+34644556677", email: "rafa.ortiz@ejemplo.es", origen: "Web", estado: "PRUEBA", consentimientoEn: new Date(), borrarEn: borrar },
+      { tenantId: t, ofertaId: oferta2.id, centroId: centro("OB"), nombre: "Silvia", apellidos: "Mena Pardo", telefono: "+34655667788", origen: "InfoJobs", estado: "DESCARTADO", borrarEn: aDia(sumarDias(hoy, 90)) },
+      { tenantId: t, centroId: centro("VA-AYA"), nombre: "Luis", apellidos: "Calvo Ramos", telefono: "+34666778899", origen: "Currículum en mano", notas: "Parrillero con experiencia, disponible fines de semana", estado: "RECIBIDO", consentimientoEn: new Date(), borrarEn: borrar },
+      { tenantId: t, centroId: centro("VA-AYA"), nombre: "Estefanía", apellidos: "Prado Gil", email: "estefania.prado@ejemplo.es", origen: "Web", notas: "Ayudante de cocina, busca jornada parcial", estado: "RECIBIDO", consentimientoEn: new Date(), borrarEn: borrar },
     ],
   });
 };

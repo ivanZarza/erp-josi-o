@@ -5,7 +5,12 @@ import "server-only";
  *
  * Exporta para otros módulos:
  *  - productosElaboradosIds: qué productos del catálogo son elaborados del obrador (Carta los marca así)
- *  - recalcularTarifasProducto: vuelve a calcular los precios a locales cuando cambia el coste
+ *  - recalcularTarifasProducto (en ./tarifas.ts): vuelve a calcular los precios a locales cuando cambia
+ *    el coste. Se puede llamar desde compras al recibir (dentro de su transacción).
+ *
+ * Eventos que emite (obrador.produccion.cerrada, obrador.lote.retirado, obrador.tarifa.cambiada): se
+ * guardan en EventoInterno, pero hoy ningún módulo los procesa (pendiente). La factura entre sociedades
+ * al servir un pedido tampoco existe todavía.
  */
 import { Prisma } from "@/generated/prisma/client";
 import { db } from "@/kernel/db";
@@ -16,6 +21,12 @@ import { registrarMovimientos, stockDe, type NuevoMovimiento, type Tx } from "@/
 import { cantidadBruta, redondear, unirAlergenos } from "@/modulos/comidas/carta-alergenos";
 import { alergenosDeProductos, costeYAlergenosEscandallo, fijarAlergenosProducto } from "@/modulos/comidas/carta-servicio";
 import { crearIncidenciaAutomatica } from "@/modulos/calidad/servicio";
+import { registrarMerma } from "@/nucleo/mermas";
+import { costeMedioTrasEntrada } from "@/nucleo/coste-medio";
+import { hoyMadrid, inicioDiaMadrid } from "@/kernel/fechas";
+
+export { hoyMadrid, inicioDiaMadrid };
+import { precioSegunModo, recalcularTarifasProducto } from "./tarifas";
 import {
   esquemaCierre,
   esquemaEdicionLinea,
@@ -32,9 +43,6 @@ export class ErrorObrador extends Error {}
 const FAMILIA_ELABORADOS = "Elaborados del obrador";
 const DIA_MS = 24 * 60 * 60 * 1000;
 
-export function hoyMadrid(): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Madrid" }).format(new Date());
-}
 function fechaDeTexto(s: string): Date {
   return new Date(`${s}T00:00:00Z`);
 }
@@ -396,11 +404,9 @@ export async function cerrarOrden(ctx: Contexto, datos: Record<string, unknown>)
       }
       const costeUnitario = costeTotal / d.cantidadReal;
 
-      // Precio medio del elaborado antes de la entrada
+      // Coste medio del elaborado: la misma regla que las compras (stock de toda la cadena, src/nucleo/coste-medio.ts)
       const elaborado = prod.get(orden.receta.productoId)!;
-      const stockAntes = Math.max(await stockDe(tx, t, centroId, elaborado.id), 0);
-      const costeAntes = Number(elaborado.costeUnitario);
-      const nuevoMedio = stockAntes > 0 && costeAntes > 0 ? (stockAntes * costeAntes + d.cantidadReal * costeUnitario) / (stockAntes + d.cantidadReal) : costeUnitario;
+      const { costeNuevo: nuevoMedio } = await costeMedioTrasEntrada(tx, t, elaborado.id, d.cantidadReal, costeUnitario);
 
       movs.push({
         tenantId: t,
@@ -487,6 +493,17 @@ export async function listarLotes(ctx: Contexto, filtro: { estado?: string; q?: 
   const ids = Array.from(new Set(lotes.flatMap((l) => [l.productoId, ...l.ingredientes.map((i) => i.productoId)])));
   const productos = await prisma.producto.findMany({ where: { tenantId: ctx.tenant.id, id: { in: ids } }, select: { id: true, nombre: true, unidad: true, referencia: true } });
   const prod = new Map(productos.map((p) => [p.id, p]));
+  // Stock de cada elaborado en su obrador (para proponer cuánto dar de baja al retirar un lote)
+  const stockObrador =
+    lotes.length === 0
+      ? []
+      : await prisma.movimientoStock.groupBy({
+          by: ["centroId", "productoId"],
+          where: { tenantId: ctx.tenant.id, centroId: { in: obradores.map((o) => o.id) }, productoId: { in: Array.from(new Set(lotes.map((l) => l.productoId))) } },
+          _sum: { cantidad: true },
+        });
+  const stockDeElaborado = (centroId: string, productoId: string) =>
+    Math.max(0, Number(stockObrador.find((x) => x.centroId === centroId && x.productoId === productoId)?._sum.cantidad ?? 0));
 
   // Trazabilidad hacia delante (aproximada): pedidos servidos del mismo producto desde ese obrador
   // entre la elaboración y la caducidad del lote. El pedido interno aún no guarda el lote.
@@ -505,11 +522,18 @@ export async function listarLotes(ctx: Contexto, filtro: { estado?: string; q?: 
           },
           include: { pedido: { select: { numero: true, origenId: true, servidoEn: true, destino: { select: { nombre: true } } } } },
         });
-  return lotes.map((l) => ({
-    ...l,
-    destinos: servidos
+  return lotes.map((l) => {
+    const destinos = servidos
       .filter((x) => x.productoId === l.productoId && x.pedido.origenId === l.centroId && x.pedido.servidoEn && x.pedido.servidoEn >= l.elaboradoEn && x.pedido.servidoEn <= l.caducaEn)
-      .map((x) => ({ id: x.id, pedido: x.pedido.numero, local: x.pedido.destino.nombre, servidoEn: x.pedido.servidoEn, cantidad: Number(x.servida ?? x.pedida) })),
+      .map((x) => ({ id: x.id, pedido: x.pedido.numero, local: x.pedido.destino.nombre, servidoEn: x.pedido.servidoEn, cantidad: Number(x.servida ?? x.pedida) }));
+    const stockEnObrador = stockDeElaborado(l.centroId, l.productoId);
+    // lo que puede quedar del lote en el obrador: lo producido menos lo servido después, sin pasar del stock
+    const quedaPosible = redondear(Math.max(0, Math.min(stockEnObrador, Number(l.cantidad) - destinos.reduce((s, d) => s + d.cantidad, 0))), 3);
+    return {
+    ...l,
+    destinos,
+    stockEnObrador,
+    quedaPosible,
     cantidad: Number(l.cantidad),
     costeUnitario: Number(l.costeUnitario),
     producto: prod.get(l.productoId)?.nombre ?? "—",
@@ -524,7 +548,8 @@ export async function listarLotes(ctx: Contexto, filtro: { estado?: string; q?: 
       cantidad: Number(i.cantidad),
       costeUnitario: Number(i.costeUnitario),
     })),
-  }));
+    };
+  });
 }
 
 export async function lotePorId(ctx: Contexto, id: string) {
@@ -545,11 +570,28 @@ export async function retirarLote(ctx: Contexto, datos: Record<string, unknown>)
   if (!lote) throw new ErrorObrador("El lote no existe");
   exigirObrador(ctx, lote.centroId);
   if (lote.estado === "RETIRADO") throw new ErrorObrador("El lote ya está retirado");
+  const baja = redondear(d.cantidadBaja ?? 0, 3);
+  if (baja > Number(lote.cantidad) + 1e-9) throw new ErrorObrador(`No se puede dar de baja más de lo que se produjo en el lote (${redondear(Number(lote.cantidad), 3)})`);
   await prisma.$transaction(async (tx) => {
     await tx.obradorLote.update({ where: { id: lote.id }, data: { estado: "RETIRADO", retiradoMotivo: d.motivo, retiradoEn: new Date() } });
-    await auditar(tx, { tenantId: ctx.tenant.id, usuarioId: ctx.usuario.id, entidad: "ObradorLote", entidadId: lote.id, accion: "retirar lote", despues: { codigo: lote.codigo, motivo: d.motivo } });
-    // Aviso a otros módulos (locales que lo recibieron) y, si está Calidad, incidencia de seguridad alimentaria
-    await emitir(tx, ctx.tenant.id, "obrador.lote.retirado", { loteId: lote.id, codigo: lote.codigo, productoId: lote.productoId, motivo: d.motivo, centroId: lote.centroId });
+    // Lo que queda del lote en el obrador sale del stock como merma (documento MER, al coste medio).
+    // Lo que ya se sirvió a los locales lo tiene que dar de baja cada local (incidencia de Calidad).
+    let merma: string | null = null;
+    if (baja > 0) {
+      const producto = await tx.producto.findFirst({ where: { id: lote.productoId, tenantId: ctx.tenant.id }, select: { area: true } });
+      if (!producto || (producto.area !== "COMIDAS" && producto.area !== "BEBIDAS")) throw new ErrorObrador("El elaborado del lote no es de Comidas ni de Bebidas");
+      merma = await registrarMerma(tx, ctx.tenant.id, ctx.usuario.id, producto.area, {
+        centroId: lote.centroId,
+        productoId: lote.productoId,
+        cantidad: baja,
+        motivo: "Retirada de lote",
+        nota: `${lote.codigo}: ${d.motivo}`,
+      });
+    }
+    await auditar(tx, { tenantId: ctx.tenant.id, usuarioId: ctx.usuario.id, entidad: "ObradorLote", entidadId: lote.id, accion: "retirar lote", despues: { codigo: lote.codigo, motivo: d.motivo, bajaEnObrador: baja, merma } });
+    // Queda guardado como evento interno (hoy no lo procesa ningún módulo: pendiente) y, si está Calidad,
+    // se abre una incidencia de seguridad alimentaria para revisar los locales que lo recibieron.
+    await emitir(tx, ctx.tenant.id, "obrador.lote.retirado", { loteId: lote.id, codigo: lote.codigo, productoId: lote.productoId, motivo: d.motivo, centroId: lote.centroId, bajaEnObrador: baja });
     if (ctx.tieneModulo("calidad")) {
       const producto = await tx.producto.findFirst({ where: { id: lote.productoId, tenantId: ctx.tenant.id }, select: { nombre: true } });
       await crearIncidenciaAutomatica(tx, {
@@ -557,7 +599,7 @@ export async function retirarLote(ctx: Contexto, datos: Record<string, unknown>)
         centroId: lote.centroId,
         tipo: "SEGURIDAD_ALIMENTARIA",
         titulo: `Retirada del lote ${lote.codigo} (${producto?.nombre ?? "elaborado"})`,
-        descripcion: `Motivo: ${d.motivo}\nComprobar en los locales que lo recibieron que se ha retirado y destruido.`,
+        descripcion: `Motivo: ${d.motivo}\n${baja > 0 ? `En el obrador se han dado de baja ${baja} (merma ${merma}).` : "En el obrador no se ha dado de baja stock."}\nComprobar en los locales que lo recibieron que se ha retirado y destruido, y registrar allí la merma.`,
         origen: "LOTE",
         origenId: lote.id,
         usuarioId: ctx.usuario.id,
@@ -571,32 +613,7 @@ export async function retirarLote(ctx: Contexto, datos: Record<string, unknown>)
 // Tarifas a locales
 // ---------------------------------------------------------------------------
 
-export function precioSegunModo(modo: string, coste: number, porcentaje: number | null, precioFijo: number | null): number {
-  if (modo === "PRECIO_FIJO") return precioFijo ?? 0;
-  if (modo === "COSTE_MAS_PORCENTAJE") return coste * (1 + (porcentaje ?? 0) / 100);
-  return coste;
-}
-
-/** Recalcula ProductoCentro.precioVenta de las tarifas a coste y coste + % de un producto. */
-export async function recalcularTarifasProducto(tx: Tx, tenantId: string, productoId: string, usuarioId?: string) {
-  const [producto, tarifas] = await Promise.all([
-    tx.producto.findFirst({ where: { id: productoId, tenantId } }),
-    tx.obradorTarifa.findMany({ where: { tenantId, productoId, modo: { not: "PRECIO_FIJO" } } }),
-  ]);
-  if (!producto) return 0;
-  const coste = Number(producto.costeUnitario);
-  for (const t of tarifas) {
-    const precio = redondear(precioSegunModo(t.modo, coste, t.porcentaje != null ? Number(t.porcentaje) : null, null));
-    await tx.productoCentro.upsert({
-      where: { productoId_centroId: { productoId, centroId: t.centroId } },
-      create: { productoId, centroId: t.centroId, precioVenta: precio },
-      update: { precioVenta: precio },
-    });
-  }
-  if (tarifas.length > 0)
-    await auditar(tx, { tenantId, usuarioId, entidad: "Producto", entidadId: productoId, accion: "recalcular tarifas a locales", despues: { coste, tarifas: tarifas.length } });
-  return tarifas.length;
-}
+export { precioSegunModo, recalcularTarifasProducto };
 
 export async function localesDestino(ctx: Contexto) {
   const prisma = await db();
@@ -637,6 +654,8 @@ export async function listarTarifas(ctx: Contexto, obradorId: string) {
         porcentaje: tar?.porcentaje != null ? Number(tar.porcentaje) : null,
         precioFijo: tar?.precioFijo != null ? Number(tar.precioFijo) : null,
         precio,
+        // precio del local distinto del último que escribió la tarifa: lo cambiaron a mano (Stock → Productos)
+        cambiadoAMano: !!tar && tar.precioAplicado != null && precio != null && Math.abs(precio - Number(tar.precioAplicado)) > 0.00005,
         margenPct: precio != null && precio > 0 && coste > 0 ? ((precio - coste) / precio) * 100 : null,
       };
     });
@@ -686,8 +705,8 @@ export async function aplicarTarifa(ctx: Contexto, datos: Record<string, unknown
       for (const l of destino) {
         await tx.obradorTarifa.upsert({
           where: { tenantId_productoId_centroId: { tenantId: t, productoId: producto.id, centroId: l.id } },
-          create: { tenantId: t, obradorId: d.obradorId, productoId: producto.id, centroId: l.id, modo: d.modo, porcentaje, precioFijo, actualizadoPor: ctx.usuario.id },
-          update: { obradorId: d.obradorId, modo: d.modo, porcentaje, precioFijo, actualizadoPor: ctx.usuario.id },
+          create: { tenantId: t, obradorId: d.obradorId, productoId: producto.id, centroId: l.id, modo: d.modo, porcentaje, precioFijo, precioAplicado: precio, actualizadoPor: ctx.usuario.id },
+          update: { obradorId: d.obradorId, modo: d.modo, porcentaje, precioFijo, precioAplicado: precio, actualizadoPor: ctx.usuario.id },
         });
         await tx.productoCentro.upsert({
           where: { productoId_centroId: { productoId: producto.id, centroId: l.id } },
@@ -734,26 +753,39 @@ export async function resumenObrador(ctx: Contexto) {
   const hoy = hoyMadrid();
   const ahora = new Date();
   const enTresDias = new Date(ahora.getTime() + 3 * DIA_MS);
-  const inicioMes = new Date(`${hoy.slice(0, 7)}-01T00:00:00Z`);
+  const inicioMes = inicioDiaMadrid(`${hoy.slice(0, 7)}-01`); // día 1 a las 00:00 de Madrid
 
   const [ordenesHoy, lotesCaducan, lineasMes, pendientes] = await Promise.all([
     listarOrdenes(ctx, { desde: hoy, hasta: hoy }),
     listarLotes(ctx, {}).then((ls) => ls.filter((l) => l.estado === "ACTIVO" && l.caducaEn <= enTresDias && l.caducaEn >= new Date(ahora.getTime() - 2 * DIA_MS))),
     prisma.pedidoInternoLinea.findMany({
       where: { pedido: { tenantId: t, origenId: { in: obradores }, estado: { in: ["SERVIDO", "RECIBIDO"] }, servidoEn: { gte: inicioMes } } },
-      include: { pedido: { select: { destinoId: true, destino: { select: { nombre: true } } } }, producto: { select: { costeUnitario: true } } },
+      include: { pedido: { select: { id: true, destinoId: true, destino: { select: { nombre: true } } } }, producto: { select: { costeUnitario: true } } },
     }),
     prisma.pedidoInterno.count({ where: { tenantId: t, origenId: { in: obradores }, estado: "PENDIENTE" } }),
   ]);
+
+  // Coste de lo servido = el de la salida del obrador (movimiento SALIDA_PEDIDO, valorado al coste medio
+  // del día en que se sirvió), no el coste medio de hoy.
+  const salidas = lineasMes.length
+    ? await prisma.movimientoStock.groupBy({
+        by: ["documentoId", "productoId"],
+        where: { tenantId: t, tipo: "SALIDA_PEDIDO", centroId: { in: obradores }, documentoId: { in: Array.from(new Set(lineasMes.map((l) => l.pedido.id))) } },
+        _sum: { cantidad: true },
+        _max: { costeUnitario: true },
+      })
+    : [];
+  const costeServido = new Map(salidas.map((x) => [`${x.documentoId}:${x.productoId}`, Number(x._max.costeUnitario ?? 0)]));
 
   let venta = 0;
   let coste = 0;
   const porLocal = new Map<string, { local: string; importe: number; lineas: number }>();
   for (const l of lineasMes) {
     const cantidad = Number(l.servida ?? l.pedida);
-    const precio = l.precio != null ? Number(l.precio) : Number(l.producto.costeUnitario);
+    const costeUnidad = costeServido.get(`${l.pedido.id}:${l.productoId}`) ?? Number(l.producto.costeUnitario);
+    const precio = l.precio != null ? Number(l.precio) : costeUnidad;
     venta += cantidad * precio;
-    coste += cantidad * Number(l.producto.costeUnitario);
+    coste += cantidad * costeUnidad;
     const x = porLocal.get(l.pedido.destinoId) ?? { local: l.pedido.destino.nombre, importe: 0, lineas: 0 };
     x.importe += cantidad * precio;
     x.lineas += 1;

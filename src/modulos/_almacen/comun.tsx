@@ -3,6 +3,7 @@
  */
 import { Aviso, Etiqueta, Selector } from "@/ui";
 import type { Contexto } from "@/kernel/contexto";
+import { numero, numeroCampo } from "@/kernel/formato";
 import { moduloDeArea, type AreaAlmacen } from "@/nucleo/comun-almacen";
 import type { EstadoStock } from "@/nucleo/stock";
 
@@ -103,6 +104,7 @@ const INVENTARIO: Record<string, { texto: string; tono: "normal" | "ok" | "aviso
   ABIERTO: { texto: "Contando", tono: "info" },
   PENDIENTE_APROBACION: { texto: "Pendiente de aprobación", tono: "aviso" },
   CERRADO: { texto: "Cerrado", tono: "ok" },
+  CANCELADO: { texto: "Cancelado", tono: "normal" },
 };
 export function EtiquetaInventario({ estado }: { estado: string }) {
   const e = INVENTARIO[estado] ?? { texto: estado, tono: "normal" as const };
@@ -161,6 +163,7 @@ export const NOMBRE_UNIDAD: Record<string, string> = {
   BARRIL: "barriles",
   PAQUETE: "paquetes",
   BANDEJA: "bandejas",
+  RACION: "raciones",
 };
 export function unidad(u: string): string {
   return NOMBRE_UNIDAD[u] ?? u.toLowerCase();
@@ -174,5 +177,12 @@ export function veCentro(ctx: Contexto, centroId: string): boolean {
 /** Valor para una casilla editable: coma decimal y SIN separador de miles (para que se lea bien al guardar). */
 export function paraCampo(n: number | null | undefined): string {
   if (n === null || n === undefined) return "";
-  return String(Math.round(n * 10000) / 10000).replace(".", ",");
+  return numeroCampo(Math.round(n * 10000) / 10000);
+}
+
+/** «812 botellas · 35,5 kg · 12 litros»: cantidades de stock por unidad (no se suman kilos con botellas). */
+export function textoCantidades(cantidades: [string, number][], max = 3): string {
+  if (cantidades.length === 0) return "sin existencias";
+  const partes = cantidades.slice(0, max).map(([u, n]) => `${numero(n, 3)} ${unidad(u)}`);
+  return cantidades.length > max ? `${partes.join(" · ")} y más` : partes.join(" · ");
 }

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { ZodError } from "zod";
 import { exigir } from "@/kernel/contexto";
+import { ErrorNegocio } from "@/nucleo/comun-almacen";
 import * as s from "./servicio";
 
 function datos(form: FormData): Record<string, unknown> {
@@ -21,7 +22,7 @@ async function ejecutar(form: FormData, fn: () => Promise<unknown>, destino?: (r
     resultado = await fn();
   } catch (e) {
     if (e instanceof ZodError) error = e.issues[0]?.message ?? "Datos no válidos";
-    else if (e instanceof s.ErrorObrador) error = e.message;
+    else if (e instanceof s.ErrorObrador || e instanceof ErrorNegocio) error = e.message; // ErrorNegocio: del motor de stock (merma al retirar un lote)
     else throw e;
   }
   revalidatePath("/obrador", "layout");

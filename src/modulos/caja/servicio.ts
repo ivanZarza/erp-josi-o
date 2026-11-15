@@ -8,6 +8,7 @@ import "server-only";
  * - Venta por plato y consumo teórico frente a real.
  */
 import { db } from "@/kernel/db";
+import { euros, fecha as fechaTexto } from "@/kernel/formato";
 import { centrosFiltro, type Contexto } from "@/kernel/contexto";
 import { auditar } from "@/kernel/eventos";
 import { siguienteNumero } from "@/kernel/numeracion";
@@ -27,6 +28,7 @@ import {
   MovimientoCajaEsquema,
   ImportarTpvEsquema,
 } from "./esquemas";
+import { listarEmpleados } from "@/modulos/personal/servicio";
 import { ErrorTicket, guardarTickets, anadirLineas, cobrarTicket, anularLinea, anularTicket, diaDeNegocio, type TicketNuevo, type CobroNuevo, type LineaTicketNueva } from "./tickets";
 
 /** Error que se enseña tal cual al usuario. */
@@ -186,6 +188,7 @@ export async function arqueo(ctx: Contexto, centroId: string, fechaISO: string) 
 export async function crearCierre(ctx: Contexto, entrada: unknown) {
   const d = CierreEsquema.parse(entrada);
   comprobarCentro(ctx, d.centroId);
+  if (d.fecha > hoyISO()) throw new ErrorCaja("No se puede cerrar la caja de un día que aún no ha llegado.");
   const prisma = await db();
   const fecha = aFecha(d.fecha);
   const a = await arqueo(ctx, d.centroId, d.fecha);
@@ -290,7 +293,25 @@ export interface FiltroTickets {
   hasta: string;
   estado?: string;
   centroId?: string;
-  q?: string; // mesa, número o camarero
+  q?: string; // trozo de la mesa, del número o del camarero
+}
+
+/**
+ * Búsqueda por texto: trozo de la mesa, del número o del camarero (sin distinguir mayúsculas). El camarero
+ * se busca en el nombre escrito (TPV o a mano) y, si Personal está contratado, en el nombre y apellidos
+ * del empleado elegido en el ticket.
+ */
+async function filtroTexto(ctx: Contexto, q: string): Promise<Prisma.TicketWhereInput> {
+  const o: Prisma.TicketWhereInput[] = [
+    { mesa: { contains: q, mode: "insensitive" } },
+    { numero: { contains: q, mode: "insensitive" } },
+    { camarero: { contains: q, mode: "insensitive" } },
+  ];
+  if (ctx.tieneModulo("personal")) {
+    const empleados = await listarEmpleados(ctx, { texto: q, estado: "todos" });
+    if (empleados.length) o.push({ empleadoId: { in: empleados.map((e) => e.id) } });
+  }
+  return { OR: o };
 }
 
 export async function listarTickets(ctx: Contexto, f: FiltroTickets) {
@@ -299,7 +320,7 @@ export async function listarTickets(ctx: Contexto, f: FiltroTickets) {
   const where: Prisma.TicketWhereInput = { tenantId: ctx.tenant.id, centroId: { in: ids }, fecha: { gte: aFecha(f.desde), lte: aFecha(f.hasta) } };
   if (f.estado === "ABIERTO" || f.estado === "COBRADO" || f.estado === "ANULADO") where.estado = f.estado;
   if (f.estado === "CON_ANULACIONES") where.OR = [{ estado: "ANULADO" }, { lineas: { some: { anulada: true } } }];
-  if (f.q) where.AND = [{ OR: [{ mesa: f.q }, { numero: { contains: f.q, mode: "insensitive" } }, { camarero: { contains: f.q, mode: "insensitive" } }] }];
+  if (f.q?.trim()) where.AND = [await filtroTexto(ctx, f.q.trim())];
   return prisma.ticket.findMany({
     where,
     include: { lineas: { orderBy: { orden: "asc" } }, cobros: { orderBy: { momento: "asc" } } },
@@ -385,7 +406,7 @@ export async function registrarTicket(ctx: Contexto, entrada: unknown) {
       };
       const r = await guardarTickets(tx, ctx.tenant.id, [t], { usuarioId: ctx.usuario.id });
       await auditar(tx, { tenantId: ctx.tenant.id, usuarioId: ctx.usuario.id, entidad: "Ticket", entidadId: r.ids[0], accion: "crear", despues: { numero, estado: d.estado, total, lineas: d.lineas.length } });
-      return numero;
+      return { numero, jornadasSustituidas: r.jornadasSustituidas };
     },
     { timeout: 30_000 },
   );
@@ -514,6 +535,7 @@ export async function importarVentasTpv(ctx: Contexto, centroId: string, tickets
   await prisma.$transaction(
     async (tx) => {
       const r = await guardarTickets(tx, ctx.tenant.id, nuevos, { usuarioId: ctx.usuario.id });
+      for (const j of r.jornadasSustituidas) avisos.push(`El ${fechaTexto(aFecha(j.fecha))} tenía ventas metidas a mano (${euros(j.ventaNeta)}): ahora manda lo de los tickets (lo de antes queda en el historial).`);
       await auditar(tx, { tenantId: ctx.tenant.id, usuarioId: ctx.usuario.id, entidad: "Ticket", entidadId: r.ids[0], accion: "importar TPV", despues: { centroId, tickets: nuevos.length, sinEnlace: Array.from(sinEnlace).slice(0, 50) } });
     },
     { timeout: 120_000 },
@@ -591,7 +613,8 @@ export interface FilaVentaPlato {
   invitadas: number;
   importe: number; // sin IVA
   coste: number; // coste teórico (incluye lo invitado)
-  porDia: Map<string, { unidades: number; importe: number; coste: number }>;
+  /** Por día: unidades cobradas e invitadas por separado, como en la fila. */
+  porDia: Map<string, { unidades: number; invitadas: number; importe: number; coste: number }>;
 }
 
 /** Lo vendido por plato y formato en un periodo (tickets cobrados, sin líneas anuladas). */
@@ -623,8 +646,9 @@ export async function ventaPorPlato(ctx: Contexto, desdeISO: string, hastaISO: s
     v.importe += Number(f.importe);
     v.coste += Number(f.coste);
     const dia = f.fecha.toISOString().slice(0, 10);
-    const d = v.porDia.get(dia) ?? { unidades: 0, importe: 0, coste: 0 };
-    d.unidades += u;
+    const d = v.porDia.get(dia) ?? { unidades: 0, invitadas: 0, importe: 0, coste: 0 };
+    if (f.invitacion) d.invitadas += u;
+    else d.unidades += u;
     d.importe += Number(f.importe);
     d.coste += Number(f.coste);
     v.porDia.set(dia, d);

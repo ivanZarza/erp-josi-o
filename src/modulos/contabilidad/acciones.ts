@@ -127,7 +127,7 @@ export async function accionAnularFacturaEmitida(form: FormData) {
 export async function accionCrearGasto(form: FormData) {
   const ctx = await exigir("contabilidad", "contabilidad:gastos:editar");
   await ejecutar(volver(form, "/contabilidad/gastos"), async () => {
-    await crearGasto(ctx, objetoDeFormulario(form, ["base"]));
+    await crearGasto(ctx, objetoDeFormulario(form));
     return "Gasto registrado.";
   });
 }

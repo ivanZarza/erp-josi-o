@@ -14,6 +14,7 @@ export const modulo: ManifiestoModulo = {
   permisos: [
     { clave: "cuadro:ver", descripcion: "Ver el cuadro de mando" },
     { clave: "cuadro:presupuestos:editar", descripcion: "Editar presupuestos" },
+    { clave: "cuadro:recalcular", descripcion: "Recalcular y guardar los indicadores del día a día" },
   ],
   mejoraCon: ["caja", "contabilidad", "bebidas", "comidas", "obrador", "personal"],
   integraciones: [],

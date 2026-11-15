@@ -5,7 +5,7 @@ import { fecha, numero } from "@/kernel/formato";
 import { Cabecera, Cifra, Rejilla, Boton, BotonEnlace, Entrada, Selector, Etiqueta, HuecoIntegracion } from "@/ui";
 import { TablaDesplegable, DatosDetalle } from "@/ui/tabla-desplegable";
 import { listarClientes, etiquetasUsadas } from "@/modulos/clientes/servicio";
-import { AvisosUrl, PestanasClientes, EtiquetaConsentimiento, param, type Busqueda } from "@/modulos/clientes/ui";
+import { AvisosUrl, PestanasClientes, EtiquetaConsentimiento, nombreOrigen, param, type Busqueda } from "@/modulos/clientes/ui";
 
 export default async function Clientes({ searchParams }: { searchParams: Busqueda }) {
   const ctx = await exigir("clientes", "clientes:ver");
@@ -76,7 +76,7 @@ export default async function Clientes({ searchParams }: { searchParams: Busqued
                   { etiqueta: "Alergias", valor: c.alergias ? <span className="text-error">{c.alergias}</span> : "—" },
                   { etiqueta: "Preferencias", valor: c.preferencias ?? "—" },
                   { etiqueta: "Notas de sala", valor: c.notas ?? "—" },
-                  { etiqueta: "Origen", valor: c.origen },
+                  { etiqueta: "Origen", valor: nombreOrigen(c.origen) },
                   { etiqueta: "Consentimiento reserva", valor: <EtiquetaConsentimiento c={c.vigentes.RESERVA} /> },
                   { etiqueta: "Correo comercial", valor: <EtiquetaConsentimiento c={c.vigentes.CORREO} /> },
                   { etiqueta: "WhatsApp comercial", valor: <EtiquetaConsentimiento c={c.vigentes.WHATSAPP} /> },

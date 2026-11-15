@@ -4,7 +4,7 @@ import { exigir } from "@/kernel/contexto";
 import { fecha, fechaHora, euros, numero } from "@/kernel/formato";
 import { Cabecera, Tarjeta, Campo, Entrada, Selector, AreaTexto, Boton, BotonEnlace, Etiqueta, Tabla, Vacio } from "@/ui";
 import { TablaDesplegable, DatosDetalle } from "@/ui/tabla-desplegable";
-import { detalleSolicitud, listarMenus, marcasYLocales, estadosSiguientes, NOMBRE_ESTADO, NOMBRE_TIPO, type TipoEvento } from "@/modulos/eventos/servicio";
+import { detalleSolicitud, listarMenus, marcasYLocales, estadosSiguientes, nombreOrigen, pasosPresupuesto, NOMBRE_ESTADO, NOMBRE_TIPO, type TipoEvento } from "@/modulos/eventos/servicio";
 import { espaciosDeCentros, reservasDeEspacio, NOMBRE_TIPO_ESPACIO } from "@/modulos/reservas/servicio";
 import { cambiarEstadoAccion, asignarLocalAccion, crearPresupuestoAccion, cambiarEstadoPresupuestoAccion } from "@/modulos/eventos/acciones";
 import { AvisosUrl, EtiquetaEstadoEvento, type Busqueda } from "@/modulos/eventos/ui";
@@ -52,7 +52,7 @@ export default async function DetalleEvento({ params, searchParams }: { params: 
                 { etiqueta: "Local", valor: s.centroId ? nombreLocal[s.centroId] ?? "—" : "Sin asignar" },
                 { etiqueta: "Espacio", valor: espacio ? `${espacio.nombre} (aforo ${espacio.aforo})` : "—" },
                 { etiqueta: "Quiere gastar", valor: s.presupuestoCliente ? euros(s.presupuestoCliente) : "—" },
-                { etiqueta: "Origen", valor: s.origen },
+                { etiqueta: "Origen", valor: nombreOrigen(s.origen) },
                 { etiqueta: "Cliente", valor: s.clienteId ? <Link className="text-acento underline" href={`/clientes/${s.clienteId}`}>Ver ficha</Link> : "—" },
                 { etiqueta: "Motivo de pérdida", valor: s.motivoPerdida ?? "—" },
                 { etiqueta: "Recibida", valor: fechaHora(s.createdAt) },
@@ -112,9 +112,9 @@ export default async function DetalleEvento({ params, searchParams }: { params: 
                     <div className="text-right text-sm font-semibold">Total (IVA incluido): {euros(p.total)}</div>
                     {p.condiciones && <p className="whitespace-pre-line text-sm text-suave">{p.condiciones}</p>}
                     <DatosDetalle datos={[{ etiqueta: "Enviado", valor: fechaHora(p.enviadoEn) }, { etiqueta: "Aceptado", valor: fechaHora(p.aceptadoEn) }]} />
-                    {puede && (
+                    {puede && abierta && (
                       <div className="flex flex-wrap gap-2">
-                        {(p.estado === "BORRADOR" ? (["ENVIADO"] as const) : p.estado === "ENVIADO" ? (["ACEPTADO", "RECHAZADO"] as const) : []).map((e) => (
+                        {pasosPresupuesto(p.estado).map((e) => (
                           <form key={e} action={cambiarEstadoPresupuestoAccion}>
                             <input type="hidden" name="id" value={p.id} />
                             <input type="hidden" name="solicitudId" value={s.id} />
@@ -145,7 +145,7 @@ export default async function DetalleEvento({ params, searchParams }: { params: 
                   </Selector>
                 </Campo>
                 <Campo etiqueta="Personas"><Entrada type="number" name="personas" min={1} defaultValue={s.personas} /></Campo>
-                <Campo etiqueta="Señal (€)"><Entrada type="number" name="senal" min={0} step="0.01" /></Campo>
+                <Campo etiqueta="Señal (€)"><Entrada name="senal" inputMode="decimal" placeholder="300,00" /></Campo>
                 <div className="sm:col-span-3">
                   <Campo etiqueta="Extras" ayuda="Uno por línea: concepto;cantidad;precio con IVA. Ejemplo: Barra libre 1 h;40;12,50">
                     <AreaTexto name="extras" rows={3} />

@@ -63,8 +63,8 @@ export default async function SociedadesPagina({ searchParams }: { searchParams:
                 <Campo etiqueta="Razón social">
                   <Entrada name="razonSocial" required />
                 </Campo>
-                <Campo etiqueta="CIF">
-                  <Entrada name="cif" required />
+                <Campo etiqueta="CIF" ayuda="Si aún no lo sabes, déjalo en blanco: se guarda como pendiente">
+                  <Entrada name="cif" />
                 </Campo>
                 <Campo etiqueta="Domicilio">
                   <Entrada name="domicilio" />

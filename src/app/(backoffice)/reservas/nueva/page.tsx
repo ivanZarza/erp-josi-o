@@ -55,7 +55,7 @@ export default async function NuevaReserva({ searchParams }: { searchParams: Bus
               <Campo etiqueta="Correo">
                 <Entrada name="email" type="email" />
               </Campo>
-              <Campo etiqueta="Origen">
+              <Campo etiqueta="Origen" ayuda="Las de la web se guardan como «Solicitada» hasta que las confirmes">
                 <Selector name="origen" defaultValue="TELEFONO">
                   <option value="TELEFONO">Teléfono</option>
                   <option value="MANUAL">En el local</option>

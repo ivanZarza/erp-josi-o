@@ -78,7 +78,11 @@ export default async function FichaEmpleado({ params, searchParams }: { params: 
               <Volver a={volver} />
               <input type="hidden" name="empleadoId" value={e.id} />
               <Tarjeta titulo="Ficha" acciones={<Boton type="submit">Guardar</Boton>}>
-                <CamposEmpleado e={e} centros={ctx.centros} puestos={await s.listarPuestos(ctx)} convenios={await s.listarConvenios(ctx)} sociedades={await s.listarSociedades(ctx)} />
+                <p className="mb-4 text-sm text-slate-500">
+                  Alta: {fecha(e.fechaAlta)}
+                  {e.fechaAntiguedad ? ` · Antigüedad desde el ${fecha(e.fechaAntiguedad)} (reingreso)` : ""}
+                </p>
+                <CamposEmpleado e={e} centros={ctx.centros} puestos={await s.listarPuestos(ctx)} convenios={await s.listarConvenios(ctx)} sociedades={await s.listarSociedades(ctx)} usuarios={await s.usuariosParaEnlazar(ctx, e.id)} />
               </Tarjeta>
             </form>
           ) : (
@@ -89,6 +93,8 @@ export default async function FichaEmpleado({ params, searchParams }: { params: 
                   { etiqueta: "Teléfono", valor: e.telefono },
                   { etiqueta: "Correo", valor: e.email },
                   { etiqueta: "Alta", valor: fecha(e.fechaAlta) },
+                  { etiqueta: "Antigüedad", valor: fecha(e.fechaAntiguedad ?? e.fechaAlta) },
+                  { etiqueta: "Usuario de acceso", valor: e.usuarioId ? "Enlazado (puede usar «Fichar»)" : "Sin usuario" },
                   { etiqueta: "Puesto", valor: e.puesto ? `${e.puesto.nombre} · ${NOMBRE_DEPARTAMENTO[e.puesto.departamento]}` : null },
                   { etiqueta: "Categoría", valor: e.categoria?.nombre },
                   { etiqueta: "Otros centros", valor: e.centros.map((x) => centros.get(x.centroId)?.nombre).join(", ") || "Ninguno" },
@@ -106,7 +112,7 @@ export default async function FichaEmpleado({ params, searchParams }: { params: 
                   <Entrada type="date" name="fecha" defaultValue={hoy} required />
                 </Campo>
                 <div className="min-w-64 flex-1">
-                  <Campo etiqueta="Motivo" ayuda="Se finaliza su contrato, se quitan sus turnos posteriores y se avisa para desactivar su usuario. Nada se borra.">
+                  <Campo etiqueta="Motivo" ayuda="Se finaliza su contrato (y se anulan los que aún no habían empezado), se quitan sus turnos posteriores, se anulan sus peticiones pendientes y se desactiva al momento su usuario de acceso. Nada se borra.">
                     <Entrada name="motivo" required />
                   </Campo>
                 </div>
@@ -129,7 +135,7 @@ export default async function FichaEmpleado({ params, searchParams }: { params: 
               { titulo: "Tipo", celda: (c) => NOMBRE_CONTRATO[c.tipo] },
               { titulo: "Jornada", celda: (c) => `${numero(c.jornadaSemanal)} h/sem`, alinear: "derecha" },
               { titulo: "Desde", celda: (c) => fecha(c.fechaInicio) },
-              { titulo: "Hasta", celda: (c) => (c.fechaFin ? fecha(c.fechaFin) : "Indefinido") },
+              { titulo: "Hasta", celda: (c) => (!c.fechaFin ? "Indefinido" : c.fechaFin < c.fechaInicio ? "Anulado antes de empezar" : fecha(c.fechaFin)) },
               { titulo: "Prueba hasta", celda: (c) => fecha(c.finPeriodoPrueba) },
               { titulo: "Convenio", celda: (c) => [c.convenio?.nombre, c.categoria?.nombre].filter(Boolean).join(" · ") || "—" },
               ...(verSalarios
@@ -301,6 +307,7 @@ async function PestanaTurnos({ empleadoId }: { empleadoId: string }) {
         { titulo: "Centro", celda: (t) => t.centro },
         { titulo: "Horario", celda: (t) => `${t.inicio}–${t.fin}${t.inicio2 ? ` y ${t.inicio2}–${t.fin2}` : ""}` },
         { titulo: "Horas", celda: (t) => horasTexto(t.horas), alinear: "derecha" },
+        { titulo: "Cuadrante", celda: (t) => (t.publicado ? <Etiqueta tono="ok">Publicado</Etiqueta> : <Etiqueta tono="aviso">Borrador</Etiqueta>) },
         { titulo: "Notas", celda: (t) => t.notas ?? "" },
       ]}
     />
@@ -317,8 +324,8 @@ async function PestanaFichajes({ e, volver }: { e: s.EmpleadoFicha; volver: stri
   const total = jornadas.reduce((t, j) => t + j.horas, 0);
   return (
     <div className="space-y-4">
-      {e.activo && (
-        <Tarjeta titulo="Fichar ahora">
+      {e.activo && corregir && (
+        <Tarjeta titulo="Fichar ahora (por esta persona)">
           <form action={a.ficharAccion} className="flex flex-wrap items-end gap-3">
             <Volver a={volver} />
             <input type="hidden" name="empleadoId" value={e.id} />

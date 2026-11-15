@@ -12,7 +12,7 @@ export default async function Webs() {
   const prisma = await db();
   const marcas = await prisma.marca.findMany({
     where: { tenantId: ctx.tenant.id, activo: true },
-    include: { centros: { where: { estado: { notIn: ["CERRADO"] } }, include: { edificio: true }, orderBy: { nombre: "asc" } } },
+    include: { centros: { where: { tipo: "LOCAL", estado: { notIn: ["CERRADO"] } }, include: { edificio: true }, orderBy: { nombre: "asc" } } },
     orderBy: { nombre: "asc" },
   });
 

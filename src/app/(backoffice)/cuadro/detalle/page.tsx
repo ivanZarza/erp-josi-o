@@ -26,17 +26,23 @@ export default async function DetalleIndicador({ searchParams }: { searchParams:
       );
     throw e;
   }
-  const { centro, filas, motivo } = datos;
+  const { centro, filas, motivo, avisos, hastaDia } = datos;
   const suma = filas ? redondear(filas.reduce((s, f) => s + f.importe, 0)) : null;
   const base = `/cuadro/detalle?centro=${centroId}&mes=${mes}`;
   const enlaceModulo =
-    indicador === "ventas" && ctx.tieneModulo("caja") ? "/caja" : indicador === "gastos" && ctx.tieneModulo("contabilidad") ? `/contabilidad/gastos?mes=${mes}` : null;
+    indicador === "ventas" && ctx.tieneModulo("caja")
+      ? "/caja"
+      : indicador === "gastos" && ctx.tieneModulo("contabilidad")
+        ? `/contabilidad/gastos?mes=${mes}`
+        : indicador === "personal" && ctx.tieneModulo("personal") && ctx.puede("personal:nominas:ver")
+          ? `/personal/nominas?mes=${mes}`
+          : null;
 
   return (
     <>
       <Cabecera
         titulo={`${NOMBRE[indicador]} · ${centro.nombre}`}
-        subtitulo={`${nombreMes(mes)} · ${[centro.marca?.nombre, centro.sociedad?.razonSocial].filter(Boolean).join(" · ")}. Fuente: ${motivo}.`}
+        subtitulo={`${nombreMes(mes)}${hastaDia ? ` hasta ayer (${fecha(hastaDia)})` : ""} · ${[centro.marca?.nombre, centro.sociedad?.razonSocial].filter(Boolean).join(" · ")}. Fuente: ${motivo}.`}
         acciones={
           <>
             {enlaceModulo && (
@@ -54,6 +60,11 @@ export default async function DetalleIndicador({ searchParams }: { searchParams:
         activa={`${base}&indicador=${indicador}`}
         items={(["ventas", "mercancia", "gastos", "personal"] as Indicador[]).map((k) => ({ href: `${base}&indicador=${k}`, titulo: NOMBRE[k] }))}
       />
+      {avisos && avisos.length > 0 && (
+        <div className="mb-4">
+          <Aviso tono="aviso">{avisos.join(" ")}</Aviso>
+        </div>
+      )}
       {filas === null ? (
         <Vacio>Sin datos: {motivo}.</Vacio>
       ) : (
@@ -69,7 +80,7 @@ export default async function DetalleIndicador({ searchParams }: { searchParams:
               { titulo: "Fecha", celda: (f) => fecha(f.fecha) },
               { titulo: "Documento", celda: (f) => f.documento },
               { titulo: "Concepto", celda: (f) => f.concepto },
-              { titulo: "Importe sin IVA", celda: (f) => euros(f.importe), alinear: "derecha" },
+              { titulo: indicador === "personal" ? "Coste" : "Importe sin IVA", celda: (f) => euros(f.importe), alinear: "derecha" },
             ]}
           />
         </>

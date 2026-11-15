@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { exigir } from "@/kernel/contexto";
-import { euros, fecha, fechaHora, numero } from "@/kernel/formato";
+import { euros, fecha, fechaHora, numero, numeroCampo } from "@/kernel/formato";
 import { Boton, BotonEnlace, Cabecera, Campo, Entrada, Etiqueta, Pestanas, Tabla } from "@/ui";
 import { DatosDetalle, TablaDesplegable } from "@/ui/tabla-desplegable";
 import { nombreAlergeno } from "@/modulos/comidas/carta-alergenos";
@@ -119,6 +119,9 @@ export default async function Lotes({ searchParams }: { searchParams: Busqueda }
                     <input type="hidden" name="volver" value="/obrador/lotes" />
                     <Campo etiqueta="Motivo de la retirada">
                       <Entrada name="motivo" required placeholder="Alerta sanitaria del proveedor de carne" className="w-72" />
+                    </Campo>
+                    <Campo etiqueta={`Dar de baja en el obrador (${unidad(l.unidad)})`} ayuda={`Hay ${numero(l.stockEnObrador, 3)} en el obrador. Sale como merma; 0 = no tocar el stock`}>
+                      <Entrada name="cantidadBaja" inputMode="decimal" defaultValue={numeroCampo(l.quedaPosible)} className="w-32" />
                     </Campo>
                     <Boton type="submit" variante="peligro">
                       Retirar lote

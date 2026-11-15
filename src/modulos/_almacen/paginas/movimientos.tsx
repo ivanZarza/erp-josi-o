@@ -5,16 +5,10 @@ import { Cabecera, Entrada, Selector, Boton } from "@/ui";
 import { TablaDesplegable, DatosDetalle } from "@/ui/tabla-desplegable";
 import { listarMovimientos, almacenesDeCentros, SIN_UBICAR } from "@/nucleo/stock";
 import { num } from "@/nucleo/comun-almacen";
+import { inicioDiaMadridSiValido } from "@/kernel/fechas";
 import { Mensajes, TIPOS_MOVIMIENTO, textosArea, uno, unidad, type PropsPagina } from "../comun";
 import { centrosDelArea } from "./resumen";
 
-/** Fecha «aaaa-mm-dd» del filtro a Date (medianoche en la hora del servidor; `sumar` días para el «hasta» inclusivo). */
-function dia(s: string, sumar = 0): Date | undefined {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return undefined;
-  const d = new Date(`${s}T00:00:00`);
-  d.setDate(d.getDate() + sumar);
-  return d;
-}
 
 export async function PaginaMovimientos({ area, searchParams }: PropsPagina) {
   const t = textosArea(area);
@@ -30,8 +24,9 @@ export async function PaginaMovimientos({ area, searchParams }: PropsPagina) {
       tipo: uno(sp, "tipo") || undefined,
       texto: uno(sp, "q"),
       productoId: productoId || undefined,
-      desde: dia(uno(sp, "desde")),
-      hasta: dia(uno(sp, "hasta"), 1),
+      // días de Madrid: «desde» a las 00:00 y «hasta» incluido entero (hasta las 24:00)
+      desde: inicioDiaMadridSiValido(uno(sp, "desde")),
+      hasta: inicioDiaMadridSiValido(uno(sp, "hasta"), 1),
       almacen: almacen || undefined,
     }),
     prisma.usuario.findMany({ where: { tenantId: ctx.tenant.id }, select: { id: true, nombre: true } }),

@@ -5,12 +5,14 @@
 // Referencias al núcleo (Marca, Centro, Producto) solo con id de texto, sin @relation.
 // =====================================================================
 
-/// Objetivo de coste de mercancía de cada marca (% sobre precio sin IVA)
+/// Objetivo de coste de mercancía de cada marca (% sobre precio sin IVA). `objetivoCostePct` es el de
+/// Comidas; `objetivoBebidasPct` el de Bebidas (vacío = las bebidas usan el de Comidas).
 model CartaObjetivoMarca {
-  id               String  @id @default(cuid())
-  tenantId         String
-  marcaId          String
-  objetivoCostePct Decimal @default(30) @db.Decimal(5, 2)
+  id                 String   @id @default(cuid())
+  tenantId           String
+  marcaId            String
+  objetivoCostePct   Decimal  @default(30) @db.Decimal(5, 2)
+  objetivoBebidasPct Decimal? @db.Decimal(5, 2)
 
   @@unique([tenantId, marcaId])
 }
@@ -66,6 +68,7 @@ model CartaSeccion {
   nombre   String
   nombreEn String?
   orden    Int          @default(0)
+  activo   Boolean      @default(true) // «Quitar sección» la desactiva (no se borra: guarda sus platos por si se recupera)
   lineas   CartaLinea[]
 }
 

@@ -46,9 +46,15 @@ export async function actualizarClienteAccion(form: FormData) {
 
 export async function cambiarConsentimientoAccion(form: FormData) {
   const ctx = await exigir("clientes", "clientes:editar");
-  const d = esquemaConsentimiento.parse(leerFormulario(form));
-  await s.cambiarConsentimiento(ctx, d);
-  revalidatePath(`/clientes/${d.clienteId}`);
+  const id = String(form.get("clienteId") ?? "");
+  let destino = `/clientes/${id}?ok=${encodeURIComponent("Consentimiento registrado")}`;
+  try {
+    await s.cambiarConsentimiento(ctx, esquemaConsentimiento.parse(leerFormulario(form)));
+  } catch (e) {
+    destino = conError(`/clientes/${id}`, e);
+  }
+  revalidatePath(`/clientes/${id}`);
+  redirect(destino);
 }
 
 export async function suprimirClienteAccion(form: FormData) {

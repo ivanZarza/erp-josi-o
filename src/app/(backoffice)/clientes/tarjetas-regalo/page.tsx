@@ -1,10 +1,10 @@
 import { exigir } from "@/kernel/contexto";
-import { fecha, fechaHora, euros, numero } from "@/kernel/formato";
+import { fecha, fechaHora, euros, numero, numeroCampo } from "@/kernel/formato";
 import { Cabecera, Cifra, Rejilla, Tarjeta, Campo, Boton, BotonEnlace, Entrada, Selector, Etiqueta, Tabla } from "@/ui";
 import { TablaDesplegable, DatosDetalle } from "@/ui/tabla-desplegable";
-import { listarTarjetas, marcasDeLaCadena } from "@/modulos/clientes/servicio";
+import { listarTarjetas, marcasDeLaCadena, hoyMadrid } from "@/modulos/clientes/servicio";
 import { emitirTarjetaAccion, canjearTarjetaAccion, anularTarjetaAccion } from "@/modulos/clientes/acciones";
-import { AvisosUrl, PestanasClientes, param, type Busqueda } from "@/modulos/clientes/ui";
+import { AvisosUrl, PestanasClientes, nombreOrigen, param, type Busqueda } from "@/modulos/clientes/ui";
 
 const ESTADOS = { ACTIVA: "Activa", AGOTADA: "Agotada", CADUCADA: "Caducada", ANULADA: "Anulada" } as const;
 const MOVIMIENTOS = { EMISION: "Emisión", CANJE: "Canje", AJUSTE: "Ajuste", ANULACION: "Anulación" } as const;
@@ -21,7 +21,9 @@ export default async function TarjetasRegalo({ searchParams }: { searchParams: B
   const activas = tarjetas.filter((t) => t.estado === "ACTIVA");
   const saldoVivo = activas.reduce((a, t) => a + Number(t.saldo), 0);
   const vendido = tarjetas.reduce((a, t) => a + Number(t.importeInicial), 0);
-  const enUnAno = new Date(Date.now() + 365 * 86_400_000).toISOString().slice(0, 10);
+  // Días de Madrid: la tarjeta vale hasta el final de su día de caducidad
+  const enUnAno = hoyMadrid(365);
+  const en30Dias = hoyMadrid(30);
 
   return (
     <>
@@ -33,7 +35,7 @@ export default async function TarjetasRegalo({ searchParams }: { searchParams: B
           <Cifra etiqueta="Activas" valor={numero(activas.length)} />
           <Cifra etiqueta="Saldo pendiente de canjear" valor={euros(saldoVivo)} tono="aviso" />
           <Cifra etiqueta="Emitido (listado)" valor={euros(vendido)} />
-          <Cifra etiqueta="Caducan en 30 días" valor={numero(activas.filter((t) => t.caducidad.getTime() < Date.now() + 30 * 86_400_000).length)} />
+          <Cifra etiqueta="Caducan en 30 días" valor={numero(activas.filter((t) => t.caducidad.toISOString().slice(0, 10) <= en30Dias).length)} />
         </Rejilla>
       </div>
 
@@ -68,7 +70,7 @@ export default async function TarjetasRegalo({ searchParams }: { searchParams: B
                   { etiqueta: "Comprador", valor: t.compradorNombre ?? "—" },
                   { etiqueta: "Correo comprador", valor: t.compradorEmail ?? "—" },
                   { etiqueta: "Mensaje", valor: t.mensaje ?? "—" },
-                  { etiqueta: "Origen", valor: t.origen },
+                  { etiqueta: "Origen", valor: nombreOrigen(t.origen) },
                 ]}
               />
               <Tabla
@@ -87,10 +89,10 @@ export default async function TarjetasRegalo({ searchParams }: { searchParams: B
                 <div className="flex flex-wrap gap-4">
                   <form action={canjearTarjetaAccion} className="flex flex-wrap items-end gap-2">
                     <input type="hidden" name="tarjetaId" value={t.id} />
-                    <Campo etiqueta="Canjear (€)"><Entrada type="number" name="importe" min={0.01} step="0.01" max={Number(t.saldo)} className="w-32" required /></Campo>
+                    <Campo etiqueta="Canjear (€)"><Entrada name="importe" inputMode="decimal" placeholder={numeroCampo(t.saldo)} className="w-32" required /></Campo>
                     <Campo etiqueta="Local">
-                      <Selector name="centroId" defaultValue={ctx.centroActivo?.id ?? ""} className="w-48">
-                        <option value="">Sin indicar</option>
+                      <Selector name="centroId" defaultValue={ctx.centroActivo?.id ?? ""} className="w-48" required={!!t.marcaId}>
+                        <option value="">{t.marcaId ? "Elige el local…" : "Sin indicar"}</option>
                         {ctx.centros.filter((c) => c.tipo === "LOCAL").map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
                       </Selector>
                     </Campo>
@@ -113,7 +115,7 @@ export default async function TarjetasRegalo({ searchParams }: { searchParams: B
         <div className="mt-6">
           <Tarjeta titulo="Emitir tarjeta">
             <form action={emitirTarjetaAccion} className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <Campo etiqueta="Importe (€)"><Entrada type="number" name="importe" min={1} step="0.01" defaultValue={100} required /></Campo>
+              <Campo etiqueta="Importe (€)"><Entrada name="importe" inputMode="decimal" defaultValue={numeroCampo(100)} required /></Campo>
               <Campo etiqueta="Caduca"><Entrada type="date" name="caducidad" defaultValue={enUnAno} required /></Campo>
               <Campo etiqueta="Válida en">
                 <Selector name="marcaId" defaultValue="">

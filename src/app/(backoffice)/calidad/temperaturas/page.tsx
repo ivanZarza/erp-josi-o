@@ -2,8 +2,8 @@ import { exigir, centrosFiltro } from "@/kernel/contexto";
 import { fechaHora, numero } from "@/kernel/formato";
 import { Boton, Cabecera, Campo, Entrada, Etiqueta, HuecoIntegracion, Selector, Tabla, Tarjeta } from "@/ui";
 import { DatosDetalle, TablaDesplegable } from "@/ui/tabla-desplegable";
-import { listarEquipos } from "@/modulos/calidad/servicio";
-import { crearEquipo, desactivarEquipo, registrarTemperatura } from "@/modulos/calidad/acciones";
+import { listarEquipos, listarEquiposDeBaja } from "@/modulos/calidad/servicio";
+import { crearEquipo, desactivarEquipo, reactivarEquipo, registrarTemperatura } from "@/modulos/calidad/acciones";
 import { Indicadores, Mensajes, TIPOS_EQUIPO, type Busqueda } from "../_comun";
 
 const grados = (v: number) => `${numero(v, 1)} °C`;
@@ -11,9 +11,9 @@ const grados = (v: number) => `${numero(v, 1)} °C`;
 export default async function Temperaturas({ searchParams }: { searchParams: Busqueda }) {
   const ctx = await exigir("calidad", "calidad:ver");
   const sp = await searchParams;
-  const equipos = await listarEquipos(ctx);
   const puedeRegistrar = ctx.puede("calidad:registrar");
   const puedeEditar = ctx.puede("calidad:editar");
+  const [equipos, deBaja] = await Promise.all([listarEquipos(ctx), puedeEditar ? listarEquiposDeBaja(ctx) : Promise.resolve([])]);
   const volver = "/calidad/temperaturas";
   const centros = ctx.centros.filter((c) => centrosFiltro(ctx).includes(c.id));
 
@@ -93,6 +93,35 @@ export default async function Temperaturas({ searchParams }: { searchParams: Bus
           ),
         }))}
       />
+
+      {puedeEditar && deBaja.length > 0 && (
+        <div className="mt-6">
+          <Tarjeta titulo="Equipos dados de baja">
+            <Tabla
+              clave={(e) => e.id}
+              filas={deBaja}
+              columnas={[
+                { titulo: "Centro", celda: (e) => e.centro },
+                { titulo: "Equipo", celda: (e) => `${e.nombre} · ${TIPOS_EQUIPO[e.tipo]}` },
+                { titulo: "Rango", alinear: "derecha", celda: (e) => `${grados(e.minimo)} a ${grados(e.maximo)}` },
+                { titulo: "Última lectura", celda: (e) => (e.ultimaLectura ? fechaHora(e.ultimaLectura) : "Nunca") },
+                {
+                  titulo: "",
+                  celda: (e) => (
+                    <form action={reactivarEquipo}>
+                      <input type="hidden" name="id" value={e.id} />
+                      <input type="hidden" name="volver" value={volver} />
+                      <Boton type="submit" variante="secundario">
+                        Volver a dar de alta
+                      </Boton>
+                    </form>
+                  ),
+                },
+              ]}
+            />
+          </Tarjeta>
+        </div>
+      )}
 
       {puedeEditar && centros.length > 0 && (
         <div className="mt-6">

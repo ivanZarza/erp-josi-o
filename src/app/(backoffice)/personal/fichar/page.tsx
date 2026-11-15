@@ -25,13 +25,15 @@ export default async function MiPortal({ searchParams }: { searchParams: Busqued
   const hoy = hoyMadrid();
   const [estado, turnos, saldo, ausencias, centros] = await Promise.all([
     s.estadoFichaje(ctx, yo.id),
-    s.turnosEmpleado(ctx, yo.id, hoy, 14),
+    s.turnosEmpleado(ctx, yo.id, hoy, 14, { soloPublicados: true }),
     s.saldoVacaciones(ctx, yo.id),
     s.listarAusencias(ctx, { empleadoId: yo.id, desde: hoy }),
     s.mapaCentros(ctx),
   ]);
   const misCentros = [yo.centroPrincipalId, ...yo.centros.map((c) => c.centroId)];
   const turnoHoy = turnos.find((t) => t.dia === hoy);
+  // el centro por defecto para fichar sale del turno de hoy aunque su semana aún no esté publicada
+  const turnoHoyCualquiera = turnoHoy ?? (await s.turnosEmpleado(ctx, yo.id, hoy, 1)).find((t) => t.dia === hoy);
 
   return (
     <div className="mx-auto max-w-2xl">
@@ -42,7 +44,7 @@ export default async function MiPortal({ searchParams }: { searchParams: Busqued
           <Volver a="/personal/fichar" />
           {misCentros.length > 1 ? (
             <Campo etiqueta="Centro">
-              <Selector name="centroId" defaultValue={turnoHoy?.centroId ?? yo.centroPrincipalId}>
+              <Selector name="centroId" defaultValue={turnoHoyCualquiera?.centroId ?? yo.centroPrincipalId}>
                 {misCentros.map((c) => (
                   <option key={c} value={c}>{centros.get(c)?.nombre ?? c}</option>
                 ))}
@@ -69,7 +71,7 @@ export default async function MiPortal({ searchParams }: { searchParams: Busqued
         <Tabla
           filas={turnos}
           clave={(t) => t.id}
-          vacio="No tienes turnos publicados en los próximos 14 días."
+          vacio="No tienes turnos publicados en los próximos 14 días (los cuadrantes en borrador no salen hasta que se publican)."
           columnas={[
             { titulo: "Día", celda: (t) => `${NOMBRES_DIA[diaSemana(t.dia)]} ${fecha(t.fecha)}` },
             { titulo: "Centro", celda: (t) => t.centro },

@@ -77,7 +77,7 @@ function fechaInput(d?: Date | null): string | undefined {
 }
 
 /** Campos de datos del centro (sin <form>: lo pone la página con su acción). */
-export function CamposCentro({ v, marcas, sociedades, edificios }: { v: ValoresCentro; marcas: OpcionId[]; sociedades: OpcionId[]; edificios: OpcionId[] }) {
+export function CamposCentro({ v, marcas, sociedades, edificios, edificioSeleccionado }: { v: ValoresCentro; marcas: OpcionId[]; sociedades: OpcionId[]; edificios: OpcionId[]; edificioSeleccionado?: string }) {
   return (
     <div className="space-y-4">
       <Rejilla columnas={4}>
@@ -127,16 +127,19 @@ export function CamposCentro({ v, marcas, sociedades, edificios }: { v: ValoresC
           <Entrada name="aperturaEn" type="date" defaultValue={fechaInput(v.aperturaEn)} />
         </Campo>
       </Rejilla>
-      <CamposDireccion v={v.edificio ?? null} edificios={edificios} />
+      <CamposDireccion v={v.edificio ?? null} edificios={edificios} seleccionado={edificioSeleccionado} />
     </div>
   );
 }
 
-export function CamposDireccion({ v, edificios }: { v: ValoresCentro["edificio"] | null; edificios: OpcionId[] }) {
+export function CamposDireccion({ v, edificios, seleccionado }: { v: ValoresCentro["edificio"] | null; edificios: OpcionId[]; seleccionado?: string }) {
   return (
     <div className="space-y-3">
-      <Campo etiqueta="Edificio compartido" ayuda="Si comparte edificio con otro centro, elígelo; si no, deja «Dirección propia» y escríbela abajo">
-        <Selector name="edificioId" defaultValue="">
+      <Campo
+        etiqueta="Edificio compartido"
+        ayuda="Si comparte edificio con otro centro, elígelo (la dirección de abajo no se usa); si no, deja «Dirección propia» y escríbela abajo. Pasar a «Dirección propia» separa el centro del edificio que compartía."
+      >
+        <Selector name="edificioId" defaultValue={seleccionado ?? ""}>
           <option value="">Dirección propia</option>
           {edificios.map((e) => (
             <option key={e.id} value={e.id}>

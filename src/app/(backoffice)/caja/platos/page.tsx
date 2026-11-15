@@ -85,10 +85,11 @@ export default async function VentaPorPlato({ searchParams }: { searchParams: Pa
             vacio="No hay tickets con líneas en estas fechas. Las jornadas metidas a mano (sin tickets) no tienen detalle por plato."
             columnas={[{ titulo: "Plato · formato" }, { titulo: "Unidades", alinear: "derecha" }, { titulo: "Venta", alinear: "derecha" }, { titulo: "Coste teórico", alinear: "derecha", secundaria: true }, { titulo: "Margen", alinear: "derecha" }, { titulo: "% coste", alinear: "derecha", secundaria: true }]}
             filas={filas.map((f) => {
-              const grupos = new Map<string, { unidades: number; importe: number; coste: number }>();
+              const grupos = new Map<string, { unidades: number; invitadas: number; importe: number; coste: number }>();
               for (const [dia, d] of f.porDia) {
-                const g = grupos.get(clave(dia)) ?? { unidades: 0, importe: 0, coste: 0 };
+                const g = grupos.get(clave(dia)) ?? { unidades: 0, invitadas: 0, importe: 0, coste: 0 };
                 g.unidades += d.unidades;
+                g.invitadas += d.invitadas;
                 g.importe += d.importe;
                 g.coste += d.coste;
                 grupos.set(clave(dia), g);
@@ -124,6 +125,7 @@ export default async function VentaPorPlato({ searchParams }: { searchParams: Pa
                         <tr>
                           <th className="py-1 text-left">{agrupar === "mes" ? "Mes" : "Día"}</th>
                           <th className="py-1 text-right">Unidades</th>
+                          <th className="py-1 text-right">Invitadas</th>
                           <th className="py-1 text-right">Venta</th>
                           <th className="py-1 text-right">Coste</th>
                           <th className="py-1 text-right">Margen</th>
@@ -134,6 +136,7 @@ export default async function VentaPorPlato({ searchParams }: { searchParams: Pa
                           <tr key={k} className="border-t border-slate-100">
                             <td className="py-1">{agrupar === "mes" ? k : fecha(k)}</td>
                             <td className="py-1 text-right tabular-nums">{numero(g.unidades)}</td>
+                            <td className="py-1 text-right tabular-nums">{g.invitadas ? numero(g.invitadas) : "—"}</td>
                             <td className="py-1 text-right tabular-nums">{euros(g.importe)}</td>
                             <td className="py-1 text-right tabular-nums">{euros(g.coste)}</td>
                             <td className="py-1 text-right tabular-nums">{euros(g.importe - g.coste)}</td>

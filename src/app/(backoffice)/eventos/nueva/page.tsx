@@ -41,7 +41,7 @@ export default async function NuevaSolicitud({ searchParams }: { searchParams: B
             </Selector>
           </Campo>
           <Campo etiqueta="Presupuesto del cliente (€)" ayuda="Lo que dice que quiere gastar en total">
-            <Entrada type="number" name="presupuestoCliente" min={0} step="0.01" />
+            <Entrada name="presupuestoCliente" inputMode="decimal" placeholder="1.500,00" />
           </Campo>
           <Campo etiqueta="Origen">
             <Selector name="origen" defaultValue="TELEFONO">

@@ -1,5 +1,5 @@
 import { exigir } from "@/kernel/contexto";
-import { euros, numero } from "@/kernel/formato";
+import { euros, numero, numeroCampo } from "@/kernel/formato";
 import { Cabecera, Tarjeta, Campo, Entrada, Selector, AreaTexto, Boton, Etiqueta } from "@/ui";
 import { TablaDesplegable, DatosDetalle } from "@/ui/tabla-desplegable";
 import { listarMenus, marcasYLocales } from "@/modulos/eventos/servicio";
@@ -19,8 +19,8 @@ function FormMenu({ m, marcas }: { m?: Menu; marcas: { id: string; nombre: strin
           {marcas.map((x) => <option key={x.id} value={x.id}>{x.nombre}</option>)}
         </Selector>
       </Campo>
-      <Campo etiqueta="Precio por persona (IVA incl.)"><Entrada type="number" name="precioPersona" min={0} step="0.01" defaultValue={m ? Number(m.precioPersona) : undefined} required /></Campo>
-      <Campo etiqueta="IVA %"><Entrada type="number" name="iva" min={0} max={21} defaultValue={m ? Number(m.iva) : 10} /></Campo>
+      <Campo etiqueta="Precio por persona (IVA incl.)"><Entrada name="precioPersona" inputMode="decimal" defaultValue={m ? numeroCampo(m.precioPersona) : undefined} placeholder="45,00" required /></Campo>
+      <Campo etiqueta="IVA %"><Entrada name="iva" inputMode="decimal" defaultValue={m ? numeroCampo(m.iva) : "10"} /></Campo>
       <Campo etiqueta="Mínimo de personas"><Entrada type="number" name="minPersonas" min={1} defaultValue={m?.minPersonas ?? 10} /></Campo>
       <div className="sm:col-span-2 lg:col-span-5"><Campo etiqueta="Descripción"><Entrada name="descripcion" defaultValue={m?.descripcion ?? ""} /></Campo></div>
       <div className="sm:col-span-2 lg:col-span-5"><Campo etiqueta="Platos" ayuda="Uno por línea"><AreaTexto name="platos" rows={4} defaultValue={m?.platos ?? ""} /></Campo></div>

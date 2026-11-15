@@ -1,11 +1,14 @@
 /** Validación (zod) de los formularios de Caja y ventas. */
 import { z } from "zod";
+import { numeroEs, numeroEsOpcional } from "@/kernel/esquemas";
+import { leerNumero } from "@/kernel/formato";
 
 const opcional = z.preprocess((v) => (v === "" || v === null ? undefined : v), z.string().trim().optional());
 const fechaISO = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha no válida");
-const importe = (mensaje: string) => z.coerce.number({ message: mensaje }).finite(mensaje).min(0, mensaje);
-const importeOpcional = z.preprocess((v) => (v === "" || v === null || v === undefined ? undefined : v), z.coerce.number().finite().min(0).optional());
-const entero = (mensaje: string) => z.coerce.number({ message: mensaje }).int(mensaje).min(0, mensaje);
+// Números escritos a mano: «6,5», «1.234,5», «1.500» o «6.5» (numeroEs / numeroEsOpcional del núcleo)
+const importe = (mensaje: string) => numeroEs(mensaje).pipe(z.number().min(0, mensaje));
+const importeOpcional = numeroEsOpcional("Importe no válido").pipe(z.number().min(0, "Los importes no pueden ser negativos").optional());
+const entero = (mensaje: string) => numeroEs(mensaje).pipe(z.number().int(mensaje).min(0, mensaje));
 
 export const FORMAS_COBRO = ["EFECTIVO", "TARJETA", "BIZUM", "VALE", "CREDITO", "OTRA"] as const;
 export const NOMBRE_FORMA_COBRO: Record<(typeof FORMAS_COBRO)[number], string> = {
@@ -30,7 +33,7 @@ export const JornadaEsquema = z.object({
   invitaciones: importeOpcional,
   anulaciones: importeOpcional,
   notas: opcional,
-  pagos: z.array(z.object({ forma: z.enum(FORMAS_COBRO), importe: z.number().finite().min(0) })),
+  pagos: z.array(z.object({ forma: z.enum(FORMAS_COBRO), importe: z.number({ message: "Un cobro por forma de pago no es un número válido" }).finite("Un cobro por forma de pago no es un número válido").min(0, "Los cobros no pueden ser negativos") })),
 });
 export type JornadaDatos = z.infer<typeof JornadaEsquema>;
 
@@ -51,26 +54,21 @@ export const ValidarCierreEsquema = z.object({
   comentario: opcional,
 });
 
-/** Acepta «1.234,56», «1234,56» o «1234.56». */
-export function decimalEs(v: FormDataEntryValue | null): string {
-  const s = String(v ?? "").trim().replace(/\s|€/g, "");
-  if (s.includes(",")) return s.replace(/\./g, "").replace(",", ".");
-  return s;
-}
-
-const DECIMALES = ["ventaNeta", "cuotaIva", "ventaComida", "ventaCena", "descuentos", "invitaciones", "anulaciones", "efectivoTeorico", "efectivoContado", "tarjetaBanco", "fondoCaja", "fondoInicial", "importe", "descuentoPct", "propina", "importe2"];
-
 export function objetoDeFormulario(form: FormData) {
   const o: Record<string, unknown> = {};
   const pagos: { forma: string; importe: number }[] = [];
   for (const [k, v] of form.entries()) {
     if (k.startsWith("$ACTION")) continue;
     if (k.startsWith("pago_")) {
-      const s = decimalEs(v);
-      if (s !== "") pagos.push({ forma: k.slice(5), importe: Number(s) });
+      // un cobro mal escrito llega como NaN y el esquema lo rechaza (no se pierde en silencio)
+      if (String(v).trim() !== "") {
+        const n = leerNumero(String(v));
+        pagos.push({ forma: k.slice(5), importe: typeof n === "number" ? n : Number.NaN });
+      }
       continue;
     }
-    o[k] = DECIMALES.includes(k) ? decimalEs(v) : v;
+    // los números se leen en el esquema (numeroEs), que entiende la coma
+    o[k] = v;
   }
   o.pagos = pagos;
   return o;
@@ -87,14 +85,14 @@ export const TicketFormEsquema = z.object({
   empleadoId: opcional,
   camarero: opcional,
   estado: z.enum(["ABIERTO", "COBRADO"]),
-  descuentoPct: z.preprocess((v) => (v === "" || v === null || v === undefined ? undefined : v), z.coerce.number().min(0, "Descuento no válido").max(100, "Descuento no válido").optional()),
+  descuentoPct: numeroEsOpcional("Descuento no válido").pipe(z.number().min(0, "Descuento no válido").max(100, "Descuento no válido").optional()),
   forma: z.enum(FORMAS_COBRO).default("TARJETA"),
   propina: importeOpcional,
   forma2: z.preprocess((v) => (v === "" ? undefined : v), z.enum(FORMAS_COBRO).optional()),
   importe2: importeOpcional,
   notas: opcional,
   lineas: z
-    .array(z.object({ platoId: z.string().min(1), formatoId: z.string().nullable(), cantidad: z.number().positive("La cantidad tiene que ser mayor que cero"), invitacion: z.boolean() }))
+    .array(z.object({ platoId: z.string().min(1), formatoId: z.string().nullable(), cantidad: z.number({ message: "Una cantidad no es un número válido" }).positive("La cantidad tiene que ser mayor que cero"), invitacion: z.boolean() }))
     .min(1, "Añade al menos una línea"),
 });
 export type TicketFormDatos = z.infer<typeof TicketFormEsquema>;
@@ -118,7 +116,9 @@ function lineasDeFormulario(form: FormData) {
     const art = String(form.get(`linea_${i}_articulo`) ?? "");
     if (!art) continue;
     const [platoId, formatoId] = art.split("|");
-    const cant = Number(decimalEs(form.get(`linea_${i}_cantidad`)) || "1");
+    const texto = String(form.get(`linea_${i}_cantidad`) ?? "").trim();
+    const leido = texto === "" ? 1 : leerNumero(texto);
+    const cant = typeof leido === "number" ? leido : Number.NaN;
     lineas.push({ platoId, formatoId: formatoId || null, cantidad: cant, invitacion: form.get(`linea_${i}_invitacion`) === "on" });
   }
   return lineas;
@@ -143,7 +143,7 @@ export const MovimientoCajaEsquema = z.object({
   centroId: z.string().min(1, "Elige el local"),
   fecha: fechaISO,
   tipo: z.enum(["RETIRADA", "PAGO", "ENTRADA"]),
-  importe: z.coerce.number({ message: "Importe no válido" }).finite().positive("El importe tiene que ser mayor que cero"),
+  importe: numeroEs("Importe no válido").pipe(z.number().positive("El importe tiene que ser mayor que cero")),
   concepto: z.string().trim().min(3, "Explica el movimiento (a quién, para qué)"),
 });
 

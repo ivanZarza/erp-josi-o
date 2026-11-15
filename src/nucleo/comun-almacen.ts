@@ -1,5 +1,6 @@
 import "server-only";
 import type { PrismaClient } from "@/generated/prisma/client";
+import { leerNumero } from "@/kernel/formato";
 
 /**
  * Utilidades comunes del motor de almacén (Bebidas y Comidas).
@@ -48,23 +49,45 @@ export function num(v: { toString(): string } | number | null | undefined): numb
 }
 
 /**
- * Lee un número escrito a la española: «1,5», «1.500,25», «12». Devuelve null si está vacío o no es número.
- * Si lleva coma, el punto se toma como separador de miles; si no lleva coma, el punto es decimal.
+ * Lee un número escrito a mano: «1,5», «1.500,25», «1.500» (mil quinientos), «6.5», «12». Devuelve null si
+ * está vacío o no es número. Misma regla que el resto del ERP (leerNumero de src/kernel/formato.ts).
  */
 export function leerNumeroES(texto: unknown): number | null {
   if (texto === null || texto === undefined) return null;
-  let s = String(texto).trim().replace(/\s/g, "").replace(/€/g, "");
-  if (s === "") return null;
-  if (s.includes(",")) s = s.replace(/\./g, "").replace(",", ".");
-  const n = Number(s);
-  return Number.isFinite(n) ? n : null;
+  const s = String(texto);
+  if (s.trim() === "") return null;
+  const n = leerNumero(s);
+  return typeof n === "number" && Number.isFinite(n) ? n : null;
 }
 
-/** Centros de los que se puede pedir (obradores y almacenes centrales de la cadena). */
-export async function centrosQueSirven(tx: Tx, tenantId: string) {
-  return tx.centro.findMany({
-    where: { tenantId, tipo: { in: ["OBRADOR", "ALMACEN"] }, estado: { not: "CERRADO" } },
-    select: { id: true, codigo: true, nombre: true, tipo: true },
-    orderBy: { nombre: "asc" },
-  });
+/**
+ * ¿Trabaja este centro el área? Igual que el contexto (src/kernel/contexto.ts): si el centro tiene sus
+ * áreas configuradas (CentroModulo), las activas; si no, hereda las contratadas por la cadena.
+ */
+function centroTieneArea(c: { modulos: { modulo: string; activo: boolean }[] }, modulo: string, contratados: Set<string>): boolean {
+  return c.modulos.length > 0 ? c.modulos.some((m) => m.activo && m.modulo === modulo) : contratados.has(modulo);
+}
+
+/** Módulos contratados y en vigor de la cadena. */
+async function modulosContratados(tx: Tx, tenantId: string): Promise<Set<string>> {
+  const ahora = new Date();
+  const filas = await tx.tenantModulo.findMany({ where: { tenantId, activo: true, OR: [{ hasta: null }, { hasta: { gt: ahora } }] }, select: { modulo: true } });
+  return new Set(filas.map((f) => f.modulo));
+}
+
+/**
+ * Centros de los que se puede pedir en un área: obradores y almacenes centrales abiertos de la cadena
+ * que tienen esa área (Bebidas o Comidas) activa.
+ */
+export async function centrosQueSirven(tx: Tx, tenantId: string, area: AreaAlmacen) {
+  const [centros, contratados] = await Promise.all([
+    tx.centro.findMany({
+      where: { tenantId, tipo: { in: ["OBRADOR", "ALMACEN"] }, estado: { notIn: ["CERRADO", "PREPARACION"] } },
+      select: { id: true, codigo: true, nombre: true, tipo: true, modulos: { select: { modulo: true, activo: true } } },
+      orderBy: { nombre: "asc" },
+    }),
+    modulosContratados(tx, tenantId),
+  ]);
+  const m = moduloDeArea(area);
+  return centros.filter((c) => centroTieneArea(c, m, contratados)).map(({ modulos: _m, ...c }) => c);
 }

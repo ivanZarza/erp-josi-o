@@ -1,12 +1,14 @@
 /** Validación (zod) de Bebidas: ficha de vino. Los números admiten coma decimal española. */
 import { z } from "zod";
+import { leerNumero } from "@/kernel/formato";
 
+/** «75», «75 cl», «37,5», «1.500» → número (misma lectura que el resto del ERP: leerNumero). Vacío → sin dato. */
 function aNumeroEs(v: unknown): unknown {
   if (typeof v !== "string") return v;
-  let s = v.trim().replace(/\s|cl/gi, "");
+  const s = v.trim().replace(/\s|cl/gi, "");
   if (s === "") return undefined;
-  if (s.includes(",")) s = s.replace(/\./g, "").replace(",", ".");
-  return Number(s);
+  const n = leerNumero(s);
+  return typeof n === "number" ? n : Number.NaN;
 }
 const textoOpcional = z.preprocess((v) => (typeof v === "string" && v.trim() === "" ? undefined : v), z.string().trim().max(2000).optional());
 

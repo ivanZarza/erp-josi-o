@@ -8,11 +8,11 @@ import bcrypt from "bcryptjs";
 import { db } from "@/kernel/db";
 import { auditar } from "@/kernel/eventos";
 import { MODULOS, moduloPorId } from "@/kernel/registro";
-import { PERMISOS_ROL, tienePermiso, type Rol } from "@/kernel/permisos";
+import { leerPermisosGuardados, PERMISOS_ROL, ROLES, tienePermiso, type Rol } from "@/kernel/permisos";
 import type { Contexto } from "@/kernel/contexto";
 import { Prisma } from "@/generated/prisma/client";
 import { ErrorNegocio } from "@/modulos/organizacion/errores";
-import { extenderAreaNueva } from "@/modulos/organizacion/servicio";
+import { ambitoCentros, extenderAreaNueva } from "@/modulos/organizacion/servicio";
 import type { DatosIntegracion, DatosUsuario } from "./esquemas";
 
 type Tx = Prisma.TransactionClient;
@@ -66,12 +66,88 @@ function fotoUsuario(u: { nombre: string; email: string; rol: string; todosCentr
   return { nombre: u.nombre, email: u.email, rol: u.rol, todosCentros: u.todosCentros, activo: u.activo, centros };
 }
 
+// ---------------------------------------------------------------------------------------------
+// Escalada de privilegios: nadie da lo que no tiene (specs/general/05 §2)
+// ---------------------------------------------------------------------------------------------
+
+/** Claves (de módulos contratados) que tendría alguien con ese rol y permisos y que quien edita no tiene. */
+function permisosQueNoTiene(ctx: Contexto, rol: string, guardados: string[] | null): string[] {
+  if (ctx.usuario.rol === "admin") return [];
+  return Array.from(clavesContratadas(ctx)).filter((c) => tienePermiso(rol, guardados, c) && !ctx.puede(c));
+}
+
+function textoPermisos(ctx: Contexto, claves: string[]): string {
+  const desc = new Map(catalogoPermisos(ctx).flatMap((m) => m.permisos.map((p) => [p.clave, p.descripcion] as const)));
+  const nombres = claves.slice(0, 3).map((c) => `«${desc.get(c) ?? c}»`);
+  return `${nombres.join(", ")}${claves.length > 3 ? ` y ${claves.length - 3} más` : ""}`;
+}
+
+/**
+ * ¿Puede quien edita dar este rol con estos permisos? Devuelve el motivo si no (null = sí).
+ * Solo un administrador nombra administradores; nadie da un permiso que él no tiene.
+ */
+export function motivoNoPuedeDar(ctx: Contexto, rol: string, guardados: string[] | null): string | null {
+  if (ctx.usuario.rol === "admin") return null;
+  if (rol === "admin") return "Solo un administrador puede nombrar administradores";
+  const faltan = permisosQueNoTiene(ctx, rol, guardados);
+  if (faltan.length) return `No puedes dar permisos que tú no tienes: ${textoPermisos(ctx, faltan)}`;
+  return null;
+}
+
+/**
+ * ¿Puede quien edita cambiar a esta persona (datos, rol, permisos, contraseña, activar)? null = sí.
+ * A un administrador solo lo cambia otro administrador; a quien tiene permisos que tú no tienes, tampoco.
+ */
+export function motivoNoPuedeGestionar(ctx: Contexto, u: { id: string; rol: string; permisos: unknown }): string | null {
+  if (ctx.usuario.rol === "admin") return null;
+  if (u.rol === "admin") return "Solo un administrador puede cambiar a un administrador";
+  if (u.id === ctx.usuario.id) return null;
+  if (permisosQueNoTiene(ctx, u.rol, leerPermisosGuardados(u.permisos)).length)
+    return "Esta persona tiene permisos que tú no tienes: solo puede cambiarla alguien con, al menos, sus mismos permisos";
+  return null;
+}
+
+/** Roles que quien edita puede dar (con los permisos de su rol). */
+export function rolesQuePuedeDar(ctx: Contexto): Rol[] {
+  return (Object.keys(ROLES) as Rol[]).filter((r) => motivoNoPuedeDar(ctx, r, null) === null);
+}
+
+function exigirGestionable(ctx: Contexto, u: { id: string; rol: string; permisos: unknown }) {
+  const motivo = motivoNoPuedeGestionar(ctx, u);
+  if (motivo) throw new ErrorNegocio(motivo);
+}
+
+function exigirPuedeDar(ctx: Contexto, rol: string, guardados: string[] | null) {
+  const motivo = motivoNoPuedeDar(ctx, rol, guardados);
+  if (motivo) throw new ErrorNegocio(motivo);
+}
+
+/**
+ * Centros que quedan guardados al editar: los marcados (solo de los que ve quien edita) más los que
+ * el usuario ya tenía fuera del alcance de quien edita (esos no se tocan). `ambito` null = ve todos.
+ */
+function centrosResultantes(ambito: string[] | null, pedidos: string[], antes: string[]): string[] {
+  const marcados = Array.from(new Set(pedidos));
+  if (!ambito) return marcados;
+  const ajeno = marcados.find((c) => !ambito.includes(c));
+  if (ajeno) throw new ErrorNegocio("No puedes dar acceso a centros que tú no ves");
+  return Array.from(new Set([...marcados, ...antes.filter((c) => !ambito.includes(c))]));
+}
+
+const SIN_CENTROS = "Elige al menos un centro o marca «Todos los centros»";
+
 export async function crearUsuario(ctx: Contexto, d: DatosUsuario, contrasenaTemporal: string): Promise<string> {
+  exigirPuedeDar(ctx, d.rol, null);
+  // fuera de la transacción: la conexión es única y una consulta suelta dentro la bloquearía
+  const ambito = await ambitoCentros(ctx);
+  if (ambito && d.todosCentros && d.rol !== "admin") throw new ErrorNegocio("Solo quien ve todos los centros puede dar «Todos los centros»");
   const prisma = await db();
   const passwordHash = await bcrypt.hash(contrasenaTemporal, 12);
   return prisma.$transaction(async (tx) => {
     if (await tx.usuario.findFirst({ where: { tenantId: ctx.tenant.id, email: d.email } })) throw new ErrorNegocio("Ya hay un usuario con ese correo");
-    const centros = d.todosCentros || d.rol === "admin" ? [] : Array.from(new Set(d.centros));
+    const todos = d.todosCentros || d.rol === "admin";
+    const centros = todos ? [] : centrosResultantes(ambito, d.centros, []);
+    if (!todos && !centros.length) throw new ErrorNegocio(SIN_CENTROS);
     await comprobarCentros(tx, ctx.tenant.id, centros);
     const u = await tx.usuario.create({
       data: {
@@ -80,7 +156,7 @@ export async function crearUsuario(ctx: Contexto, d: DatosUsuario, contrasenaTem
         email: d.email,
         rol: d.rol,
         passwordHash,
-        todosCentros: d.todosCentros || d.rol === "admin",
+        todosCentros: todos,
         centros: { create: centros.map((centroId) => ({ centroId })) },
       },
     });
@@ -90,18 +166,26 @@ export async function crearUsuario(ctx: Contexto, d: DatosUsuario, contrasenaTem
 }
 
 export async function actualizarUsuario(ctx: Contexto, id: string, d: DatosUsuario) {
+  const ambito = await ambitoCentros(ctx);
   const prisma = await db();
   await prisma.$transaction(async (tx) => {
     const u = await tx.usuario.findFirst({ where: { id, tenantId: ctx.tenant.id }, include: { centros: true } });
     if (!u) throw new ErrorNegocio("Usuario no encontrado");
+    exigirGestionable(ctx, u);
+    exigirPuedeDar(ctx, d.rol, leerPermisosGuardados(u.permisos));
+    // un rol nuevo tampoco puede llevar más de lo que tiene quien edita (aunque hoy tenga permisos a medida:
+    // «Volver a los permisos del rol» se los daría)
+    if (d.rol !== u.rol) exigirPuedeDar(ctx, d.rol, null);
     if (u.rol === "admin" && d.rol !== "admin" && !(await quedaOtroAdmin(tx, ctx.tenant.id, id))) throw new ErrorNegocio("Es el único administrador: nombra otro antes de cambiarle el rol");
     if (u.rol === "admin" && d.rol !== "admin" && id === ctx.usuario.id) throw new ErrorNegocio("No puedes quitarte a ti mismo el rol de administrador");
     const repetido = await tx.usuario.findFirst({ where: { tenantId: ctx.tenant.id, email: d.email, id: { not: id } } });
     if (repetido) throw new ErrorNegocio("Ya hay otro usuario con ese correo");
     const todos = d.todosCentros || d.rol === "admin";
-    const centros = todos ? [] : Array.from(new Set(d.centros));
-    await comprobarCentros(tx, ctx.tenant.id, centros);
+    if (ambito && todos !== u.todosCentros) throw new ErrorNegocio("Solo quien ve todos los centros puede dar o quitar «Todos los centros»");
     const antesCentros = u.centros.map((c) => c.centroId);
+    const centros = todos ? [] : centrosResultantes(ambito, d.centros, antesCentros);
+    if (!todos && !centros.length) throw new ErrorNegocio(SIN_CENTROS);
+    await comprobarCentros(tx, ctx.tenant.id, centros);
     await tx.usuarioCentro.deleteMany({ where: { usuarioId: id, centroId: { notIn: centros } } });
     for (const centroId of centros.filter((c) => !antesCentros.includes(c))) await tx.usuarioCentro.create({ data: { usuarioId: id, centroId } });
     const nuevo = await tx.usuario.update({ where: { id }, data: { nombre: d.nombre, email: d.email, rol: d.rol, todosCentros: todos } });
@@ -115,6 +199,7 @@ export async function cambiarActivoUsuario(ctx: Contexto, id: string, activo: bo
   await prisma.$transaction(async (tx) => {
     const u = await tx.usuario.findFirst({ where: { id, tenantId: ctx.tenant.id } });
     if (!u) throw new ErrorNegocio("Usuario no encontrado");
+    exigirGestionable(ctx, u);
     if (!activo && id === ctx.usuario.id) throw new ErrorNegocio("No puedes desactivarte a ti mismo");
     if (!activo && u.rol === "admin" && !(await quedaOtroAdmin(tx, ctx.tenant.id, id))) throw new ErrorNegocio("Es el único administrador activo");
     await tx.usuario.update({ where: { id }, data: { activo } });
@@ -128,19 +213,35 @@ export async function restablecerContrasena(ctx: Contexto, id: string, contrasen
   await prisma.$transaction(async (tx) => {
     const u = await tx.usuario.findFirst({ where: { id, tenantId: ctx.tenant.id } });
     if (!u) throw new ErrorNegocio("Usuario no encontrado");
+    exigirGestionable(ctx, u);
     await tx.usuario.update({ where: { id }, data: { passwordHash } });
     // nunca se guarda la contraseña ni su huella en el historial
     await auditar(tx, { tenantId: ctx.tenant.id, usuarioId: ctx.usuario.id, entidad: "Usuario", entidadId: id, accion: "contrasena" });
   });
 }
 
-/** Paso «Usuarios» del asistente: quién tiene acceso a un centro (los de «todos los centros» ya lo tienen). */
+/**
+ * Quién sale en el paso «Usuarios» del asistente: activos, sin «Todos los centros», y ni administradores
+ * (ya lo ven todo) ni empleados (no usan el backoffice). La pantalla y el guardado usan esta misma regla.
+ */
+export function elegibleParaCentro(u: { activo: boolean; rol: string; todosCentros: boolean }): boolean {
+  return u.activo && !u.todosCentros && u.rol !== "admin" && u.rol !== "empleado";
+}
+
+/**
+ * Paso «Usuarios» del asistente: quién tiene acceso a un centro (los de «todos los centros» ya lo tienen).
+ * Solo cambia a los usuarios que salen en la pantalla y que quien edita puede gestionar; a los demás
+ * (desactivados, empleados, o con más permisos que quien edita) no se les quita ni se les da nada.
+ */
 export async function guardarUsuariosDeCentro(ctx: Contexto, centroId: string, usuarioIds: string[]) {
+  const ambito = await ambitoCentros(ctx);
+  if (ambito && !ambito.includes(centroId)) throw new ErrorNegocio("No tienes acceso a ese centro");
   const prisma = await db();
   await prisma.$transaction(async (tx) => {
     const c = await tx.centro.findFirst({ where: { id: centroId, tenantId: ctx.tenant.id } });
     if (!c) throw new ErrorNegocio("Centro no encontrado");
-    const candidatos = await tx.usuario.findMany({ where: { tenantId: ctx.tenant.id, todosCentros: false, rol: { not: "admin" } }, include: { centros: { where: { centroId } } } });
+    const todos = await tx.usuario.findMany({ where: { tenantId: ctx.tenant.id }, include: { centros: { where: { centroId } } } });
+    const candidatos = todos.filter((u) => elegibleParaCentro(u) && !motivoNoPuedeGestionar(ctx, u));
     const antes = candidatos.filter((u) => u.centros.length > 0).map((u) => u.id);
     const despues = candidatos.filter((u) => usuarioIds.includes(u.id)).map((u) => u.id);
     for (const u of candidatos) {
@@ -179,7 +280,9 @@ export function permisosDelRol(rol: string): string[] {
 
 /**
  * Guarda las casillas en Usuario.permisos. `null` = volver a los permisos del rol.
+ * Una lista vacía es válida: la persona se queda sin ningún permiso (no vuelve a los del rol).
  * Se conservan los permisos guardados de módulos no contratados (desactivar no borra).
+ * Nadie puede dar un permiso que él no tiene ni cambiar a quien tiene más permisos que él.
  */
 export async function guardarPermisos(ctx: Contexto, id: string, marcadas: string[] | null) {
   const validas = clavesContratadas(ctx);
@@ -188,7 +291,8 @@ export async function guardarPermisos(ctx: Contexto, id: string, marcadas: strin
     const u = await tx.usuario.findFirst({ where: { id, tenantId: ctx.tenant.id } });
     if (!u) throw new ErrorNegocio("Usuario no encontrado");
     if (u.rol === "admin") throw new ErrorNegocio("El administrador lo puede todo: sus permisos no se cambian aquí");
-    const antes = Array.isArray(u.permisos) ? (u.permisos as string[]) : null;
+    exigirGestionable(ctx, u);
+    const antes = leerPermisosGuardados(u.permisos);
     let despues: string[] | null = null;
     if (marcadas) {
       const desconocida = marcadas.find((c) => !validas.has(c));
@@ -196,6 +300,7 @@ export async function guardarPermisos(ctx: Contexto, id: string, marcadas: strin
       const deOtros = (antes ?? []).filter((c) => !validas.has(c) && !c.includes("*"));
       despues = Array.from(new Set([...marcadas, ...deOtros])).sort();
     }
+    exigirPuedeDar(ctx, u.rol, despues);
     await tx.usuario.update({ where: { id }, data: { permisos: despues ?? Prisma.DbNull } });
     await auditar(tx, { tenantId: ctx.tenant.id, usuarioId: ctx.usuario.id, entidad: "Usuario", entidadId: id, accion: "permisos", antes: antes ?? { rol: u.rol }, despues: despues ?? { rol: u.rol } });
   });
@@ -248,7 +353,7 @@ export async function activarModulo(ctx: Contexto, id: string) {
       create: { tenantId: ctx.tenant.id, modulo: id, activo: true },
       update: { activo: true, hasta: null },
     });
-    await extenderAreaNueva(tx, ctx.tenant.id, id);
+    await extenderAreaNueva(tx, ctx.tenant.id, id, ctx.usuario.id);
     await auditar(tx, { tenantId: ctx.tenant.id, usuarioId: ctx.usuario.id, entidad: "TenantModulo", entidadId: id, accion: "activar", antes: antes ? { activo: antes.activo, hasta: antes.hasta } : null, despues: { activo: true } });
   });
 }

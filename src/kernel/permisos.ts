@@ -41,11 +41,17 @@ function encaja(patron: string, clave: string): boolean {
 
 /**
  * ¿Tiene el usuario este permiso?
- * 1. admin → sí. 2. Si el usuario tiene permisos guardados, mandan esos. 3. Si no, los del rol.
+ * 1. admin → sí. 2. Si el usuario tiene permisos a medida (una lista, aunque esté vacía), mandan esos:
+ *    lista vacía = ningún permiso. 3. Si no tiene lista (null: «los del rol»), los de su rol.
  * (El módulo contratado y el ámbito de centros se comprueban aparte: contexto.ts)
  */
 export function tienePermiso(rol: string, guardados: string[] | null | undefined, clave: string): boolean {
   if (rol === "admin") return true;
-  const lista = guardados && guardados.length > 0 ? guardados : (PERMISOS_ROL[rol as Rol] ?? []);
+  const lista = Array.isArray(guardados) ? guardados : (PERMISOS_ROL[rol as Rol] ?? []);
   return lista.some((p) => encaja(p, clave));
+}
+
+/** Lee Usuario.permisos de la base: lista (a medida, puede estar vacía) o null (los del rol). */
+export function leerPermisosGuardados(v: unknown): string[] | null {
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : null;
 }

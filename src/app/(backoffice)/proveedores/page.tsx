@@ -1,26 +1,31 @@
 import { exigir } from "@/kernel/contexto";
 import { db } from "@/kernel/db";
-import { euros, numero, fecha } from "@/kernel/formato";
+import { euros, numero, numeroCampo, fecha } from "@/kernel/formato";
 import { Cabecera, Selector, Entrada, Boton, BotonEnlace, Etiqueta, Cifra, Rejilla } from "@/ui";
 import { TablaDesplegable, DatosDetalle } from "@/ui/tabla-desplegable";
 import { listarProveedores } from "@/modulos/proveedores/servicio";
 import { normalizarTelefono } from "@/modulos/proveedores/esquemas";
 import { accionEditarProveedor, accionActivarProveedor } from "@/modulos/proveedores/acciones";
 import { FormularioProveedor } from "@/modulos/proveedores/formulario";
-import { Mensajes, rutaVolver, uno, paraCampo, type Busqueda } from "@/modulos/_almacen/comun";
+import { Mensajes, rutaVolver, uno, type Busqueda } from "@/modulos/_almacen/comun";
 import { num } from "@/nucleo/comun-almacen";
 
-const NOMBRE_AREA: Record<string, string> = { BEBIDAS: "Bebidas", COMIDAS: "Comidas", CONSUMIBLES: "Consumibles" };
+const NOMBRE_AREA: Record<string, string> = { BEBIDAS: "Bebidas", COMIDAS: "Comidas", CONSUMIBLES: "Consumibles (aún sin compras)" };
 
 export default async function PaginaProveedores({ searchParams }: { searchParams: Promise<Busqueda> }) {
   const ctx = await exigir("proveedores", "proveedores:ver");
   const sp = await searchParams;
   const prisma = await db();
   const verInactivos = uno(sp, "inactivos") === "1";
-  const proveedores = await listarProveedores(prisma, ctx.tenant.id, { texto: uno(sp, "q"), area: uno(sp, "area") || undefined, incluirInactivos: verInactivos });
+  const hayFiltro = !!(uno(sp, "q") || uno(sp, "area"));
+  const [proveedores, todosActivos] = await Promise.all([
+    listarProveedores(prisma, ctx.tenant.id, { texto: uno(sp, "q"), area: uno(sp, "area") || undefined, incluirInactivos: verInactivos }),
+    // las cifras de arriba son de TODOS los proveedores activos, no de la lista filtrada
+    listarProveedores(prisma, ctx.tenant.id),
+  ]);
   const puedeEditar = ctx.puede("proveedores:editar");
   const volver = rutaVolver("/proveedores", sp);
-  const activos = proveedores.filter((p) => p.activo);
+  const activos = todosActivos;
   const telefonoMal = activos.filter((p) => p.telefono && !normalizarTelefono(p.telefono).ok).length;
   const sinTelefono = activos.filter((p) => !p.telefono).length;
 
@@ -34,7 +39,7 @@ export default async function PaginaProveedores({ searchParams }: { searchParams
       <Mensajes sp={sp} />
       <div className="space-y-4">
         <Rejilla columnas={3}>
-          <Cifra etiqueta="Proveedores activos" valor={numero(activos.length)} />
+          <Cifra etiqueta="Proveedores activos" valor={numero(activos.length)} detalle={hayFiltro ? `${numero(proveedores.filter((p) => p.activo).length)} con el filtro de abajo` : "Todos, sin filtro"} />
           <Cifra etiqueta="Sin teléfono" valor={numero(sinTelefono)} tono={sinTelefono ? "aviso" : "ok"} detalle="no se les puede pedir por WhatsApp" />
           <Cifra etiqueta="Teléfono mal escrito" valor={numero(telefonoMal)} tono={telefonoMal ? "error" : "ok"} detalle="sin prefijo de país" />
         </Rejilla>
@@ -111,7 +116,7 @@ export default async function PaginaProveedores({ searchParams }: { searchParams
                           email: p.email,
                           areas: p.areas,
                           diasReparto: p.diasReparto,
-                          pedidoMinimo: p.pedidoMinimo ? paraCampo(num(p.pedidoMinimo)) : "",
+                          pedidoMinimo: numeroCampo(p.pedidoMinimo),
                           notas: p.notas,
                         }}
                       />

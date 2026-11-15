@@ -20,8 +20,10 @@ export default async function Ventas({ searchParams }: { searchParams: Parametro
   // jornada a editar: ?centro=&fecha= (por defecto, ayer en el centro activo)
   const centroForm = param(sp, "centro") ?? ctx.centroActivo?.id ?? (centros.length === 1 ? centros[0].id : "");
   const fechaForm = param(sp, "fecha") ?? ayer;
-  const [jornadas, faltanAyer, enEdicion] = await Promise.all([
+  const [jornadas, jornadasAyer, faltanAyer, enEdicion] = await Promise.all([
     listarJornadas(ctx, desde, hasta),
+    // «Venta de ayer» no depende del filtro de fechas de la tabla
+    listarJornadas(ctx, ayer, ayer),
     jornadasQueFaltan(ctx, ayer),
     centroForm && centros.some((c) => c.id === centroForm) ? jornadaDe(ctx, centroForm, fechaForm) : Promise.resolve(null),
   ]);
@@ -29,8 +31,7 @@ export default async function Ventas({ searchParams }: { searchParams: Parametro
   const venta = redondear(jornadas.reduce((s, j) => s + Number(j.ventaNeta), 0));
   const comensales = jornadas.reduce((s, j) => s + j.comensales, 0);
   const tickets = jornadas.reduce((s, j) => s + j.tickets, 0);
-  const deAyer = jornadas.filter((j) => j.fecha.toISOString().slice(0, 10) === ayer);
-  const ventaAyer = redondear(deAyer.reduce((s, j) => s + Number(j.ventaNeta), 0));
+  const ventaAyer = redondear(jornadasAyer.reduce((s, j) => s + Number(j.ventaNeta), 0));
   const pago = (forma: string) => enEdicion?.pagos.find((p) => p.forma === forma)?.importe ?? null;
 
   if (centros.length === 0)
@@ -50,7 +51,7 @@ export default async function Ventas({ searchParams }: { searchParams: Parametro
       </div>
 
       <Rejilla columnas={4}>
-        <Cifra etiqueta={`Venta de ayer (${fecha(ayer)})`} valor={euros(ventaAyer)} detalle={`${numero(deAyer.length)} de ${numero(centros.length)} locales con datos`} />
+        <Cifra etiqueta={`Venta de ayer (${fecha(ayer)})`} valor={euros(ventaAyer)} detalle={`${numero(jornadasAyer.length)} de ${numero(centros.length)} locales con datos`} />
         <Cifra etiqueta="Venta del periodo" valor={euros(venta)} detalle={`${fecha(desde)} – ${fecha(hasta)}`} />
         <Cifra etiqueta="Ticket medio" valor={tickets ? euros(venta / tickets) : "—"} detalle={`${numero(tickets)} tickets`} />
         <Cifra etiqueta="Venta por comensal" valor={comensales ? euros(venta / comensales) : "—"} detalle={`${numero(comensales)} comensales`} />
@@ -134,7 +135,7 @@ export default async function Ventas({ searchParams }: { searchParams: Parametro
                 <AreaTexto name="notas" rows={2} defaultValue={enEdicion?.notas ?? ""} />
               </Campo>
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-xs text-slate-500">Para corregir un día ya metido, ábrelo en la tabla y pulsa «Corregir». Si el día ya existe, se sobrescribe (queda en el historial).</p>
+                <p className="text-xs text-slate-500">Para corregir un día ya metido, ábrelo en la tabla y pulsa «Corregir». Si el día ya existe, se sobrescribe (queda en el historial). Si después se apuntan o importan tickets de ese día, mandan los tickets: la jornada se recalcula con ellos y estas cifras quedan en el historial.</p>
                 <Boton type="submit">{enEdicion ? "Guardar corrección" : "Guardar ventas"}</Boton>
               </div>
             </form>

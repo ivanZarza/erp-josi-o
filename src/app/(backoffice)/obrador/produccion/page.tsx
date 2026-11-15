@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { exigir } from "@/kernel/contexto";
-import { euros, fecha, fechaHora, numero } from "@/kernel/formato";
+import { euros, fecha, fechaHora, numero, numeroCampo } from "@/kernel/formato";
 import { Boton, Cabecera, Campo, Entrada, Etiqueta, Pestanas, Selector, Tabla, Tarjeta } from "@/ui";
 import { DatosDetalle, TablaDesplegable } from "@/ui/tabla-desplegable";
 import { hoyMadrid, listarOrdenes, listarRecetas } from "@/modulos/obrador/servicio";
@@ -130,7 +130,7 @@ export default async function Produccion({ searchParams }: { searchParams: Busqu
                     <input type="hidden" name="id" value={o.id} />
                     <input type="hidden" name="volver" value="/obrador/produccion" />
                     <Campo etiqueta={`Cantidad producida (${unidad(o.unidad)})`}>
-                      <Entrada name="cantidadReal" inputMode="decimal" defaultValue={String(o.cantidadPrevista)} required className="w-40" />
+                      <Entrada name="cantidadReal" inputMode="decimal" defaultValue={numeroCampo(o.cantidadPrevista)} required className="w-40" />
                     </Campo>
                     <label className="flex min-h-10 items-center gap-2 text-sm">
                       <input type="checkbox" name="forzar" /> Cerrar aunque falte stock

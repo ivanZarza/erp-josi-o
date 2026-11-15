@@ -4,7 +4,7 @@ import { auditar, emitir } from "@/kernel/eventos";
 import { siguienteNumero } from "@/kernel/numeracion";
 import { registrarMovimientos, type NuevoMovimiento } from "./movimientos";
 import { stockEnCentro } from "./stock";
-import { ErrorNegocio, num, r2, r3, r4, type AreaAlmacen, type Tx } from "./comun-almacen";
+import { ErrorNegocio, centrosQueSirven, num, r2, r3, r4, type AreaAlmacen, type Tx } from "./comun-almacen";
 
 /**
  * Pedidos internos: un local pide al obrador (o almacén central). Motor común de Bebidas y Comidas.
@@ -12,6 +12,13 @@ import { ErrorNegocio, num, r2, r3, r4, type AreaAlmacen, type Tx } from "./comu
  * movimientos SALIDA_PEDIDO en origen y ENTRADA_PEDIDO en destino) → RECIBIDO (el local confirma y
  * puede marcar diferencias). También RECHAZADO (el obrador) y CANCELADO (el local).
  * Precio de cada línea = tarifa del obrador para ese local (ProductoCentro.precioVenta) o, si no hay, el coste.
+ *
+ * Valoración (decisión del 15/11/2026, ver docs/specs/nucleo/stock-y-pedidos.md «Valoración de los pedidos»):
+ * - El PRECIO de la línea (tarifa) es la venta del obrador al local: importe del pedido y del albarán, y base de
+ *   la factura entre sociedades.
+ * - El STOCK se valora siempre al coste medio del producto, que es uno solo para toda la cadena: los movimientos
+ *   de salida (obrador) y de entrada (local) llevan ese coste. La tarifa no cambia el coste del producto en el
+ *   local (si no, el mismo producto valdría distinto según el centro y el valor del stock no cuadraría).
  */
 
 export interface LineaPedida {
@@ -88,6 +95,9 @@ export async function crearPedidoInterno(
     tx.centro.findFirst({ where: { id: d.destinoId, tenantId } }),
   ]);
   if (!origen) throw new ErrorNegocio("El centro que sirve tiene que ser un obrador o un almacén central.");
+  if (!(await centrosQueSirven(tx, tenantId, area)).some((c) => c.id === origen.id)) {
+    throw new ErrorNegocio(`${origen.nombre} no sirve ${area === "BEBIDAS" ? "bebidas" : "comidas"}: no tiene esa área activa o no está abierto.`);
+  }
   if (!destino) throw new ErrorNegocio("El centro que pide no existe.");
   const lineas = juntarLineas(d.lineas);
   await comprobarLineas(tx, tenantId, area, d.destinoId, lineas);
@@ -190,7 +200,8 @@ export async function servirPedidoInterno(
   await auditar(tx, { tenantId, usuarioId, entidad: "PedidoInterno", entidadId: id, accion: "servir", despues: { albaran, lineas: ajustadas, importe: r2(importe) } });
   const centros = await tx.centro.findMany({ where: { id: { in: [p.origenId, p.destinoId] } }, select: { id: true, sociedadId: true } });
   const soc = new Map(centros.map((c) => [c.id, c.sociedadId]));
-  // Lo escucha Obrador / Contabilidad para la venta del obrador y la factura entre sociedades
+  // Aviso para la venta del obrador y la futura factura entre sociedades. Hoy NINGÚN módulo lo escucha:
+  // la «Venta a locales» del Obrador se calcula leyendo los pedidos servidos y la factura entre sociedades no existe aún.
   await emitir(tx, tenantId, "almacen.pedido.servido", {
     pedidoId: id,
     numero: p.numero,
@@ -205,33 +216,36 @@ export async function servirPedidoInterno(
   return { albaran, recortadas: ajustadas.filter((a) => a.servida < a.pedidaServir).length };
 }
 
-/** El local confirma lo que le llega. Si recibe menos (o más) de lo servido, se regulariza en destino. */
+/**
+ * El local confirma lo que le llega. Si no coincide con lo servido:
+ * - Llega MENOS: lo servido ya salió del obrador y entró en el local; lo que no ha llegado se da de baja en el
+ *   local como MERMA («Falta al recibir…», con la nota), para que la pérdida quede a la vista en las mermas.
+ * - Llega MÁS: el obrador mandó más de lo apuntado. Sale del obrador (SALIDA_PEDIDO) y entra en el local
+ *   (ENTRADA_PEDIDO) la diferencia, así el stock de los dos centros cuadra.
+ * Todo al coste medio del producto, con el albarán del pedido como documento.
+ */
 export async function recibirPedidoInterno(tx: Tx, tenantId: string, usuarioId: string, area: AreaAlmacen, id: string, recibidas: Map<string, number | null>, nota?: string | null) {
   const p = await pedidoDe(tx, tenantId, area, id);
   if (p.estado !== "SERVIDO") throw new ErrorNegocio("Solo se puede confirmar la recepción de un pedido servido.");
   const precios = await preciosPara(tx, p.lineas.map((l) => l.productoId), p.destinoId);
   const movs: NuevoMovimiento[] = [];
   const diferencias: { productoId: string; servida: number; recibida: number }[] = [];
+  const documento = p.albaran ?? p.numero;
+  const conNota = nota ? `: ${nota}` : "";
   for (const l of p.lineas) {
     const servida = num(l.servida);
     const v = recibidas.get(l.id);
     const recibida = r3(v === null || v === undefined ? servida : Math.max(0, v));
     await tx.pedidoInternoLinea.update({ where: { id: l.id }, data: { recibida: new Prisma.Decimal(recibida) } });
     const dif = r3(recibida - servida);
-    if (dif !== 0) {
-      diferencias.push({ productoId: l.productoId, servida, recibida });
-      movs.push({
-        tenantId,
-        centroId: p.destinoId,
-        productoId: l.productoId,
-        tipo: "ENTRADA_PEDIDO",
-        cantidad: dif,
-        costeUnitario: precios.coste(l.productoId),
-        documento: p.albaran ?? p.numero,
-        documentoId: p.id,
-        motivo: `Diferencia al recibir ${p.numero}${nota ? `: ${nota}` : ""}`,
-        usuarioId,
-      });
+    if (dif === 0) continue;
+    diferencias.push({ productoId: l.productoId, servida, recibida });
+    const comun = { tenantId, productoId: l.productoId, costeUnitario: precios.coste(l.productoId), documento, documentoId: p.id, usuarioId };
+    if (dif < 0) {
+      movs.push({ ...comun, centroId: p.destinoId, tipo: "MERMA", cantidad: dif, motivo: `Falta al recibir ${p.numero}${conNota}` });
+    } else {
+      movs.push({ ...comun, centroId: p.origenId, tipo: "SALIDA_PEDIDO", cantidad: -dif, motivo: `Sobra al recibir ${p.numero} (el local recibió más de lo servido)${conNota}` });
+      movs.push({ ...comun, centroId: p.destinoId, tipo: "ENTRADA_PEDIDO", cantidad: dif, motivo: `Sobra al recibir ${p.numero}${conNota}` });
     }
   }
   await registrarMovimientos(tx, movs);
@@ -239,7 +253,7 @@ export async function recibirPedidoInterno(tx: Tx, tenantId: string, usuarioId: 
   await tx.pedidoInterno.update({ where: { id }, data: { estado: "RECIBIDO", notas } });
   await auditar(tx, { tenantId, usuarioId, entidad: "PedidoInterno", entidadId: id, accion: "recibir", despues: { diferencias, nota } });
   await emitir(tx, tenantId, "almacen.pedido.recibido", { pedidoId: id, numero: p.numero, area, conDiferencias: diferencias.length > 0 });
-  return { diferencias: diferencias.length };
+  return { diferencias: diferencias.length, faltas: diferencias.filter((d) => d.recibida < d.servida).length, sobras: diferencias.filter((d) => d.recibida > d.servida).length };
 }
 
 export async function rechazarPedidoInterno(tx: Tx, tenantId: string, usuarioId: string, area: AreaAlmacen, id: string, motivo: string) {
@@ -287,8 +301,17 @@ export async function leerPedidoInterno(tx: Tx, tenantId: string, area: AreaAlma
   });
 }
 
-/** Importe de un pedido (servido si ya se sirvió; pedido si no). */
-export function importePedido(p: { estado: string; lineas: { pedida: unknown; servida: unknown; precio: unknown }[] }): number {
+/**
+ * Importe de un pedido a la tarifa: lo pedido si aún no se ha servido; lo servido si está servido; y, ya
+ * recibido, lo servido más lo que llegó de más (la sobra también salió del obrador). Lo que no llegó
+ * sigue contando: salió del obrador y en el local es una merma.
+ */
+export function importePedido(p: { estado: string; lineas: { pedida: unknown; servida: unknown; recibida?: unknown; precio: unknown }[] }): number {
   const servido = p.estado === "SERVIDO" || p.estado === "RECIBIDO";
-  return r2(p.lineas.reduce((a, l) => a + num((servido ? l.servida : l.pedida) as never) * num(l.precio as never), 0));
+  return r2(
+    p.lineas.reduce((a, l) => {
+      const cantidad = !servido ? num(l.pedida as never) : p.estado === "RECIBIDO" ? Math.max(num(l.servida as never), num(l.recibida as never)) : num(l.servida as never);
+      return a + cantidad * num(l.precio as never);
+    }, 0),
+  );
 }

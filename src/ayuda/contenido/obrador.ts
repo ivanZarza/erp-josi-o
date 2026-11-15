@@ -31,9 +31,9 @@ export const AYUDA_OBRADOR: AyudaArea = {
           },
           {
             nombre: "Venta a locales (mes)",
-            queEs: "Lo servido a los locales desde el día 1 del mes a precio de tarifa.",
+            queEs: "Lo servido a los locales desde el día 1 del mes (00:00, hora de Madrid) a precio de tarifa.",
             logica:
-              "Suma de cantidad servida × precio de la línea de los pedidos servidos o recibidos que salen de tus obradores (Comidas y Bebidas). El detalle «Margen sobre coste» = venta − cantidad servida × coste medio actual del producto (el de hoy, no el del día en que se sirvió).",
+              "Suma de cantidad servida × precio de la línea de los pedidos servidos o recibidos que salen de tus obradores (Comidas y Bebidas). El detalle «Margen sobre coste» = venta − cantidad servida × coste del producto el día en que se sirvió (el de la salida del obrador, movimiento «Salida por pedido»), no el coste medio de hoy.",
           },
           { nombre: "Pedidos por servir", queEs: "Pedidos de los locales a tus obradores que aún están por servir (Comidas y Bebidas)." },
         ],
@@ -312,12 +312,14 @@ export const AYUDA_OBRADOR: AyudaArea = {
           {
             nombre: "Recalcular con el coste actual",
             queEs: "Vuelve a calcular todos los precios «A coste» y «Coste + %» de este obrador con el coste medio de hoy.",
-            logica: "Útil para artículos de reventa: su coste cambia al recibir compras pero el precio a los locales no se recalcula solo.",
+            logica:
+              "Útil para artículos de reventa: su coste cambia al recibir compras pero el precio a los locales no se recalcula solo. Si el precio de un local se cambió a mano en Stock («Tarifa al centro»), no se pisa: esa tarifa pasa a «Precio fijo» con el precio puesto a mano.",
           },
           { nombre: "Pestañas de obradores", queEs: "Si tienes varios obradores, elige de cuál ver las tarifas." },
           {
             nombre: "Aviso",
-            queEs: "«A coste» y «Coste + %» se recalculan solos al cerrar cada producción del elaborado. «Precio fijo» no cambia hasta que lo edites.",
+            queEs:
+              "«A coste» y «Coste + %» se recalculan solos al cerrar cada producción del elaborado y con «Recalcular». «Precio fijo» no cambia hasta que lo edites. El precio es el mismo dato que la «Tarifa al centro» de Stock: si se cambia allí a mano, se respeta. Los cambios aún no avisan a los locales, no tienen fecha de entrada en vigor y no se hace la factura entre sociedades al servir (pendiente).",
           },
         ],
       },
@@ -330,6 +332,16 @@ export const AYUDA_OBRADOR: AyudaArea = {
           { nombre: "Modo", queEs: "Modos de tarifa usados en los locales, o «Sin tarifa»." },
           { nombre: "Locales con precio", queEs: "Cuántos locales tienen precio para este artículo. En amarillo si falta alguno." },
           { nombre: "Precio", queEs: "Precio (o el más bajo y el más alto si varía entre locales)." },
+        ],
+      },
+      {
+        titulo: "Qué es este precio",
+        campos: [
+          {
+            nombre: "Tarifa (precio de venta al local)",
+            queEs: "Es el precio de las líneas del pedido interno: lo que vale el pedido del local al obrador y la «Venta a locales» del resumen.",
+            logica: "El stock que entra en el local NO se valora a esta tarifa: entra al coste medio del producto, que es uno solo en toda la cadena.",
+          },
         ],
       },
       {
@@ -354,7 +366,7 @@ export const AYUDA_OBRADOR: AyudaArea = {
           },
           {
             nombre: "Tabla Local · Marca · Modo · Precio · Margen",
-            queEs: "Tarifa de cada local.",
+            queEs: "Tarifa de cada local. «Cambiado a mano» (amarillo) si el precio del local ya no es el que puso el obrador porque alguien lo cambió en Stock; al recalcular se respeta y la tarifa pasa a «Precio fijo».",
             logica: "Margen = (precio − coste) / precio × 100, es decir, sobre el precio de venta.",
           },
         ],
@@ -418,10 +430,21 @@ export const AYUDA_OBRADOR: AyudaArea = {
           },
           { nombre: "Imprimir etiqueta", queEs: "Abre la etiqueta del lote." },
           {
-            nombre: "Motivo de la retirada y Retirar lote",
-            queEs: "Marca el lote como retirado con el motivo (obligatorio).",
-            logica: "No quita el stock: lo que quede hay que darlo de baja como merma en Comidas → Stock.",
-            influye: "Si la cadena tiene Calidad, se crea sola una incidencia de seguridad alimentaria para comprobar la retirada en los locales.",
+            nombre: "Motivo de la retirada",
+            queEs: "Por qué se retira (obligatorio). Se guarda en el lote y en la merma.",
+          },
+          {
+            nombre: "Dar de baja en el obrador",
+            queEs: "Cantidad del lote que queda en el obrador y se tira. Viene propuesta; 0 = no tocar el stock.",
+            logica:
+              "Propuesta = lo producido en el lote − lo servido a locales mientras estaba vigente, sin pasar del stock que hay en el obrador (el stock no se lleva por lote). No se puede dar de baja más de lo producido ni más de lo que hay.",
+          },
+          {
+            nombre: "Retirar lote",
+            queEs: "Marca el lote como retirado y saca del stock del obrador la cantidad indicada.",
+            logica: "La baja es una merma (documento MER, motivo «Retirada de lote», al coste medio). Lo que ya se sirvió a los locales lo tiene que dar de baja cada local como merma.",
+            influye:
+              "Stock y mermas del obrador. Si la cadena tiene Calidad, se crea sola una incidencia de seguridad alimentaria para comprobar la retirada en los locales. El aviso automático a los locales todavía no existe (pendiente).",
           },
         ],
       },
@@ -429,7 +452,7 @@ export const AYUDA_OBRADOR: AyudaArea = {
     logica: [OBRADORES, "Se ven los 300 lotes más recientes."],
     influye: [
       { texto: "Incidencias de calidad", ruta: "/calidad/incidencias" },
-      { texto: "Dar de baja el stock retirado", ruta: "/comidas/stock" },
+      { texto: "Stock del obrador (baja por la retirada)", ruta: "/comidas/stock" },
     ],
   },
 

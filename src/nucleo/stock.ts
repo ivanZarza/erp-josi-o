@@ -210,16 +210,19 @@ export async function listadoStock(
 
 export interface ResumenStock {
   referencias: number;
-  unidades: number;
+  /** Cantidad total por unidad de stock (no se suman kilos con botellas): [["BOTELLA", 812], ["KG", 35,5]…], de más a menos. */
+  cantidades: [string, number][];
   valor: number;
   bajoMinimo: number;
   sinStock: number;
 }
 
 export function resumirStock(filas: FilaStock[]): ResumenStock {
+  const porUnidad = new Map<string, number>();
+  for (const f of filas) if (f.total > 0) porUnidad.set(f.producto.unidad, r3((porUnidad.get(f.producto.unidad) ?? 0) + f.total));
   return {
     referencias: filas.length,
-    unidades: r3(filas.reduce((a, f) => a + Math.max(0, f.total), 0)),
+    cantidades: Array.from(porUnidad).sort((a, b) => b[1] - a[1]),
     valor: r2(filas.reduce((a, f) => a + f.valor, 0)),
     bajoMinimo: filas.filter((f) => f.estado === "BAJO").length,
     sinStock: filas.filter((f) => f.estado === "SIN").length,

@@ -16,7 +16,8 @@ export interface ValoresProveedor {
 const AREAS: [string, string][] = [
   ["BEBIDAS", "Bebidas"],
   ["COMIDAS", "Comidas"],
-  ["CONSUMIBLES", "Consumibles"],
+  // el área de consumibles (menaje, limpieza…) aún no tiene módulo de compras: se puede marcar, pero no hace nada todavía
+  ["CONSUMIBLES", "Consumibles (aún sin compras: solo informativo)"],
 ];
 
 /** Formulario de alta y edición de proveedor (Server Component). */
@@ -46,11 +47,11 @@ export function FormularioProveedor({ accion, valores, volver, boton }: { accion
         <Campo etiqueta="Días de reparto">
           <Entrada name="diasReparto" placeholder="Por ejemplo: lunes y jueves" defaultValue={valores.diasReparto ?? ""} />
         </Campo>
-        <Campo etiqueta="Pedido mínimo (€)">
+        <Campo etiqueta="Pedido mínimo (€)" ayuda="Con coma o punto: 150 o 150,50">
           <Entrada name="pedidoMinimo" inputMode="decimal" defaultValue={valores.pedidoMinimo} />
         </Campo>
         <fieldset className="sm:col-span-2">
-          <legend className="mb-1 text-sm font-medium">Qué nos sirve</legend>
+          <legend className="mb-1 text-sm font-medium">Qué nos sirve (sale en las compras de esas áreas)</legend>
           <div className="flex flex-wrap gap-4">
             {AREAS.map(([v, n]) => (
               <label key={v} className="flex min-h-10 items-center gap-2 text-sm">

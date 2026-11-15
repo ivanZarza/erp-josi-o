@@ -143,7 +143,8 @@ model Empleado {
   categoria          CategoriaConvenio? @relation(fields: [categoriaId], references: [id])
   usuarioId          String? // Usuario del ERP (núcleo), para el portal
   pin                String? // PIN de 4 cifras para fichar en la tableta del local
-  fechaAlta          DateTime           @db.Date
+  fechaAlta          DateTime           @db.Date // alta actual (en un reingreso, la del reingreso)
+  fechaAntiguedad    DateTime?          @db.Date // primera alta en la empresa (antigüedad); vacío = la de fechaAlta
   fechaBaja          DateTime?          @db.Date
   motivoBaja         String?
   activo             Boolean            @default(true)
@@ -372,6 +373,7 @@ model Candidato {
   tenantId         String
   ofertaId         String?
   oferta           OfertaEmpleo?   @relation(fields: [ofertaId], references: [id])
+  centroId         String? // Centro (núcleo): el de la oferta o, en la bolsa, el que lo apuntó
   nombre           String
   apellidos        String?
   email            String?

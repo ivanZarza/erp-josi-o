@@ -4,14 +4,15 @@
 import { Campo, Entrada, Selector, AreaTexto } from "@/ui";
 import { TIPOS_CONTRATO, NOMBRE_CONTRATO, NOMBRE_DEPARTAMENTO } from "@/modulos/personal/esquemas";
 import { diaISO } from "@/modulos/personal/fechas";
-import type { listarPuestos, listarConvenios, listarSociedades, EmpleadoFicha } from "@/modulos/personal/servicio";
+import type { listarPuestos, listarConvenios, listarSociedades, usuariosParaEnlazar, EmpleadoFicha } from "@/modulos/personal/servicio";
 
 type Puestos = Awaited<ReturnType<typeof listarPuestos>>;
 type Convenios = Awaited<ReturnType<typeof listarConvenios>>;
 type Sociedades = Awaited<ReturnType<typeof listarSociedades>>;
+type Usuarios = Awaited<ReturnType<typeof usuariosParaEnlazar>>;
 type CentroOpcion = { id: string; nombre: string };
 
-export function CamposEmpleado({ e, centros, puestos, convenios, sociedades }: { e?: EmpleadoFicha; centros: CentroOpcion[]; puestos: Puestos; convenios: Convenios; sociedades: Sociedades }) {
+export function CamposEmpleado({ e, centros, puestos, convenios, sociedades, usuarios }: { e?: EmpleadoFicha; centros: CentroOpcion[]; puestos: Puestos; convenios: Convenios; sociedades: Sociedades; usuarios: Usuarios }) {
   const extra = new Set(e?.centros.map((c) => c.centroId) ?? []);
   return (
     <div className="space-y-6">
@@ -48,6 +49,17 @@ export function CamposEmpleado({ e, centros, puestos, convenios, sociedades }: {
         </Campo>
         <Campo etiqueta="PIN para fichar" ayuda="4 cifras, para la tableta del local">
           <Entrada name="pin" inputMode="numeric" maxLength={4} defaultValue={e?.pin ?? ""} />
+        </Campo>
+        <Campo etiqueta="Usuario de acceso" ayuda="El de Ajustes → Usuarios. Con él entra en «Fichar (mi portal)»">
+          <Selector name="usuarioId" defaultValue={e?.usuarioId ?? ""}>
+            <option value="">Sin usuario</option>
+            {usuarios.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.nombre} · {u.email}
+                {u.activo ? "" : " (desactivado)"}
+              </option>
+            ))}
+          </Selector>
         </Campo>
       </div>
 

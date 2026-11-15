@@ -11,14 +11,21 @@
  *    (lo que se paga por encima del convenio).
  * 2. Complementos fijos del contrato (transporte, responsabilidad, nocturnidad…), importe mensual.
  * 3. Prorrata de pagas extra = sueldo de una paga × (pagas − 12) ÷ 12, si están prorrateadas.
- *    Si no, la paga entera se cobra en junio y diciembre.
+ *    Si no, regla general (devengo semestral): la paga de verano se gana del 1 de enero al 30 de junio
+ *    y se cobra en junio; la de Navidad, del 1 de julio al 31 de diciembre y se cobra en diciembre.
+ *    Se paga en proporción a los días del semestre en alta con contrato, sin contar los de IT ni los
+ *    días sin sueldo. Si el empleado se da de baja, en el mes de la baja se paga la parte ganada
+ *    del semestre (finiquito). Muchos convenios cambian los periodos: a comprobar con la gestoría.
  * 4. Todo lo anterior se paga por los días en alta, menos los días de baja (IT) y los días sin sueldo.
- * 5. Incapacidad temporal (enfermedad común): días 1-3 sin prestación; 4-15 al 60 % a cargo de la
- *    empresa; 16-20 al 60 % y desde el 21 al 75 % en pago delegado (lo adelanta la empresa y lo
- *    descuenta de los seguros sociales). Base reguladora diaria = base de cotización normal ÷ 30.
- * 6. Horas extra (de los fichajes: lo fichado por encima del turno del cuadrante) al precio de la
- *    hora ordinaria × 1,25. A tiempo parcial son «horas complementarias», sin recargo, y cotizan como
- *    salario normal.
+ * 5. Incapacidad temporal por enfermedad común o accidente no laboral: días 1-3 sin prestación;
+ *    4-15 al 60 % a cargo de la empresa; 16-20 al 60 % y desde el 21 al 75 % en pago delegado (lo
+ *    adelanta la empresa y lo descuenta de los seguros sociales). Por accidente de trabajo: el día del
+ *    accidente se paga como trabajado y desde el día siguiente, 75 % en pago delegado (de la mutua).
+ *    Base reguladora diaria = base de cotización normal ÷ 30 (la real del accidente de trabajo suma la
+ *    media de horas extra del año anterior: a comprobar con la gestoría).
+ * 6. Horas extra (horasExtraDeJornadas: lo fichado por encima del turno del cuadrante) al precio de la
+ *    hora ordinaria × 1,25. A tiempo parcial (esTiempoParcial: contrato «Tiempo parcial» o jornada de
+ *    menos de 40 h) son «horas complementarias», sin recargo, y cotizan como salario normal.
  * 7. Base de contingencias comunes = sueldo + complementos que cotizan + prorrata (aunque las pagas no
  *    se prorrateen), por los días en alta, con tope máximo. Base de profesionales = la anterior + horas extra.
  * 8. Seguridad Social, IRPF, neto y coste empresa con los tipos de TIPOS_NOMINA.
@@ -26,6 +33,7 @@
 import type { PrismaClient, Prisma } from "../../generated/prisma/client";
 import { aDia, diaISO, diasDelMes, diasEntre, horasTurno, instanteMadrid, sumarDias } from "./fechas";
 import { calcularJornadas } from "./jornadas";
+import type { Turno } from "./fechas";
 
 // =====================================================================
 // Tipos y porcentajes DE EJEMPLO (2026). A comprobar con la gestoría.
@@ -42,11 +50,33 @@ export const TIPOS_NOMINA = {
   recargoHorasExtra: 1.25,
   /** Horas anuales si el convenio no las tiene */
   horasAnualesPorDefecto: 1776,
-  /** Prestación por incapacidad temporal (enfermedad común) */
-  it: { diasSinPrestacion: 3, finEmpresa: 15, finSesenta: 20, pctSesenta: 60, pctSetentaYCinco: 75 },
+  /** Prestación por incapacidad temporal (enfermedad común y accidente no laboral; el accidente de trabajo, 75 % desde el día siguiente) */
+  it: { diasSinPrestacion: 3, finEmpresa: 15, finSesenta: 20, pctSesenta: 60, pctSetentaYCinco: 75, pctAccidenteTrabajo: 75 },
+  /** Jornada semanal completa: por debajo, el contrato es a tiempo parcial */
+  jornadaCompleta: 40,
   /** Fichado por encima del turno que no cuenta como hora extra (minutos por jornada) */
   toleranciaExtraMinutos: 15,
 } as const;
+
+/** A tiempo parcial: contrato «Tiempo parcial» o jornada por debajo de la completa (40 h). Una sola regla para el cálculo y la pantalla. */
+export function esTiempoParcial(tipoContrato: string | null | undefined, jornadaSemanal: number): boolean {
+  return tipoContrato === "PARCIAL" || (jornadaSemanal > 0 && jornadaSemanal < TIPOS_NOMINA.jornadaCompleta);
+}
+
+/**
+ * Horas extra (o complementarias) de un periodo: por cada jornada fichada, lo que pasa del turno del
+ * cuadrante de ese día si supera la tolerancia (15 min); una jornada fichada sin turno cuenta entera.
+ * El total se redondea hacia abajo a cuartos de hora. Única regla: la usan la nómina y el CSV de la gestoría.
+ */
+export function horasExtraDeJornadas(jornadas: { dia: string; horas: number }[], turnos: { dia: string; turno: Turno }[]): number {
+  let extra = 0;
+  for (const j of jornadas) {
+    const previstas = turnos.filter((t) => t.dia === j.dia).reduce((s, t) => s + horasTurno(t.turno), 0);
+    const exceso = j.horas - previstas;
+    if (exceso * 60 > TIPOS_NOMINA.toleranciaExtraMinutos) extra += exceso;
+  }
+  return Math.floor(extra * 4) / 4;
+}
 
 /** Retención de IRPF orientativa por salario anual (la real depende de la situación personal: la fija la gestoría). */
 export function irpfOrientativo(salarioAnual: number): number {
@@ -84,8 +114,10 @@ export interface EntradaNomina {
   parcial: boolean;
   temporal: boolean;
   horasExtra: number;
-  /** días de IT del mes según el día de la baja en que caen */
-  diasIT: { sinPrestacion: number; empresa: number; sesenta: number; setentaYCinco: number };
+  /** días de IT del mes: por enfermedad común según el día de la baja en que caen; `accidente` = días de IT por accidente de trabajo (desde el día siguiente al accidente) */
+  diasIT: { sinPrestacion: number; empresa: number; sesenta: number; setentaYCinco: number; accidente?: number };
+  /** Pagas extra sin prorratear: la que toca cobrar este mes y la parte ganada (0 a 1). null = este mes no toca. */
+  pagaExtra?: { nombre: string; fraccion: number; dias: number } | null;
   diasSinSueldo: number;
   irpfPorcentaje: number | null; // null = orientativo
   otrasDeducciones?: { nombre: string; importe: number }[];
@@ -141,7 +173,8 @@ export function calcularNomina(e: EntradaNomina): ResultadoNomina {
 
   // días: mes comercial de 30
   const diasAlta30 = e.diasAlta >= e.diasMes ? 30 : Math.min(30, e.diasAlta);
-  const diasIT = e.diasIT.sinPrestacion + e.diasIT.empresa + e.diasIT.sesenta + e.diasIT.setentaYCinco;
+  const diasAT = e.diasIT.accidente ?? 0;
+  const diasIT = e.diasIT.sinPrestacion + e.diasIT.empresa + e.diasIT.sesenta + e.diasIT.setentaYCinco + diasAT;
   const diasPagados = Math.max(0, diasAlta30 - diasIT - e.diasSinSueldo);
   const fAlta = diasAlta30 / 30;
   const fPago = diasPagados / 30;
@@ -165,8 +198,10 @@ export function calcularNomina(e: EntradaNomina): ResultadoNomina {
   let prorrataPagas = 0;
   if (extras > 0 && e.pagasProrrateadas) {
     prorrataPagas = linea({ tipo: "DEVENGO", concepto: "PRORRATA_PAGAS", nombre: `Prorrata de ${extras} pagas extra`, cantidad: diasPagados, base: paga, importe: ((paga * extras) / 12) * fPago });
-  } else if (extras > 0 && ["06", "12"].includes(e.mes.slice(5))) {
-    prorrataPagas = linea({ tipo: "DEVENGO", concepto: "PAGA_EXTRA", nombre: e.mes.slice(5) === "06" ? "Paga extra de verano" : "Paga extra de Navidad", importe: paga });
+  } else if (extras > 0 && e.pagaExtra && e.pagaExtra.fraccion > 0) {
+    // las pagas extra (2 normalmente) se reparten entre verano y Navidad, en proporción a lo ganado del semestre
+    const fraccion = Math.min(1, e.pagaExtra.fraccion);
+    prorrataPagas = linea({ tipo: "DEVENGO", concepto: "PAGA_EXTRA", nombre: e.pagaExtra.nombre, cantidad: e.pagaExtra.dias, base: paga, importe: paga * (extras / 2) * fraccion });
   }
 
   // horas extra (o complementarias)
@@ -191,7 +226,9 @@ export function calcularNomina(e: EntradaNomina): ResultadoNomina {
   const itEmpresa = linea({ tipo: "DEVENGO", concepto: "IT_EMPRESA", nombre: `Incapacidad temporal a cargo de la empresa (${T.it.pctSesenta} %)`, cantidad: e.diasIT.empresa, precio: (baseReguladoraDia * T.it.pctSesenta) / 100, importe: (e.diasIT.empresa * baseReguladoraDia * T.it.pctSesenta) / 100 });
   const it60 = linea({ tipo: "DEVENGO", concepto: "IT_DELEGADO_60", nombre: `Incapacidad temporal, pago delegado (${T.it.pctSesenta} %)`, cantidad: e.diasIT.sesenta, precio: (baseReguladoraDia * T.it.pctSesenta) / 100, importe: (e.diasIT.sesenta * baseReguladoraDia * T.it.pctSesenta) / 100 });
   const it75 = linea({ tipo: "DEVENGO", concepto: "IT_DELEGADO_75", nombre: `Incapacidad temporal, pago delegado (${T.it.pctSetentaYCinco} %)`, cantidad: e.diasIT.setentaYCinco, precio: (baseReguladoraDia * T.it.pctSetentaYCinco) / 100, importe: (e.diasIT.setentaYCinco * baseReguladoraDia * T.it.pctSetentaYCinco) / 100 });
-  const pagoDelegadoIT = r2(it60 + it75);
+  const pctAT = T.it.pctAccidenteTrabajo;
+  const itAT = linea({ tipo: "DEVENGO", concepto: "IT_ACCIDENTE_TRABAJO", nombre: `Incapacidad temporal por accidente de trabajo, pago delegado (${pctAT} %)`, cantidad: diasAT, precio: (baseReguladoraDia * pctAT) / 100, importe: (diasAT * baseReguladoraDia * pctAT) / 100 });
+  const pagoDelegadoIT = r2(it60 + it75 + itAT);
   const prestacionIT = r2(itEmpresa + pagoDelegadoIT);
 
   const devengado = r2(salarioBase + complementos + prorrataPagas + importeHorasExtra + prestacionIT);
@@ -289,6 +326,36 @@ export interface NominaPreparada {
 const max = (a: string, b: string) => (a > b ? a : b);
 const min = (a: string, b: string) => (a < b ? a : b);
 
+/** Semestre de devengo de la paga extra (regla general): enero-junio (verano) y julio-diciembre (Navidad). */
+function inicioSemestre(mes: string): string {
+  return `${mes.slice(0, 4)}-${mes.slice(5) <= "06" ? "01" : "07"}-01`;
+}
+function finSemestre(mes: string): string {
+  return `${mes.slice(0, 4)}-${mes.slice(5) <= "06" ? "06-30" : "12-31"}`;
+}
+
+/**
+ * Días del semestre (desde `semIni` hasta `hasta`, incluidos) que generan paga extra: en alta, con un
+ * contrato que cubre el día y sin baja (IT) ni ausencia sin sueldo aprobada ese día.
+ */
+function diasDevengoPagaExtra(
+  e: { fechaAlta: Date; fechaBaja: Date | null; contratos: { fechaInicio: Date; fechaFin: Date | null }[]; ausencias: { tipo: string; desde: Date; hasta: Date }[] },
+  semIni: string,
+  hasta: string,
+): number {
+  const alta = diaISO(e.fechaAlta);
+  const baja = e.fechaBaja ? diaISO(e.fechaBaja) : null;
+  const sinDevengo = ["BAJA_ENFERMEDAD", "BAJA_ACCIDENTE", "SIN_JUSTIFICAR", "EXCEDENCIA"];
+  let n = 0;
+  for (let d = max(semIni, alta); d <= hasta && (!baja || d <= baja); d = sumarDias(d, 1)) {
+    const conContrato = e.contratos.some((c) => diaISO(c.fechaInicio) <= d && (!c.fechaFin || diaISO(c.fechaFin) >= d));
+    if (!conContrato) continue;
+    const ausente = e.ausencias.some((a) => sinDevengo.includes(a.tipo) && diaISO(a.desde) <= d && diaISO(a.hasta) >= d && !(a.tipo === "BAJA_ACCIDENTE" && diaISO(a.desde) === d));
+    if (!ausente) n++;
+  }
+  return n;
+}
+
 /** Días de IT del mes, clasificados por el día de la baja en que caen (la baja puede venir del mes anterior). */
 function tramosIT(desdeBaja: string, hastaBaja: string, ini: string, fin: string) {
   const r = { sinPrestacion: 0, empresa: 0, sesenta: 0, setentaYCinco: 0 };
@@ -322,7 +389,8 @@ export async function prepararNominasMes(prisma: Cliente, tenantId: string, cent
       puesto: true,
       contratos: { include: { categoria: true, convenio: true, complementos: { where: { activo: true } } } },
       asignaciones: { where: { fecha: { gte: aDia(ini), lte: aDia(fin) } } },
-      ausencias: { where: { estado: "APROBADA", desde: { lte: aDia(fin) }, hasta: { gte: aDia(ini) } } },
+      // desde el inicio del semestre: hacen falta para la paga extra sin prorratear
+      ausencias: { where: { estado: "APROBADA", desde: { lte: aDia(fin) }, hasta: { gte: aDia(inicioSemestre(mes)) } } },
     },
   });
   const fichajes = await prisma.fichaje.findMany({
@@ -353,12 +421,17 @@ export async function prepararNominasMes(prisma: Cliente, tenantId: string, cent
     const diasAlta = diasEntre(desde, hasta);
 
     // ausencias
-    const it = { sinPrestacion: 0, empresa: 0, sesenta: 0, setentaYCinco: 0 };
+    const it = { sinPrestacion: 0, empresa: 0, sesenta: 0, setentaYCinco: 0, accidente: 0 };
     let diasSinSueldo = 0;
     for (const a of e.ausencias) {
       const d1 = diaISO(a.desde);
       const d2 = diaISO(a.hasta);
-      if (a.tipo === "BAJA_ENFERMEDAD" || a.tipo === "BAJA_ACCIDENTE") {
+      if (a.tipo === "BAJA_ACCIDENTE") {
+        // accidente de trabajo: el día del accidente se paga como trabajado; la prestación, desde el día siguiente
+        const a1 = max(sumarDias(d1, 1), desde);
+        const a2 = min(d2, hasta);
+        if (a1 <= a2) it.accidente += diasEntre(a1, a2);
+      } else if (a.tipo === "BAJA_ENFERMEDAD") {
         const t = tramosIT(d1, d2, desde, hasta);
         it.sinPrestacion += t.sinPrestacion;
         it.empresa += t.empresa;
@@ -374,14 +447,17 @@ export async function prepararNominasMes(prisma: Cliente, tenantId: string, cent
     // horas trabajadas y extra (de los fichajes, contra el cuadrante)
     const suyas = jornadas.filter((j) => j.empleadoId === e.id && j.dia >= desde && j.dia <= hasta);
     const horasTrabajadas = suyas.reduce((s, j) => s + j.horas, 0);
-    let extra = 0;
-    for (const j of suyas) {
-      const asig = e.asignaciones.find((a) => diaISO(a.fecha) === j.dia);
-      const previstas = asig ? horasTurno(asig) : 0;
-      const exceso = j.horas - previstas;
-      if (exceso * 60 > TIPOS_NOMINA.toleranciaExtraMinutos) extra += exceso;
+    const horasExtra = horasExtraDeJornadas(suyas, e.asignaciones.map((a) => ({ dia: diaISO(a.fecha), turno: a })));
+
+    // paga extra sin prorratear: en junio y diciembre, o en el mes de la baja (la parte ganada del semestre)
+    const bajaEnMes = !!e.fechaBaja && diaISO(e.fechaBaja) >= ini && diaISO(e.fechaBaja) <= fin;
+    const mesPaga = ["06", "12"].includes(mes.slice(5));
+    let pagaExtra: EntradaNomina["pagaExtra"] = null;
+    if (!c.pagasProrrateadas && c.pagasAnuales > 12 && (mesPaga || bajaEnMes)) {
+      const verano = mes.slice(5) <= "06";
+      const devengo = diasDevengoPagaExtra(e, inicioSemestre(mes), hasta);
+      pagaExtra = { nombre: `${verano ? "Paga extra de verano" : "Paga extra de Navidad"}${mesPaga ? "" : " (parte ganada, por la baja)"}`, fraccion: devengo / diasEntre(inicioSemestre(mes), finSemestre(mes)), dias: devengo };
     }
-    const horasExtra = Math.floor(extra * 4) / 4;
 
     const jornada = Number(c.jornadaSemanal);
     const salarioConvenio = c.categoria?.salarioBaseAnual ? (Number(c.categoria.salarioBaseAnual) * jornada) / 40 : 0;
@@ -396,12 +472,13 @@ export async function prepararNominasMes(prisma: Cliente, tenantId: string, cent
       complementos: c.complementos.map((k) => ({ concepto: k.concepto, nombre: k.nombre, importeMensual: Number(k.importeMensual), cotiza: k.cotiza, tributa: k.tributa })),
       jornadaSemanal: jornada,
       horasAnualesConvenio: c.convenio?.horasAnuales ?? TIPOS_NOMINA.horasAnualesPorDefecto,
-      parcial: c.tipo === "PARCIAL" || jornada < 40,
+      parcial: esTiempoParcial(c.tipo, jornada),
       temporal: c.tipo === "TEMPORAL" || c.tipo === "PRACTICAS",
       horasExtra,
       diasIT: it,
       diasSinSueldo,
       irpfPorcentaje: c.irpfPorcentaje !== null ? Number(c.irpfPorcentaje) : null,
+      pagaExtra,
     });
     nominas.push({
       empleadoId: e.id,

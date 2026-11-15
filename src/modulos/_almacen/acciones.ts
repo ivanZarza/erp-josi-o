@@ -17,9 +17,10 @@ import {
   rechazarPedidoInterno,
   cancelarPedidoInterno,
 } from "@/nucleo/pedidos";
-import { crearCompra, editarCompra, marcarCompraEnviada, recibirCompra, cancelarCompra, type LineaCompra } from "@/nucleo/compras";
-import { crearInventario, guardarRecuento, terminarInventario, aprobarInventario, reabrirInventario } from "@/nucleo/inventarios";
+import { crearCompra, editarCompra, marcarCompraEnviada, recibirCompra, cancelarCompra, cerrarCompra, type LineaCompra } from "@/nucleo/compras";
+import { crearInventario, guardarRecuento, terminarInventario, aprobarInventario, reabrirInventario, cancelarInventario } from "@/nucleo/inventarios";
 import { registrarTraspaso } from "@/nucleo/traspasos";
+import { SIN_UBICAR } from "@/nucleo/stock";
 import { euros } from "@/kernel/formato";
 import { ejecutar, rutaSegura } from "./ejecutar";
 import {
@@ -197,7 +198,9 @@ export async function accionRecibirPedido(form: FormData) {
     const recibidas = leerCantidades(form, "r_");
     const nota = String(form.get("nota") ?? "").trim() || null;
     const r = await p.prisma.$transaction((tx) => recibirPedidoInterno(tx, p.ctx.tenant.id, p.ctx.usuario.id, p.area, ped.id, recibidas, nota));
-    return { ok: r.diferencias ? `Recepción confirmada con ${r.diferencias} diferencia(s); el stock del local se ha regularizado.` : "Recepción confirmada: todo correcto." };
+    if (!r.diferencias) return { ok: "Recepción confirmada: todo correcto." };
+    const partes = [r.faltas ? `${r.faltas} con falta (apuntada como merma en el local)` : "", r.sobras ? `${r.sobras} con sobra (descontada también del centro que sirve)` : ""].filter(Boolean);
+    return { ok: `Recepción confirmada con ${r.diferencias} diferencia(s): ${partes.join(" y ")}.` };
   });
 }
 
@@ -277,7 +280,18 @@ export async function accionRecibirCompra(form: FormData) {
     const albaranProveedor = String(form.get("albaranProveedor") ?? "").trim().slice(0, 60) || null;
     const almacenId = String(form.get("almacenId") ?? "").trim() || null;
     const r = await p.prisma.$transaction((tx) => recibirCompra(tx, p.ctx.tenant.id, p.ctx.usuario.id, p.area, c.id, { lineas, albaranProveedor, cerrar: form.get("cerrar") === "on", almacenId }));
-    return { ok: `Recepción guardada con el albarán ${r.albaran}. ${r.estado === "RECIBIDO" ? "Compra completa." : "Queda mercancía pendiente."}` };
+    if (!r.albaran) return { ok: `Compra ${c.numero} cerrada sin lo que faltaba.` };
+    return { ok: `Recepción guardada con el albarán ${r.albaran}. ${r.estado === "RECIBIDO" ? "Compra cerrada." : "Queda mercancía pendiente."}` };
+  });
+}
+
+export async function accionCerrarCompra(form: FormData) {
+  const p = await preparar(form, "compras:recibir");
+  return ejecutar(p, async () => {
+    const c = await compraConAcceso(p, idDe(form));
+    const motivo = String(form.get("motivo") ?? "").trim().slice(0, 200) || null;
+    await p.prisma.$transaction((tx) => cerrarCompra(tx, p.ctx.tenant.id, p.ctx.usuario.id, p.area, c.id, motivo));
+    return { ok: `Compra ${c.numero} cerrada: lo que faltaba ya no se espera.` };
   });
 }
 
@@ -337,6 +351,18 @@ export async function accionAprobarInventario(form: FormData) {
   });
 }
 
+export async function accionCancelarInventario(form: FormData) {
+  const p = await preparar(form, "inventarios:crear");
+  return ejecutar(p, async () => {
+    const inv = await inventarioConAcceso(p, idDe(form));
+    // uno pendiente de aprobación solo lo cancela quien puede cerrar inventarios
+    if (inv.estado === "PENDIENTE_APROBACION" && !p.ctx.puede(`${p.m}:inventarios:cerrar`)) throw new ErrorNegocio("Este inventario espera aprobación: solo lo puede cancelar quien cierra inventarios.");
+    const motivo = String(form.get("motivo") ?? "").trim().slice(0, 200) || null;
+    await p.prisma.$transaction((tx) => cancelarInventario(tx, p.ctx.tenant.id, p.ctx.usuario.id, p.area, inv.id, motivo));
+    return { ir: `/${p.m}/inventarios?ok=${encodeURIComponent(`Inventario ${inv.numero} cancelado. No se ha ajustado nada; ya se puede empezar otro.`)}` };
+  });
+}
+
 export async function accionReabrirInventario(form: FormData) {
   const p = await preparar(form, "inventarios:cerrar");
   return ejecutar(p, async () => {
@@ -353,7 +379,9 @@ export async function accionTraspaso(form: FormData) {
   return ejecutar(p, async () => {
     const d = EsquemaTraspaso.parse({ centroId: form.get("centroId") ?? "", origenId: form.get("origenId") ?? "", destinoId: form.get("destinoId") ?? "", nota: form.get("nota") ?? "" });
     veCentro(p.ctx, d.centroId);
-    const r = await p.prisma.$transaction((tx) => registrarTraspaso(tx, p.ctx.tenant.id, p.ctx.usuario.id, p.area, { ...d, lineas: lineasPedidas(form) }));
+    // «Sin ubicar» como origen: el stock del centro que aún no está en ningún almacén
+    const origenId = d.origenId === SIN_UBICAR ? null : d.origenId;
+    const r = await p.prisma.$transaction((tx) => registrarTraspaso(tx, p.ctx.tenant.id, p.ctx.usuario.id, p.area, { ...d, origenId, lineas: lineasPedidas(form) }));
     return { ok: `Traspaso ${r.documento} hecho (${r.lineas} producto(s)).` };
   });
 }

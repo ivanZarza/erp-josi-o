@@ -48,9 +48,15 @@ function resumenVentas(coste: number, ficha: DatosFichaVino | null, ventas: Vent
   };
 }
 
+/** Centros que cuentan para el stock de la Bodega: los de arriba (uno o todos) que tienen el área Bebidas. */
+function centrosDeBebidas(ctx: Contexto): string[] {
+  const visibles = new Set(centrosFiltro(ctx));
+  return ctx.centros.filter((c) => visibles.has(c.id) && c.modulos.includes("bebidas")).map((c) => c.id);
+}
+
 async function stockDe(ctx: Contexto, productoIds: string[]) {
   const prisma = await db();
-  const centros = centrosFiltro(ctx);
+  const centros = centrosDeBebidas(ctx);
   const filas = productoIds.length
     ? await prisma.movimientoStock.groupBy({ by: ["productoId", "centroId"], where: { tenantId: ctx.tenant.id, centroId: { in: centros }, productoId: { in: productoIds } }, _sum: { cantidad: true } })
     : [];
@@ -74,7 +80,7 @@ export interface FiltroBodega {
   soloCarta?: boolean;
 }
 
-/** Vinos de la cadena (con ficha o de una familia de vino), con su stock en los centros que se ven arriba. */
+/** Vinos de la cadena (con ficha o de una familia de vino), con su stock en los centros que se ven arriba y tienen Bebidas. */
 export async function listarBodega(ctx: Contexto, filtro: FiltroBodega = {}) {
   const prisma = await db();
   const t = ctx.tenant.id;

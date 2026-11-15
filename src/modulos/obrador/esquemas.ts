@@ -1,16 +1,11 @@
-/** Validación (zod) del Obrador. Los números admiten coma decimal española. */
+/** Validación (zod) del Obrador. Los números se leen con numeroEs (de @/kernel/esquemas): «6,5», «1.234,5», «1.500» o «6.5». */
 import { z } from "zod";
+import { numeroEs, numeroEsOpcional } from "@/kernel/esquemas";
 
-function aNumeroEs(v: unknown): unknown {
-  if (typeof v !== "string") return v;
-  let s = v.trim().replace(/\s|€|%/g, "");
-  if (s === "") return undefined;
-  if (s.includes(",")) s = s.replace(/\./g, "").replace(",", ".");
-  return Number(s);
-}
-
-const numero = (msg: string) => z.preprocess(aNumeroEs, z.number({ error: msg }).finite({ error: msg }));
-const numeroOpcional = (msg: string) => z.preprocess(aNumeroEs, z.number({ error: msg }).finite({ error: msg }).optional());
+/** Vacío = sin dato (para que un número obligatorio en blanco dé su mensaje y no se lea como 0). */
+const vacioASinDato = (v: unknown) => (typeof v === "string" && v.trim() === "" ? undefined : v);
+const numero = (msg: string) => z.preprocess(vacioASinDato, numeroEs(msg));
+const numeroOpcional = (msg: string) => numeroEsOpcional(msg);
 const texto = (msg: string) => z.string({ error: msg }).trim().min(1, { error: msg });
 const textoOpcional = z.preprocess((v) => (typeof v === "string" && v.trim() === "" ? undefined : v), z.string().trim().optional());
 const fecha = (msg: string) => z.string({ error: msg }).regex(/^\d{4}-\d{2}-\d{2}$/, { error: msg });
@@ -79,4 +74,6 @@ export const esquemaTarifa = z
 export const esquemaRetirada = z.object({
   id: texto("Falta el lote"),
   motivo: texto("Escribe el motivo de la retirada"),
+  /** Lo que queda del lote en el obrador y se tira: sale del stock como merma (vacío o 0 = nada). */
+  cantidadBaja: numeroOpcional("Cantidad a dar de baja no válida").pipe(z.number().min(0, { error: "La cantidad a dar de baja no puede ser negativa" }).optional()),
 });

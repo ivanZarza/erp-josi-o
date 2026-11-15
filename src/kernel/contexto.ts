@@ -3,7 +3,7 @@ import { cache } from "react";
 import { redirect, notFound } from "next/navigation";
 import { db } from "./db";
 import { leerSesion } from "./sesion";
-import { tienePermiso } from "./permisos";
+import { leerPermisosGuardados, tienePermiso } from "./permisos";
 import { MODULOS, moduloPorId } from "./registro";
 import type { ManifiestoModulo } from "./tipos-modulo";
 
@@ -68,7 +68,8 @@ export const contexto = cache(async (): Promise<Contexto> => {
   }));
   const centroActivo = centros.find((c) => c.id === sesion.centroId) ?? (centros.length === 1 ? centros[0] : null);
 
-  const permisos = Array.isArray(usuario.permisos) ? (usuario.permisos as string[]) : null;
+  // lista (aunque esté vacía) = permisos a medida; null = los de su rol (kernel/permisos.ts)
+  const permisos = leerPermisosGuardados(usuario.permisos);
   return {
     usuario: { id: usuario.id, nombre: usuario.nombre, email: usuario.email, rol: usuario.rol, permisos },
     tenant: { id: usuario.tenant.id, nombre: usuario.tenant.nombre },

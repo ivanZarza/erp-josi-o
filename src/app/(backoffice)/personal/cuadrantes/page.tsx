@@ -1,7 +1,7 @@
 import { exigir } from "@/kernel/contexto";
 import { euros, fecha, fechaHora } from "@/kernel/formato";
 import { Cabecera, Aviso, Boton, BotonEnlace, Etiqueta, Tarjeta, Tabla, Campo, Entrada, Cifra, Rejilla } from "@/ui";
-import { cuadranteSemana, listarTurnosTipo } from "@/modulos/personal/servicio";
+import { cuadranteSemana, listarTurnosTipo, veTodaLaCadena } from "@/modulos/personal/servicio";
 import { guardarAsignacionAccion, quitarAsignacionAccion, copiarSemanaAccion, publicarCuadranteAccion, crearTurnoTipoAccion, desactivarTurnoTipoAccion } from "@/modulos/personal/acciones";
 import { NOMBRE_AUSENCIA } from "@/modulos/personal/esquemas";
 import { esDia, hoyMadrid, lunesDe, sumarDias, NOMBRES_DIA } from "@/modulos/personal/fechas";
@@ -24,7 +24,7 @@ export default async function Cuadrantes({ searchParams }: { searchParams: Busqu
   const centro = ctx.centroActivo;
   const semanaParam = param(sp, "semana");
   const lunes = lunesDe(esDia(semanaParam) ? semanaParam : hoyMadrid());
-  const [c, turnosTipo] = await Promise.all([cuadranteSemana(ctx, centro.id, lunes), listarTurnosTipo(ctx, centro.id)]);
+  const [c, turnosTipo, toda] = await Promise.all([cuadranteSemana(ctx, centro.id, lunes), listarTurnosTipo(ctx, centro.id), veTodaLaCadena(ctx)]);
   const editable = ctx.puede("personal:cuadrantes:editar");
   const verCostes = ctx.puede("personal:costes:ver");
   const volver = `/personal/cuadrantes?semana=${lunes}`;
@@ -142,15 +142,19 @@ export default async function Cuadrantes({ searchParams }: { searchParams: Busqu
               { titulo: "Ámbito", celda: (t) => (t.centroId ? "Este centro" : "Todos los centros") },
               {
                 titulo: "",
-                celda: (t) => (
-                  <form action={desactivarTurnoTipoAccion}>
-                    <Volver a={volver} />
-                    <input type="hidden" name="turnoId" value={t.id} />
-                    <Boton type="submit" variante="secundario">
-                      Retirar
-                    </Boton>
-                  </form>
-                ),
+                // los comunes a toda la cadena solo los retira quien ve todos los centros
+                celda: (t) =>
+                  t.centroId || toda ? (
+                    <form action={desactivarTurnoTipoAccion}>
+                      <Volver a={volver} />
+                      <input type="hidden" name="turnoId" value={t.id} />
+                      <Boton type="submit" variante="secundario">
+                        {t.centroId ? "Retirar" : "Retirar en toda la cadena"}
+                      </Boton>
+                    </form>
+                  ) : (
+                    <span className="text-xs text-slate-500">Común a la cadena</span>
+                  ),
               },
             ]}
           />

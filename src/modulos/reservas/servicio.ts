@@ -1,8 +1,9 @@
 import "server-only";
+import { hoyMadrid } from "@/kernel/fechas";
 import { db } from "@/kernel/db";
 import { emitir } from "@/kernel/eventos";
 import { centrosFiltro, type Contexto } from "@/kernel/contexto";
-import type { PrismaClient } from "@/generated/prisma/client";
+import { Prisma, type PrismaClient } from "@/generated/prisma/client";
 import { buscarOCrearCliente, registrarVisita, type TipoConsentimiento } from "@/modulos/clientes/servicio";
 import { crearSolicitudDesdeReserva } from "@/modulos/eventos/servicio";
 import type { DatosReserva } from "./esquemas";
@@ -44,6 +45,18 @@ export function estadosSiguientes(e: EstadoReserva) {
 
 /** Estados que ocupan mesa. */
 const OCUPAN: EstadoReserva[] = ["SOLICITADA", "CONFIRMADA", "LLEGADA", "SENTADA"];
+/** Estados que no ocupan mesa ni cuentan cubiertos (si se vuelve de ellos, hay que comprobar sitio). */
+const LIBERAN: EstadoReserva[] = ["CANCELADA", "NO_PRESENTADA"];
+
+/**
+ * Estado con el que nace una reserva según su origen. Las que llegan de la web nacen «Solicitada»
+ * (el local aún no ha hablado con el cliente y tiene que confirmarlas); las apuntadas en el local,
+ * por teléfono o que llegan de CoverManager (que ya las confirma al cliente) nacen «Confirmada».
+ * La mesa y los cubiertos se reservan igual en los dos casos.
+ */
+export function estadoInicial(origen: string): EstadoReserva {
+  return origen === "WEB" ? "SOLICITADA" : "CONFIRMADA";
+}
 /** Estados que cuentan para el ritmo de entradas (cubiertos por franja). */
 const CUENTAN_FRANJA: EstadoReserva[] = ["SOLICITADA", "CONFIRMADA", "LLEGADA", "SENTADA", "TERMINADA"];
 
@@ -55,11 +68,7 @@ export const aMin = (h: string) => {
 };
 export const deMin = (m: number) => `${String(Math.floor(m / 60) % 24).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 
-/** Hoy en Madrid como «aaaa-mm-dd». */
-export function hoyMadrid(desplazamientoDias = 0): string {
-  const d = new Date(Date.now() + desplazamientoDias * 86_400_000);
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Madrid", year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
-}
+export { hoyMadrid } from "@/kernel/fechas";
 export function horaMadrid(): string {
   return new Intl.DateTimeFormat("es-ES", { timeZone: "Europe/Madrid", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date());
 }
@@ -92,6 +101,15 @@ export function turnoDe(turnos: Turno[], fecha: string, hora: string): Turno | n
 function inicioFranja(t: Turno, hora: string) {
   const base = aMin(t.horaInicio);
   return base + Math.floor((aMin(hora) - base) / t.intervaloMin) * t.intervaloMin;
+}
+
+/** Tabla «hasta N personas → M minutos» guardada en los ajustes, ordenada de menos a más personas. */
+export function tablaDuraciones(valor: unknown): { hasta: number; minutos: number }[] {
+  if (!valor || typeof valor !== "object") return [];
+  return Object.entries(valor as Record<string, unknown>)
+    .map(([k, v]) => ({ hasta: Number(k), minutos: Number(v) }))
+    .filter((x) => Number.isInteger(x.hasta) && x.hasta > 0 && Number.isFinite(x.minutos) && x.minutos > 0)
+    .sort((a, b) => a.hasta - b.hasta);
 }
 
 function duracionPara(ajustes: { duracionPorPersonas: unknown }, turno: Turno | null, personas: number) {
@@ -195,7 +213,7 @@ export function elegirMesas(libres: MesaLibre[], personas: number, espacioId?: s
 
 // ---------------------------------------------------------------- reservas
 
-export type ResultadoReserva = { tipo: "reserva"; id: string; sinMesa: boolean } | { tipo: "evento"; id: string; numero: string };
+export type ResultadoReserva = { tipo: "reserva"; id: string; sinMesa: boolean; estado: EstadoReserva } | { tipo: "evento"; id: string; numero: string };
 
 export async function crearReserva(ctx: Contexto, d: DatosReserva): Promise<ResultadoReserva> {
   if (!centrosFiltro(ctx).includes(d.centroId) && !ctx.centros.some((c) => c.id === d.centroId)) throw new ErrorReservas("No tienes acceso a ese local");
@@ -203,6 +221,10 @@ export async function crearReserva(ctx: Contexto, d: DatosReserva): Promise<Resu
   return prisma.$transaction(async (tx) => {
     const tenantId = ctx.tenant.id;
     const ajustes = await ajustesDe(tx, tenantId, d.centroId);
+    if (d.espacioId) {
+      const zona = await tx.reservaEspacio.findFirst({ where: { tenantId, id: d.espacioId, centroId: d.centroId, activo: true }, select: { id: true } });
+      if (!zona) throw new ErrorReservas("La zona elegida no es de ese local");
+    }
 
     const consentimientos: { tipo: TipoConsentimiento; otorgado: boolean }[] = [
       { tipo: "RESERVA", otorgado: d.consentimientoReserva },
@@ -238,17 +260,18 @@ export async function crearReserva(ctx: Contexto, d: DatosReserva): Promise<Resu
     }
     if (!mesas && !d.sinMesa) throw new ErrorReservas("No queda mesa libre para ese grupo a esa hora. Marca «guardar sin mesa» si quieres apuntarla igualmente.");
 
+    const estado = estadoInicial(d.origen);
     const r = await tx.reserva.create({
       data: {
         tenantId, centroId: d.centroId, clienteId, nombre: d.nombre, telefono: d.telefono, email: d.email?.toLowerCase(), personas: d.personas,
-        fecha: fechaDia(d.fecha), hora: d.hora, duracionMin: duracion, espacioId: d.espacioId ?? null, estado: "CONFIRMADA", origen: d.origen,
+        fecha: fechaDia(d.fecha), hora: d.hora, duracionMin: duracion, espacioId: d.espacioId ?? null, estado, origen: d.origen,
         notas: d.notas, alergias: d.alergias, creadoPor: ctx.usuario.id,
         mesas: mesas ? { create: mesas.map((mesaId) => ({ mesaId })) } : undefined,
-        historial: { create: { hasta: "CONFIRMADA", nota: mesas ? null : "Sin mesa asignada", usuarioId: ctx.usuario.id } },
+        historial: { create: { hasta: estado, nota: mesas ? null : "Sin mesa asignada", usuarioId: ctx.usuario.id } },
       },
     });
     await emitir(tx, tenantId, "reservas.reserva.creada", { reservaId: r.id, centroId: d.centroId, fecha: d.fecha, hora: d.hora, personas: d.personas });
-    return { tipo: "reserva", id: r.id, sinMesa: !mesas };
+    return { tipo: "reserva", id: r.id, sinMesa: !mesas, estado };
   });
 }
 
@@ -258,13 +281,50 @@ export async function cambiarEstadoReserva(ctx: Contexto, d: { id: string; estad
     const r = await tx.reserva.findFirst({ where: { tenantId: ctx.tenant.id, id: d.id, centroId: { in: centrosFiltro(ctx) } } });
     if (!r) throw new ErrorReservas("Reserva no encontrada");
     if (!SIGUIENTES[r.estado].includes(d.estado)) throw new ErrorReservas(`No se puede pasar de «${NOMBRE_ESTADO[r.estado]}» a «${NOMBRE_ESTADO[d.estado]}»`);
+    let nota = d.nota;
+    if (LIBERAN.includes(r.estado) && OCUPAN.includes(d.estado)) nota = [nota, await recuperarSitio(tx, ctx.tenant.id, r, d.estado)].filter(Boolean).join(" · ") || undefined;
     await tx.reserva.update({ where: { id: r.id }, data: { estado: d.estado } });
-    await tx.reservaHistorial.create({ data: { reservaId: r.id, desde: r.estado, hasta: d.estado, nota: d.nota, usuarioId: ctx.usuario.id } });
+    await tx.reservaHistorial.create({ data: { reservaId: r.id, desde: r.estado, hasta: d.estado, nota, usuarioId: ctx.usuario.id } });
     if (d.estado === "TERMINADA" && r.clienteId && ctx.tieneModulo("clientes"))
       await registrarVisita(tx, ctx.tenant.id, { clienteId: r.clienteId, centroId: r.centroId, fecha: fechaDia(diaTexto(r.fecha)), personas: r.personas, reservaId: r.id });
     if (d.estado === "NO_PRESENTADA" || d.estado === "CANCELADA")
       await emitir(tx, ctx.tenant.id, `reservas.reserva.${d.estado === "CANCELADA" ? "cancelada" : "no_presentada"}`, { reservaId: r.id, clienteId: r.clienteId });
   });
+}
+
+/**
+ * Una reserva cancelada o no presentada que vuelve a «Confirmada» o «Ha llegado» necesita sitio otra vez:
+ * - Confirmada: la franja tiene que admitir sus cubiertos y tiene que haber mesa (la suya si sigue libre,
+ *   si no, otra libre donde quepa). Si no hay, no se deja.
+ * - Ha llegado (el cliente está en la puerta): se conserva su mesa si está libre o se busca otra;
+ *   si no queda ninguna, pasa sin mesa para asignarla en sala.
+ * Devuelve la nota para el historial si ha cambiado la mesa.
+ */
+async function recuperarSitio(
+  tx: Tx,
+  tenantId: string,
+  r: { id: string; centroId: string; fecha: Date; hora: string; duracionMin: number; personas: number; espacioId: string | null },
+  destino: EstadoReserva,
+): Promise<string | null> {
+  const fecha = diaTexto(r.fecha);
+  if (destino === "CONFIRMADA") await comprobarFranja(tx, tenantId, r.centroId, fecha, r.hora, r.personas, r.id);
+  const [libres, actuales] = await Promise.all([
+    mesasLibres(tx, tenantId, r.centroId, fecha, r.hora, r.duracionMin, r.id),
+    tx.reservaMesaAsignada.findMany({ where: { reservaId: r.id }, select: { mesaId: true } }),
+  ]);
+  const libresIds = new Set(libres.map((m) => m.id));
+  if (actuales.length > 0 && actuales.every((m) => libresIds.has(m.mesaId))) return null; // su mesa sigue libre
+  const nuevas = elegirMesas(libres, r.personas, r.espacioId);
+  if (!nuevas && destino === "CONFIRMADA")
+    throw new ErrorReservas(
+      actuales.length > 0
+        ? "Su mesa ya está ocupada a esa hora y no queda otra libre para ese grupo: no se puede volver a confirmar"
+        : "No queda mesa libre para ese grupo a esa hora: no se puede volver a confirmar",
+    );
+  await tx.reservaMesaAsignada.deleteMany({ where: { reservaId: r.id } });
+  if (!nuevas) return "Sin mesa libre: asígnala en sala";
+  await tx.reservaMesaAsignada.createMany({ data: nuevas.map((mesaId) => ({ reservaId: r.id, mesaId })) });
+  return actuales.length > 0 ? "Su mesa estaba ocupada: se le asigna otra" : "Mesa asignada automáticamente";
 }
 
 export async function cambiarMesaReserva(ctx: Contexto, d: { id: string; mesaId?: string }) {
@@ -275,8 +335,10 @@ export async function cambiarMesaReserva(ctx: Contexto, d: { id: string; mesaId?
     const libres = await mesasLibres(tx, ctx.tenant.id, r.centroId, diaTexto(r.fecha), r.hora, r.duracionMin, r.id);
     let mesas: string[] | null;
     if (d.mesaId) {
-      if (!libres.some((m) => m.id === d.mesaId)) throw new ErrorReservas("Esa mesa está ocupada a esa hora");
-      mesas = [d.mesaId];
+      const m = libres.find((x) => x.id === d.mesaId);
+      if (!m) throw new ErrorReservas("Esa mesa está ocupada a esa hora");
+      if (r.personas > m.capacidadMax) throw new ErrorReservas(`En la mesa ${m.nombre} caben ${m.capacidadMax} como máximo y la reserva es de ${r.personas}`);
+      mesas = [m.id];
     } else mesas = elegirMesas(libres, r.personas, r.espacioId);
     if (!mesas) throw new ErrorReservas("No hay mesa libre para ese grupo a esa hora");
     await tx.reservaMesaAsignada.deleteMany({ where: { reservaId: r.id } });
@@ -387,14 +449,51 @@ export async function guardarMesa(
   }
 }
 
-/** Las mesas y espacios con reservas no se borran: se desactivan. */
+/** Reservas vivas (solicitada, confirmada, ha llegado, sentada) de hoy en adelante que cumplen el filtro. */
+async function reservasFuturas(tx: Tx, tenantId: string, filtro: { mesaId: string } | { espacioId: string }) {
+  return tx.reserva.findMany({
+    where: {
+      tenantId,
+      fecha: { gte: fechaDia(hoyMadrid()) },
+      estado: { in: OCUPAN },
+      ...("mesaId" in filtro
+        ? { mesas: { some: { mesaId: filtro.mesaId } } }
+        : { OR: [{ espacioId: filtro.espacioId }, { mesas: { some: { mesa: { espacioId: filtro.espacioId } } } }] }),
+    },
+    select: { fecha: true, hora: true, nombre: true },
+    orderBy: [{ fecha: "asc" }, { hora: "asc" }],
+  });
+}
+
+function textoReservasFuturas(lista: { fecha: Date; hora: string; nombre: string }[]) {
+  const p = lista[0];
+  const [a, m, d] = diaTexto(p.fecha).split("-");
+  return `${lista.length} ${lista.length === 1 ? "reserva" : "reservas"} de hoy en adelante (la primera, ${d}/${m}/${a} a las ${p.hora}, ${p.nombre})`;
+}
+
+/**
+ * Las mesas y espacios con reservas no se borran: se desactivan. No se deja desactivar
+ * si tienen reservas vivas de hoy en adelante: primero hay que cambiarlas de mesa o de zona.
+ */
 export async function activarMesa(ctx: Contexto, id: string, activo: boolean) {
   const prisma = await db();
-  await prisma.reservaMesa.updateMany({ where: { tenantId: ctx.tenant.id, id, centroId: { in: centrosFiltro(ctx) } }, data: { activo } });
+  const m = await prisma.reservaMesa.findFirst({ where: { tenantId: ctx.tenant.id, id, centroId: { in: centrosFiltro(ctx) } } });
+  if (!m) throw new ErrorReservas("Mesa no encontrada");
+  if (!activo) {
+    const futuras = await reservasFuturas(prisma, ctx.tenant.id, { mesaId: m.id });
+    if (futuras.length > 0) throw new ErrorReservas(`La mesa ${m.nombre} tiene ${textoReservasFuturas(futuras)}. Cámbialas de mesa antes de desactivarla.`);
+  }
+  await prisma.reservaMesa.update({ where: { id: m.id }, data: { activo } });
 }
 export async function activarEspacio(ctx: Contexto, id: string, activo: boolean) {
   const prisma = await db();
-  await prisma.reservaEspacio.updateMany({ where: { tenantId: ctx.tenant.id, id, centroId: { in: centrosFiltro(ctx) } }, data: { activo } });
+  const e = await prisma.reservaEspacio.findFirst({ where: { tenantId: ctx.tenant.id, id, centroId: { in: centrosFiltro(ctx) } } });
+  if (!e) throw new ErrorReservas("Espacio no encontrado");
+  if (!activo) {
+    const futuras = await reservasFuturas(prisma, ctx.tenant.id, { espacioId: e.id });
+    if (futuras.length > 0) throw new ErrorReservas(`«${e.nombre}» tiene ${textoReservasFuturas(futuras)}. Cámbialas de mesa o de zona antes de desactivarlo.`);
+  }
+  await prisma.reservaEspacio.update({ where: { id: e.id }, data: { activo } });
 }
 
 // ---------------------------------------------------------------- turnos y ajustes
@@ -427,10 +526,16 @@ export async function activarTurno(ctx: Contexto, id: string, activo: boolean) {
   await prisma.reservaTurno.updateMany({ where: { tenantId: ctx.tenant.id, id, centroId: { in: centrosFiltro(ctx) } }, data: { activo } });
 }
 
-export async function guardarAjustes(ctx: Contexto, d: { centroId: string; grupoMaximo: number; antelacionMinutos: number; elegirMesaInternet: boolean }) {
+export async function guardarAjustes(
+  ctx: Contexto,
+  d: { centroId: string; grupoMaximo: number; antelacionMinutos: number; elegirMesaInternet: boolean; duraciones: { hasta: number; minutos: number }[] },
+) {
   if (!centrosFiltro(ctx).includes(d.centroId)) throw new ErrorReservas("No tienes acceso a ese local");
   const prisma = await db();
-  const { centroId, ...datos } = d;
+  const { centroId, duraciones, ...resto } = d;
+  // Sin filas = se usa la duración de mesa del turno (Prisma.DbNull deja la columna vacía)
+  const duracionPorPersonas = duraciones.length ? Object.fromEntries(duraciones.map((x) => [String(x.hasta), x.minutos])) : Prisma.DbNull;
+  const datos = { ...resto, duracionPorPersonas };
   await prisma.reservaAjustes.upsert({ where: { centroId }, create: { tenantId: ctx.tenant.id, centroId, ...datos }, update: datos });
 }
 

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { numeroEs, numeroEsOpcional } from "@/kernel/esquemas";
 
 export function leerFormulario(form: FormData): Record<string, string> {
   const o: Record<string, string> = {};
@@ -7,7 +8,9 @@ export function leerFormulario(form: FormData): Record<string, string> {
 }
 
 const casilla = z.string().optional().transform((v) => v === "on" || v === "true" || v === "1");
-const dinero = z.coerce.number().min(0, "El importe no puede ser negativo").max(1_000_000);
+/** Importe en euros, opcional (admite «1.234,50»). */
+const dineroOpcional = (mensaje = "Importe no válido") => numeroEsOpcional(mensaje).pipe(z.number().min(0, "El importe no puede ser negativo").max(1_000_000).optional());
+const entero = (mensaje = "Número no válido") => numeroEs(mensaje).pipe(z.number().int(mensaje));
 
 export const TIPOS_EVENTO = ["EMPRESA", "CELEBRACION", "NAVIDAD", "CATERING", "OTRO"] as const;
 export const ESTADOS_EVENTO = ["NUEVA", "CONTACTADA", "PRESUPUESTO", "ACEPTADA", "CELEBRADA", "PERDIDA"] as const;
@@ -18,10 +21,10 @@ export const esquemaSolicitud = z.object({
   empresa: z.string().trim().max(120).optional(),
   telefono: z.string().trim().max(30).optional(),
   email: z.string().trim().email("Correo no válido").optional(),
-  personas: z.coerce.number().int().min(1, "Indica cuántas personas").max(2000),
+  personas: entero("Indica cuántas personas").pipe(z.number().min(1, "Indica cuántas personas").max(2000, "Como máximo 2.000 personas")),
   fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   hora: z.string().regex(/^\d{2}:\d{2}$/).optional(),
-  presupuestoCliente: dinero.optional(),
+  presupuestoCliente: dineroOpcional("Lo que quiere gastar no es un importe válido"),
   marcaId: z.string().optional(),
   centroId: z.string().optional(),
   espacioId: z.string().optional(),
@@ -49,9 +52,9 @@ export const esquemaMenu = z.object({
   id: z.string().optional(),
   nombre: z.string().trim().min(1, "Falta el nombre del menú").max(80),
   marcaId: z.string().optional(),
-  precioPersona: z.coerce.number().positive("Falta el precio por persona").max(10000),
-  iva: z.coerce.number().min(0).max(21).default(10),
-  minPersonas: z.coerce.number().int().min(1).default(1),
+  precioPersona: numeroEs("Precio por persona no válido").pipe(z.number().positive("Falta el precio por persona").max(10000)),
+  iva: numeroEs("IVA no válido").pipe(z.number().min(0, "El IVA va de 0 a 21").max(21, "El IVA va de 0 a 21")).default(10),
+  minPersonas: entero("Mínimo de personas no válido").pipe(z.number().min(1)).default(1),
   descripcion: z.string().trim().max(500).optional(),
   platos: z.string().trim().max(4000).optional(),
 });
@@ -60,10 +63,10 @@ export const esquemaMenu = z.object({
 export const esquemaPresupuesto = z.object({
   solicitudId: z.string().min(1),
   menuId: z.string().optional(),
-  personas: z.coerce.number().int().min(1).optional(),
+  personas: numeroEsOpcional("Personas no válidas").pipe(z.number().int("Las personas van sin decimales").min(1).optional()),
   extras: z.string().trim().max(4000).optional(),
   condiciones: z.string().trim().max(4000).optional(),
-  senal: dinero.optional(),
+  senal: dineroOpcional("Señal no válida"),
 });
 
 export const esquemaEstadoPresupuesto = z.object({

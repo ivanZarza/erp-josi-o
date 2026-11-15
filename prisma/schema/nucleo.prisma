@@ -281,6 +281,7 @@ model Producto {
   unidadesCompra Decimal          @default(1) @db.Decimal(12, 3) // unidades por formato de compra
   costeUnitario  Decimal          @default(0) @db.Decimal(12, 4) // € por unidad (precio medio)
   sinCoste       Boolean          @default(false) // permitido coste 0 con motivo
+  motivoSinCoste String? // por qué no tiene coste (obligatorio si sinCoste)
   iva            Decimal          @default(21) @db.Decimal(5, 2)
   stockMinimo    Decimal          @default(0) @db.Decimal(12, 3) // por defecto; cada centro puede cambiarlo
   proveedorId    String?
@@ -489,6 +490,7 @@ enum EstadoInventario {
   ABIERTO
   PENDIENTE_APROBACION
   CERRADO
+  CANCELADO // se dejó sin cerrar: no ajusta stock (se conserva para el historial)
 }
 
 model Inventario {

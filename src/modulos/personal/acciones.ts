@@ -65,8 +65,8 @@ export async function editarEmpleadoAccion(form: FormData) {
 
 export async function bajaEmpleadoAccion(form: FormData) {
   await ejecutar(form, "personal:plantilla:editar", async (ctx, d) => {
-    await s.bajaEmpleado(ctx, id(d, "empleadoId"), e.esquemaBaja.parse(d));
-    return "Baja registrada. Sus turnos posteriores se han quitado del cuadrante.";
+    const r = await s.bajaEmpleado(ctx, id(d, "empleadoId"), e.esquemaBaja.parse(d));
+    return `Baja registrada. Sus turnos posteriores se han quitado del cuadrante${r.usuarioDesactivado ? " y su usuario de acceso se ha desactivado" : ""}.`;
   });
 }
 
@@ -74,7 +74,7 @@ export async function reactivarEmpleadoAccion(form: FormData) {
   await ejecutar(form, "personal:plantilla:editar", async (ctx, d) => {
     const { fecha } = e.esquemaBaja.pick({ fecha: true }).parse(d);
     await s.reactivarEmpleado(ctx, id(d, "empleadoId"), fecha);
-    return "Empleado reactivado. Hazle un contrato nuevo.";
+    return "Empleado reactivado (se conserva su antigüedad). Hazle un contrato nuevo y, si tiene usuario de acceso, actívalo en Ajustes → Usuarios.";
   });
 }
 
@@ -138,7 +138,7 @@ export async function desactivarTurnoTipoAccion(form: FormData) {
 
 // ---------- Fichajes ----------
 
-/** Fichar desde la tableta del local o desde la ficha del empleado (con PIN si lo tiene). */
+/** Fichar desde la tableta del local (con PIN) o desde la ficha del empleado (solo con «Corregir fichajes»): lo comprueba el servicio. */
 export async function ficharAccion(form: FormData) {
   await ejecutar(form, "personal:fichajes:ver", async (ctx, d) => {
     const f = e.esquemaFichar.parse(d);
@@ -286,6 +286,13 @@ export async function crearCandidatoAccion(form: FormData) {
   await ejecutar(form, "personal:seleccion:editar", async (ctx, d) => {
     await s.crearCandidato(ctx, e.esquemaCandidato.parse(d));
     return "Candidato guardado.";
+  });
+}
+
+export async function borrarCandidatosCaducadosAccion(form: FormData) {
+  await ejecutar(form, "personal:seleccion:editar", async (ctx) => {
+    const n = await s.borrarCandidatosCaducados(ctx);
+    return n ? `Borrados los datos de ${n} candidatos fuera de plazo.` : "No había candidatos fuera de plazo.";
   });
 }
 

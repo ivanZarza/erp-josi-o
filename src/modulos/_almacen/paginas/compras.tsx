@@ -5,18 +5,19 @@ import { db } from "@/kernel/db";
 import { euros, numero, fecha, fechaHora } from "@/kernel/formato";
 import { Cabecera, Tarjeta, Selector, Boton, BotonEnlace, Campo, AreaTexto, Entrada, Aviso, Tabla, Vacio } from "@/ui";
 import { TablaDesplegable, DatosDetalle } from "@/ui/tabla-desplegable";
-import { listarCompras, leerCompra, importeCompra, textoWhatsApp, enlaceWhatsApp, propuestaCompra } from "@/nucleo/compras";
+import { listarCompras, leerCompra, importeCompra, importePedidoCompra, textoWhatsApp, enlaceWhatsApp, propuestaCompra, enFormatos } from "@/nucleo/compras";
 import { listarProductos } from "@/nucleo/productos";
 import { num } from "@/nucleo/comun-almacen";
 import { almacenesDeCentros } from "@/nucleo/stock";
 import { proveedoresDeArea } from "@/modulos/proveedores/servicio";
-import { accionCrearCompra, accionEditarCompra, accionEnviarCompra, accionRecibirCompra, accionCancelarCompra } from "../acciones";
+import { accionCrearCompra, accionEditarCompra, accionEnviarCompra, accionRecibirCompra, accionCancelarCompra, accionCerrarCompra } from "../acciones";
 import { SelectorCantidades, type ProductoSeleccionable } from "../selector-cantidades";
 import { EtiquetaCompra, Mensajes, Ocultos, SelectorAlmacen, rutaVolver, textosArea, uno, unidad, veCentro, paraCampo, type PropsPagina, type PropsPaginaId } from "../comun";
 import { centrosDelArea } from "./resumen";
 
 const ESTADOS = [
   ["", "Todas"],
+  ["POR_RECIBIR", "Por recibir (enviadas y recibidas en parte)"],
   ["BORRADOR", "Sin enviar"],
   ["ENVIADO", "Enviadas, por recibir"],
   ["RECIBIDO_PARCIAL", "Recibidas en parte"],
@@ -251,7 +252,7 @@ export async function PaginaCompra({ area, searchParams, params }: PropsPaginaId
     centro: c.centro.nombre,
     contacto: c.proveedor.contacto,
     notas: c.notas,
-    lineas: c.lineas.map((l) => ({ nombre: l.producto.nombre, referencia: l.producto.referencia, unidad: l.producto.unidad, cantidad: num(l.cantidad) })),
+    lineas: c.lineas.map((l) => ({ nombre: l.producto.nombre, referencia: l.producto.referencia, unidad: l.producto.unidad, cantidad: num(l.cantidad), unidadesCompra: num(l.producto.unidadesCompra) })),
   });
   const enlace = enlaceWhatsApp(c.proveedor.telefono, texto);
 
@@ -282,7 +283,12 @@ export async function PaginaCompra({ area, searchParams, params }: PropsPaginaId
           <DatosDetalle
             datos={[
               { etiqueta: "Estado", valor: <EtiquetaCompra estado={c.estado} /> },
-              { etiqueta: "Importe", valor: euros(importeCompra(c)) },
+              ...(c.estado === "RECIBIDO_PARCIAL" || c.estado === "RECIBIDO"
+                ? [
+                    { etiqueta: "Importe recibido", valor: euros(importeCompra(c)) },
+                    { etiqueta: "Importe pedido", valor: euros(importePedidoCompra(c)) },
+                  ]
+                : [{ etiqueta: "Importe", valor: euros(importeCompra(c)) }]),
               { etiqueta: "Enviada", valor: c.enviadoEn ? `${fechaHora(c.enviadoEn)} por ${VIA[c.enviadoPor ?? ""] ?? c.enviadoPor}` : "—" },
               { etiqueta: "Albaranes de entrada", valor: c.albaran ?? "—" },
               { etiqueta: "Contacto", valor: [c.proveedor.contacto, c.proveedor.telefono].filter(Boolean).join(" · ") || "—" },
@@ -291,7 +297,7 @@ export async function PaginaCompra({ area, searchParams, params }: PropsPaginaId
               { etiqueta: "Pedido mínimo", valor: c.proveedor.pedidoMinimo ? euros(num(c.proveedor.pedidoMinimo)) : "—" },
             ]}
           />
-          {c.proveedor.pedidoMinimo && importeCompra(c) < num(c.proveedor.pedidoMinimo) && (
+          {abierta && c.proveedor.pedidoMinimo && importeCompra(c) < num(c.proveedor.pedidoMinimo) && (
             <div className="mt-3">
               <Aviso tono="aviso">El importe no llega al pedido mínimo del proveedor ({euros(num(c.proveedor.pedidoMinimo))}).</Aviso>
             </div>
@@ -338,7 +344,7 @@ export async function PaginaCompra({ area, searchParams, params }: PropsPaginaId
                 filas={c.lineas}
                 columnas={[
                   { titulo: "Producto", celda: (l) => `${l.producto.nombre} (${l.producto.referencia})` },
-                  { titulo: "Pedido", alinear: "derecha", celda: (l) => `${numero(num(l.cantidad), 3)} ${unidad(l.producto.unidad)}` },
+                  { titulo: "Pedido", alinear: "derecha", celda: (l) => `${numero(num(l.cantidad), 3)} ${unidad(l.producto.unidad)}${enFormatos(num(l.cantidad), num(l.producto.unidadesCompra))}` },
                   { titulo: "Ya recibido", alinear: "derecha", celda: (l) => numero(num(l.recibida), 3) },
                   {
                     titulo: "Llega ahora",
@@ -372,11 +378,24 @@ export async function PaginaCompra({ area, searchParams, params }: PropsPaginaId
                   </Campo>
                 )}
                 <label className="flex min-h-10 items-center gap-2 text-sm">
-                  <input type="checkbox" name="cerrar" /> Cerrar la compra aunque falte algo
+                  <input type="checkbox" name="cerrar" /> Cerrar la compra aunque falte algo (lo que falte ya no se espera)
                 </label>
               </div>
               <Boton type="submit">Guardar recepción</Boton>
             </form>
+            {c.estado === "RECIBIDO_PARCIAL" && (
+              <form action={accionCerrarCompra} className="mt-4 flex flex-wrap items-end gap-2 border-t border-slate-200 pt-4">
+                <Ocultos area={area} volver={volver} id={c.id} />
+                <div className="min-w-60 flex-1">
+                  <Campo etiqueta="¿No va a llegar lo que falta?" ayuda="Cierra la compra con lo ya recibido. No toca el stock.">
+                    <Entrada name="motivo" placeholder="Motivo (opcional): el proveedor no lo tiene…" />
+                  </Campo>
+                </div>
+                <Boton variante="secundario" type="submit">
+                  Cerrar la compra sin lo que falta
+                </Boton>
+              </form>
+            )}
           </Tarjeta>
         ) : (
           <Tarjeta titulo="Líneas">
@@ -388,7 +407,11 @@ export async function PaginaCompra({ area, searchParams, params }: PropsPaginaId
                 { titulo: "Pedido", alinear: "derecha", celda: (l) => `${numero(num(l.cantidad), 3)} ${unidad(l.producto.unidad)}` },
                 { titulo: "Recibido", alinear: "derecha", celda: (l) => (l.recibida === null ? "—" : numero(num(l.recibida), 3)) },
                 { titulo: "€/ud", alinear: "derecha", celda: (l) => euros(num(l.precio), 4) },
-                { titulo: "Importe", alinear: "derecha", celda: (l) => euros(num(l.cantidad) * num(l.precio)) },
+                {
+                  titulo: "Importe",
+                  alinear: "derecha",
+                  celda: (l) => euros((c.estado === "RECIBIDO" || c.estado === "RECIBIDO_PARCIAL" ? num(l.recibida) : num(l.cantidad)) * num(l.precio)),
+                },
               ]}
             />
           </Tarjeta>

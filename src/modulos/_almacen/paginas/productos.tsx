@@ -20,6 +20,7 @@ interface ValoresProducto {
   unidadesCompra: number;
   costeUnitario: number | null;
   sinCoste: boolean;
+  motivoSinCoste: string | null;
   iva: number;
   stockMinimo: number;
   codigoBarras: string | null;
@@ -86,7 +87,7 @@ function FormularioProducto({
             ))}
           </Selector>
         </Campo>
-        <Campo etiqueta="Unidades por formato de compra" ayuda="Por ejemplo, 6 botellas por caja">
+        <Campo etiqueta="Unidades por formato de compra" ayuda="Por ejemplo, 6 botellas por caja. La propuesta de compra pide cajas completas">
           <Entrada name="unidadesCompra" inputMode="decimal" defaultValue={paraCampo(valores.unidadesCompra)} />
         </Campo>
         <Campo etiqueta="Coste por unidad (€)" ayuda="Coste medio; se recalcula solo al recibir compras">
@@ -111,7 +112,7 @@ function FormularioProducto({
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" name="sinCoste" defaultChecked={valores.sinCoste} /> Sin coste (muestra, regalo…)
           </label>
-          <Entrada name="motivoSinCoste" placeholder="Motivo, obligatorio si no tiene coste" />
+          <Entrada name="motivoSinCoste" defaultValue={valores.motivoSinCoste ?? ""} placeholder="Motivo, obligatorio si no tiene coste" />
         </div>
       </div>
       <Boton type="submit">{boton}</Boton>
@@ -202,6 +203,7 @@ export async function PaginaProductos({ area, searchParams }: PropsPagina) {
                       { etiqueta: "Por formato de compra", valor: numero(num(p.unidadesCompra), 3) },
                       { etiqueta: "IVA", valor: porcentaje(num(p.iva), 0) },
                       { etiqueta: "Mínimo general", valor: numero(num(p.stockMinimo), 3) },
+                      ...(p.sinCoste ? [{ etiqueta: "Por qué no tiene coste", valor: p.motivoSinCoste ?? "— (sin motivo guardado)" }] : []),
                     ]}
                   />
                   {puedeEditar && (
@@ -223,6 +225,7 @@ export async function PaginaProductos({ area, searchParams }: PropsPagina) {
                           unidadesCompra: num(p.unidadesCompra),
                           costeUnitario: coste,
                           sinCoste: p.sinCoste,
+                          motivoSinCoste: p.motivoSinCoste,
                           iva: num(p.iva),
                           stockMinimo: num(p.stockMinimo),
                           codigoBarras: p.codigoBarras,
@@ -283,6 +286,7 @@ export async function PaginaProductoNuevo({ area, searchParams }: PropsPagina) {
             unidadesCompra: 1,
             costeUnitario: null,
             sinCoste: false,
+            motivoSinCoste: null,
             iva: area === "BEBIDAS" ? 21 : 10,
             stockMinimo: 0,
             codigoBarras: null,

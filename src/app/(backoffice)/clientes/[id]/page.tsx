@@ -5,13 +5,9 @@ import { Cabecera, Tarjeta, Cifra, Rejilla, Boton, BotonEnlace, Etiqueta, Tabla,
 import { fichaCliente } from "@/modulos/clientes/servicio";
 import { actualizarClienteAccion, cambiarConsentimientoAccion, suprimirClienteAccion } from "@/modulos/clientes/acciones";
 import { FormularioCliente } from "@/modulos/clientes/formulario-cliente";
-import { AvisosUrl, EtiquetaConsentimiento, Estrellas, type Busqueda } from "@/modulos/clientes/ui";
+import { AvisosUrl, EtiquetaConsentimiento, Estrellas, NOMBRE_CONSENTIMIENTO, nombreOrigen, tonoNota, type Busqueda } from "@/modulos/clientes/ui";
 
-const TIPOS = [
-  { tipo: "RESERVA", nombre: "Datos para gestionar reservas" },
-  { tipo: "CORREO", nombre: "Ofertas por correo" },
-  { tipo: "WHATSAPP", nombre: "Ofertas por WhatsApp" },
-] as const;
+const TIPOS = (["RESERVA", "CORREO", "WHATSAPP"] as const).map((tipo) => ({ tipo, nombre: NOMBRE_CONSENTIMIENTO[tipo] }));
 
 export default async function FichaCliente({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Busqueda }) {
   const ctx = await exigir("clientes", "clientes:ver");
@@ -41,7 +37,7 @@ export default async function FichaCliente({ params, searchParams }: { params: P
           <Cifra etiqueta="Visitas" valor={numero(c.visitas)} detalle={`en ${numero(locales)} locales`} />
           <Cifra etiqueta="Última visita" valor={fecha(c.ultimaVisita)} />
           <Cifra etiqueta="Gasto registrado" valor={euros(gasto)} detalle="cuando el TPV lo dé" />
-          <Cifra etiqueta="Nota media" valor={media === null ? "—" : `${numero(media, 1)} / 5`} tono={media === null ? "normal" : media >= 4 ? "ok" : media <= 2 ? "error" : "aviso"} />
+          <Cifra etiqueta="Nota media" valor={media === null ? "—" : `${numero(media, 1)} / 5`} tono={tonoNota(media)} />
         </Rejilla>
       </div>
 
@@ -68,7 +64,7 @@ export default async function FichaCliente({ params, searchParams }: { params: P
                 { titulo: "Local", celda: (v) => c.nombreCentro[v.centroId] ?? "—" },
                 { titulo: "Personas", alinear: "derecha", celda: (v) => numero(v.personas) },
                 { titulo: "Importe", alinear: "derecha", celda: (v) => (v.importe ? euros(v.importe) : "—") },
-                { titulo: "Origen", celda: (v) => v.origen },
+                { titulo: "Origen", celda: (v) => nombreOrigen(v.origen) },
               ]}
             />
           </Tarjeta>
@@ -116,7 +112,7 @@ export default async function FichaCliente({ params, searchParams }: { params: P
               <ul className="mt-2 space-y-1">
                 {c.consentimientos.map((x) => (
                   <li key={x.id}>
-                    {fechaHora(x.fecha)} · {x.tipo} · {x.otorgado ? "acepta" : "no acepta"}{x.marcaId ? " (una marca)" : ""} · {x.origen}
+                    {fechaHora(x.fecha)} · {NOMBRE_CONSENTIMIENTO[x.tipo] ?? x.tipo} · {x.otorgado ? "acepta" : "no acepta"}{x.marcaId ? " (una marca)" : ""} · {nombreOrigen(x.origen)}
                     {x.texto ? ` · ${x.texto}` : ""}
                   </li>
                 ))}

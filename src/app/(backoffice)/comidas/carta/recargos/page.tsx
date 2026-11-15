@@ -1,6 +1,6 @@
 import { exigir } from "@/kernel/contexto";
-import { euros, fechaHora, porcentaje } from "@/kernel/formato";
-import { Boton, Cabecera, Entrada, Etiqueta } from "@/ui";
+import { euros, fechaHora, numeroCampo, porcentaje } from "@/kernel/formato";
+import { Boton, Cabecera, Entrada, Etiqueta, HuecoIntegracion } from "@/ui";
 import { TablaDesplegable } from "@/ui/tabla-desplegable";
 import { listarRecargos } from "@/modulos/comidas/carta-servicio";
 import { fijarRecargo } from "@/modulos/comidas/carta-acciones";
@@ -15,7 +15,10 @@ export default async function Recargos({ searchParams }: { searchParams: Busqued
 
   return (
     <>
-      <Cabecera titulo="Pan y aperitivo" subtitulo="Recargo fijo por persona de cada local (entre 3,20 € y 5,50 € según la marca). Se cobra en el TPV." />
+      <Cabecera
+        titulo="Pan y aperitivo"
+        subtitulo="Recargo fijo por persona de cada local (entre 3,20 € y 5,50 € según la marca). Aquí solo se configura: todavía no se añade a ningún ticket ni a la caja; lo cobrará el TPV cuando esté conectado."
+      />
       <PestanasCarta activa={volver} />
       <AvisoError error={param(sp, "error")} />
       <TablaDesplegable
@@ -29,7 +32,7 @@ export default async function Recargos({ searchParams }: { searchParams: Busqued
             f.marca,
             f.importe != null ? euros(f.importe) : "—",
             porcentaje(f.iva),
-            f.importe == null ? <Etiqueta tono="aviso">Sin definir</Etiqueta> : f.activo ? <Etiqueta tono="ok">Se cobra</Etiqueta> : <Etiqueta>No se cobra</Etiqueta>,
+            f.importe == null ? <Etiqueta tono="aviso">Sin definir</Etiqueta> : f.activo ? <Etiqueta tono="ok">Activo</Etiqueta> : <Etiqueta>Desactivado</Etiqueta>,
           ],
           detalle: puedeEditar ? (
             <form action={fijarRecargo} className="flex flex-wrap items-end gap-3">
@@ -37,14 +40,14 @@ export default async function Recargos({ searchParams }: { searchParams: Busqued
               <input type="hidden" name="volver" value={volver} />
               <label className="text-sm">
                 <span className="mb-1 block font-medium">Importe por persona (IVA incluido)</span>
-                <Entrada name="importe" inputMode="decimal" defaultValue={f.importe != null ? String(f.importe) : ""} required className="w-32" />
+                <Entrada name="importe" inputMode="decimal" defaultValue={numeroCampo(f.importe)} required className="w-32" />
               </label>
               <label className="text-sm">
                 <span className="mb-1 block font-medium">IVA %</span>
-                <Entrada name="iva" inputMode="decimal" defaultValue={String(f.iva)} required className="w-20" />
+                <Entrada name="iva" inputMode="decimal" defaultValue={numeroCampo(f.iva)} required className="w-20" />
               </label>
               <label className="flex min-h-10 items-center gap-2 text-sm">
-                <input type="checkbox" name="activo" defaultChecked={f.importe == null ? true : f.activo} /> Se cobra
+                <input type="checkbox" name="activo" defaultChecked={f.importe == null ? true : f.activo} /> Activo (se cobrará en este local)
               </label>
               <Boton type="submit">Guardar</Boton>
               <span className="text-xs text-slate-500">Última modificación: {fechaHora(f.actualizado)}</span>
@@ -52,6 +55,9 @@ export default async function Recargos({ searchParams }: { searchParams: Busqued
           ) : undefined,
         }))}
       />
+      <div className="mt-6">
+        <HuecoIntegracion nombre="Pan y aperitivo en el TPV" descripcion="El programa de caja añadirá este importe por comensal a cada cuenta del local. Hasta entonces, el recargo no se cobra desde el ERP." />
+      </div>
     </>
   );
 }

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { ZodError } from "zod";
 import { exigir } from "@/kernel/contexto";
+import { euros } from "@/kernel/formato";
 import { ErrorNegocio } from "@/nucleo/comun-almacen";
 import {
   ErrorCaja,
@@ -70,8 +71,11 @@ export async function accionValidarCierre(form: FormData) {
 export async function accionRegistrarTicket(form: FormData) {
   const ctx = await exigir("caja", "caja:tickets:crear");
   await ejecutar(volver(form, "/caja/tickets"), async () => {
-    const numero = await registrarTicket(ctx, ticketDeFormulario(form));
-    return `Ticket ${numero} guardado. El stock de lo pedido ya ha bajado.`;
+    const r = await registrarTicket(ctx, ticketDeFormulario(form));
+    const aviso = r.jornadasSustituidas.length
+      ? ` Ese día tenía las ventas metidas a mano (${euros(r.jornadasSustituidas[0].ventaNeta)}): desde ahora la jornada se calcula con los tickets y las cifras de antes quedan en el historial.`
+      : "";
+    return `Ticket ${r.numero} guardado. El stock de lo pedido ya ha bajado.${aviso}`;
   });
 }
 

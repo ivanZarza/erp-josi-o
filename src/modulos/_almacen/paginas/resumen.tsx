@@ -6,7 +6,7 @@ import { Cabecera, Cifra, Rejilla, Tarjeta, BotonEnlace, HuecoIntegracion } from
 import { TablaDesplegable } from "@/ui/tabla-desplegable";
 import { listadoStock, resumirStock } from "@/nucleo/stock";
 import { moduloDeArea, type AreaAlmacen } from "@/nucleo/comun-almacen";
-import { EtiquetaStock, EtiquetaPedido, Mensajes, textosArea, unidad, type PropsPagina } from "../comun";
+import { EtiquetaStock, EtiquetaPedido, Mensajes, textoCantidades, textosArea, unidad, type PropsPagina } from "../comun";
 
 /** Centros en los que trabaja el área: el elegido arriba o todos los del usuario con el área activa. */
 export function centrosDelArea(ctx: Contexto, area: AreaAlmacen) {
@@ -23,7 +23,7 @@ export async function PaginaResumen({ area, searchParams }: PropsPagina) {
   const centros = centrosDelArea(ctx, area);
   const ids = centros.map((c) => c.id);
 
-  const [filas, porServir, porConfirmar, comprasAbiertas, inventarios, ultimos] = await Promise.all([
+  const [filas, porServir, porConfirmar, comprasAbiertas, inventarios] = await Promise.all([
     listadoStock(prisma, ctx.tenant.id, area, centros),
     prisma.pedidoInterno.findMany({
       where: { tenantId: ctx.tenant.id, area, estado: "PENDIENTE", origenId: { in: ids } },
@@ -33,7 +33,6 @@ export async function PaginaResumen({ area, searchParams }: PropsPagina) {
     prisma.pedidoInterno.count({ where: { tenantId: ctx.tenant.id, area, estado: "SERVIDO", destinoId: { in: ids } } }),
     prisma.pedidoCompra.count({ where: { tenantId: ctx.tenant.id, area, estado: { in: ["ENVIADO", "RECIBIDO_PARCIAL"] }, centroId: { in: ids } } }),
     prisma.inventario.groupBy({ by: ["estado"], where: { tenantId: ctx.tenant.id, area, estado: { not: "CERRADO" }, centroId: { in: ids } }, _count: true }),
-    prisma.movimientoStock.count({ where: { tenantId: ctx.tenant.id, centroId: { in: ids }, producto: { area }, createdAt: { gte: new Date(Date.now() - 7 * 86400000) } } }),
   ]);
   const r = resumirStock(filas);
   const avisos = filas.filter((f) => f.estado !== "OK").sort((a, b) => (a.estado === b.estado ? a.producto.nombre.localeCompare(b.producto.nombre) : a.estado === "SIN" ? -1 : 1));
@@ -68,16 +67,16 @@ export async function PaginaResumen({ area, searchParams }: PropsPagina) {
       <div className="space-y-4">
         <Rejilla columnas={4}>
           <Cifra etiqueta="Valor del stock" valor={euros(r.valor)} detalle="a coste medio" href={`/${t.m}/stock`} />
-          <Cifra etiqueta="Referencias" valor={numero(r.referencias)} detalle={`${numero(r.unidades)} unidades en total`} href={`/${t.m}/stock`} />
+          <Cifra etiqueta="Referencias" valor={numero(r.referencias)} detalle={textoCantidades(r.cantidades)} href={`/${t.m}/stock`} />
           <Cifra etiqueta="Bajo mínimo" valor={numero(r.bajoMinimo)} tono={r.bajoMinimo ? "aviso" : "ok"} href={`/${t.m}/stock?estado=BAJO`} />
           <Cifra etiqueta="Sin stock" valor={numero(r.sinStock)} tono={r.sinStock ? "error" : "ok"} href={`/${t.m}/stock?estado=SIN`} />
           <Cifra etiqueta="Pedidos por servir" valor={numero(porServir.length)} tono={porServir.length ? "aviso" : "normal"} href={`/${t.m}/pedidos?estado=PENDIENTE`} />
           <Cifra etiqueta="Pedidos por confirmar" valor={numero(porConfirmar)} detalle="servidos, falta que el local confirme" href={`/${t.m}/pedidos?estado=SERVIDO`} />
-          <Cifra etiqueta="Compras por recibir" valor={numero(comprasAbiertas)} href={`/${t.m}/compras?estado=ENVIADO`} />
+          <Cifra etiqueta="Compras por recibir" valor={numero(comprasAbiertas)} detalle="enviadas y recibidas en parte" href={`/${t.m}/compras?estado=POR_RECIBIR`} />
           <Cifra
             etiqueta="Inventarios abiertos"
             valor={numero(invAbiertos + invPendientes)}
-            detalle={invPendientes ? `${invPendientes} pendiente(s) de aprobación` : `${numero(ultimos)} movimientos en 7 días`}
+            detalle={invPendientes ? `${numero(invAbiertos)} contando · ${numero(invPendientes)} pendiente(s) de aprobación` : invAbiertos ? `${numero(invAbiertos)} contando` : "ninguno sin cerrar"}
             tono={invPendientes ? "aviso" : "normal"}
             href={`/${t.m}/inventarios`}
           />

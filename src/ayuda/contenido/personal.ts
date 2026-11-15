@@ -57,21 +57,21 @@ export const AYUDA_PERSONAL: AyudaArea = {
             nombre: "Avisos",
             queEs: "Total de avisos de personal; debajo, cuántos son urgentes (en rojo).",
             logica:
-              "Son urgentes: contrato vencido sin renovar ni finalizar, certificado o documento ya caducado y persona activa sin ningún contrato en vigor. Son avisos normales: contrato que vence en 30 días, periodo de prueba que termina en 30 días, certificado o documento que caduca en 30 días. Solo se miran personas activas con centro principal en los centros elegidos.",
+              "Son urgentes: contrato vencido sin renovar ni finalizar, certificado o documento ya caducado y persona activa sin ningún contrato en vigor hoy (y sin otro firmado que empiece después). Son avisos normales: persona sin contrato hoy pero con uno firmado que empieza más adelante, contrato que vence en 30 días (si no hay ya otro que empiece al día siguiente), periodo de prueba que termina en 30 días, certificado o documento que caduca en 30 días. Solo se miran personas activas con centro principal en los centros elegidos.",
           },
         ],
       },
       {
-        titulo: "Contratos que vencen (30 días) y periodos de prueba",
+        titulo: "Contratos: sin contrato, vencidos, que vencen (30 días) y periodos de prueba",
         campos: [
           { nombre: "Empleado", queEs: "Nombre de la persona. Al pulsarlo se abre su ficha en la pestaña «Contratos»." },
           { nombre: "Centro", queEs: "Su centro principal." },
           {
             nombre: "Aviso",
-            queEs: "«El contrato vence» (ámbar), «Contrato vencido sin renovar ni finalizar» (rojo) o «Termina el periodo de prueba» (ámbar).",
-            logica: "Se mira el contrato en vigor: fecha de fin dentro de los próximos 30 días o ya pasada, y fin del periodo de prueba entre hoy y dentro de 30 días.",
+            queEs: "«Sin contrato en vigor» (rojo), «Sin contrato en vigor hasta que empiece el nuevo» (ámbar), «Contrato vencido sin renovar ni finalizar» (rojo), «El contrato vence» (ámbar) o «Termina el periodo de prueba» (ámbar).",
+            logica: "Contrato en vigor = el que cubre hoy por fechas (la misma regla que la lista de empleados y la ficha). Vencido: el último contrato sin cerrar acabó antes de hoy. Vence: el contrato en vigor acaba en los próximos 30 días y no hay otro que empiece al día siguiente. Periodo de prueba: el del contrato en vigor o el del próximo, si acaba entre hoy y dentro de 30 días.",
           },
-          { nombre: "Fecha", queEs: "Día en que vence el contrato o termina el periodo de prueba." },
+          { nombre: "Fecha", queEs: "Día en que vence el contrato, termina el periodo de prueba o empieza el contrato nuevo (vacío si no tiene ninguno)." },
         ],
       },
       {
@@ -109,7 +109,7 @@ export const AYUDA_PERSONAL: AyudaArea = {
     ],
     logica: [
       "Todo se refiere al día de hoy en hora de Madrid.",
-      "Los avisos de «Sin contrato en vigor» cuentan en la cifra «Avisos», pero no salen en ninguna de las dos tablas: para verlos, mira la columna «Contrato» de la lista de empleados (sale «Sin contrato» en rojo).",
+      "Cada aviso de la cifra «Avisos» sale en una de las dos tablas: los de contratos (incluido «Sin contrato en vigor») en la primera; los de certificados y documentos en la segunda.",
     ],
     influye: [
       { texto: "Lista completa de la plantilla", ruta: "/personal/empleados" },
@@ -205,7 +205,7 @@ export const AYUDA_PERSONAL: AyudaArea = {
             nombre: "Fecha de baja, Motivo y Dar de baja",
             queEs: "Da de baja a la persona en la fecha indicada. El motivo es obligatorio (fin de contrato, voluntaria…).",
             logica:
-              "No se borra nada: la ficha queda «de baja» con su historial. Además: se cierran sus contratos en esa fecha, se quitan del cuadrante todos sus turnos posteriores a la baja y se anulan sus peticiones de ausencia pendientes. La fecha de baja no puede ser anterior a la de alta.",
+              "No se borra nada: la ficha queda «de baja» con su historial. Además: se cierran sus contratos en esa fecha (los que aún no habían empezado quedan anulados), se quitan del cuadrante todos sus turnos posteriores a la baja, se anulan sus peticiones de ausencia pendientes y, si tiene usuario de acceso enlazado, se desactiva al momento (queda registrado). La fecha de baja no puede ser anterior a la de alta.",
             influye: "Deja de salir en el cuadrante, en la tableta de fichar y en los avisos. Su nómina del mes se calcula solo hasta el día de la baja.",
           },
         ],
@@ -250,7 +250,12 @@ export const AYUDA_PERSONAL: AyudaArea = {
           {
             nombre: "PIN para fichar",
             queEs: "4 cifras que la persona teclea al fichar en la tableta del local.",
-            logica: "Tienen que ser exactamente 4 cifras. Si se deja vacío, en la tableta ficha sin PIN.",
+            logica: "Tienen que ser exactamente 4 cifras. Sin PIN, en la tableta solo le puede fichar quien tenga «Corregir fichajes» (su encargado).",
+          },
+          {
+            nombre: "Usuario de acceso",
+            queEs: "El usuario con el que la persona entra en el programa (se crea en Ajustes → Usuarios). Enlazarlo es lo que le deja usar «Fichar (mi portal)»: fichar desde el móvil, ver sus turnos y pedir vacaciones.",
+            logica: "Salen los usuarios activos que no están enlazados a otro empleado activo. Un usuario solo puede ser de una ficha. El permiso «Usar el portal del empleado» lo da su rol en Ajustes → Usuarios. Al dar de baja a la persona, su usuario se desactiva solo.",
           },
           {
             nombre: "Centro principal",
@@ -378,10 +383,15 @@ export const AYUDA_PERSONAL: AyudaArea = {
         campos: [
           {
             nombre: "Ficha",
-            queEs: "Los mismos campos que en el alta: nombre, DNI, Seguridad Social, contacto, IBAN, PIN, centro principal, puesto, categoría, sociedad, otros centros y notas. Sin permiso de edición se ve solo un resumen.",
+            queEs: "Los mismos campos que en el alta: nombre, DNI, Seguridad Social, contacto, IBAN, PIN, usuario de acceso, centro principal, puesto, categoría, sociedad, otros centros y notas. Encima, la fecha de alta y, si ha tenido un reingreso, la antigüedad. Sin permiso de edición se ve solo un resumen (con alta, antigüedad y si tiene usuario).",
             logica: "Cada cambio queda registrado (quién, cuándo, antes y después). El IBAN y el PIN se registran tapados.",
           },
           { nombre: "Guardar", queEs: "Guarda los cambios de la ficha." },
+          {
+            nombre: "Usuario de acceso",
+            queEs: "Enlaza la ficha con su usuario de Ajustes → Usuarios para que pueda entrar en «Fichar (mi portal)».",
+            logica: "Solo salen usuarios activos sin otra ficha activa. Si el usuario está desactivado, actívalo antes en Ajustes → Usuarios. «Sin usuario» quita el enlace.",
+          },
           {
             nombre: "Otros centros (préstamos)",
             queEs: "Si desmarcas un centro, deja de salir en el cuadrante y la tableta de ese centro.",
@@ -390,12 +400,12 @@ export const AYUDA_PERSONAL: AyudaArea = {
             nombre: "Baja: Fecha de baja, Motivo y Dar de baja",
             queEs: "Da de baja a la persona. El motivo es obligatorio.",
             logica:
-              "No se borra nada. Se cierran sus contratos en esa fecha, se quitan sus turnos posteriores del cuadrante y se anulan sus peticiones de ausencia pendientes. La fecha no puede ser anterior al alta. Su usuario del ERP no se desactiva solo: hazlo en Ajustes → Usuarios.",
+              "No se borra nada. Se cierran sus contratos en esa fecha (los que aún no habían empezado quedan anulados, «Anulado antes de empezar»), se quitan sus turnos posteriores del cuadrante, se anulan sus peticiones de ausencia pendientes y su usuario de acceso se desactiva al momento (queda en el historial de cambios). La fecha no puede ser anterior al alta.",
           },
           {
             nombre: "Empleado de baja: Fecha de reingreso y Reactivar",
             queEs: "Vuelve a poner en activo a una persona dada de baja (por ejemplo, un fijo discontinuo al empezar la temporada).",
-            logica: "La fecha de alta de la ficha pasa a ser la de reingreso. No se crea contrato: hay que hacerle uno nuevo en «Contratos».",
+            logica: "La fecha de alta pasa a ser la del reingreso (manda en la nómina, las vacaciones y las altas del mes), pero la primera alta se guarda como antigüedad y no se pierde. La fecha tiene que ser posterior a la baja. No se crea contrato: hay que hacerle uno nuevo en «Contratos». Su usuario de acceso no se reactiva solo: hazlo en Ajustes → Usuarios.",
           },
         ],
       },
@@ -435,6 +445,7 @@ export const AYUDA_PERSONAL: AyudaArea = {
           { nombre: "Centro", queEs: "Centro donde tiene el turno." },
           { nombre: "Horario", queEs: "Entrada y salida; si es partido, los dos tramos." },
           { nombre: "Horas", queEs: "Horas de trabajo del turno: tramos menos la pausa." },
+          { nombre: "Cuadrante", queEs: "«Publicado» (verde) si la semana de ese centro está publicada; «Borrador» (ámbar) si no: esos turnos aún no los ve la persona en su portal." },
           { nombre: "Notas", queEs: "Notas del turno." },
         ],
       },
@@ -442,10 +453,10 @@ export const AYUDA_PERSONAL: AyudaArea = {
         titulo: "Pestaña Fichajes",
         campos: [
           {
-            nombre: "Fichar ahora: Centro y botones",
-            queEs: "Ficha en nombre de esta persona en este momento (por ejemplo, si no tiene móvil). Solo salen los botones que tocan ahora.",
+            nombre: "Fichar ahora (por esta persona): Centro y botones",
+            queEs: "Ficha en nombre de esta persona en este momento (por ejemplo, si no tiene móvil). Solo salen los botones que tocan ahora. Solo lo ve quien tiene «Corregir fichajes».",
             logica:
-              "Orden obligatorio: Entrada → (Inicio de pausa → Fin de pausa) → Salida. Si pasan más de 16 horas desde el último fichaje sin salida, se da por olvidada y se permite volver a entrar. Aquí no se pide PIN. El centro tiene que ser uno de los suyos.",
+              "Orden obligatorio: Entrada → (Inicio de pausa → Fin de pausa) → Salida. Si pasan más de 16 horas desde el último fichaje sin salida, se da por olvidada y se permite volver a entrar. Aquí no se pide PIN porque lo hace el encargado: queda registrado quién fichó por quién. El centro tiene que ser uno de los suyos.",
           },
           { nombre: "Último: …", queEs: "Último fichaje válido y su hora. Avisa si parece que olvidó fichar la salida." },
           { nombre: "Jornadas (30 días)", queEs: "Días con fichajes en los últimos 30 días." },
@@ -590,7 +601,7 @@ export const AYUDA_PERSONAL: AyudaArea = {
             nombre: "Publicar / Volver a publicar",
             queEs: "Marca la semana como publicada.",
             logica:
-              "Queda apuntado quién y cuándo. A partir de ahí cada cambio de turno se anota para avisar a la plantilla; el envío de esos avisos (portal, WhatsApp) aún no está conectado. Se pueden seguir cambiando turnos después de publicar.",
+              "Queda apuntado quién y cuándo. Desde ese momento la semana sale en «Fichar (mi portal)» de cada persona (los borradores no salen). Cada cambio posterior queda anotado, pero el aviso a la plantilla (portal, WhatsApp) aún no se envía: si cambias turnos ya publicados, díselo a la persona. Se pueden seguir cambiando turnos después de publicar.",
           },
         ],
       },
@@ -603,7 +614,7 @@ export const AYUDA_PERSONAL: AyudaArea = {
           {
             nombre: "Coste previsto",
             queEs: "Horas × coste por hora del contrato de cada persona. Solo con «Ver coste de personal».",
-            logica: COSTE_HORA + " Se usa el contrato en vigor el lunes (o el domingo si el lunes no tenía). Si no tiene salario ni coste por hora, sus horas cuentan a 0 €.",
+            logica: COSTE_HORA + " Cada día con el contrato en vigor ese día (si cambia de contrato a mitad de semana, cada día con el suyo). Si no tiene salario ni coste por hora, sus horas cuentan a 0 €.",
           },
         ],
       },
@@ -670,7 +681,7 @@ export const AYUDA_PERSONAL: AyudaArea = {
         campos: [
           { nombre: "Nombre / Horario", queEs: "Turnos habituales para rellenar el cuadrante con un clic." },
           { nombre: "Ámbito", queEs: "«Este centro» o «Todos los centros»." },
-          { nombre: "Retirar", queEs: "Deja de ofrecer ese turno tipo (también si es de todos los centros). Los turnos ya puestos no cambian." },
+          { nombre: "Retirar / Retirar en toda la cadena", queEs: "Deja de ofrecer ese turno tipo. Los turnos ya puestos no cambian.", logica: "Los de «Todos los centros» son comunes a la cadena: solo los retira quien ve todos los centros (sale «Retirar en toda la cadena»); a los demás les sale «Común a la cadena» sin botón." },
           {
             nombre: "Nombre, Entrada, Salida, Vuelve (partido), Sale (partido) y Crear turno tipo",
             queEs: "Crea un turno tipo para este centro.",
@@ -724,7 +735,7 @@ export const AYUDA_PERSONAL: AyudaArea = {
           {
             nombre: "PIN",
             queEs: "Las 4 cifras de su ficha.",
-            logica: "Solo se pide si la persona tiene PIN en su ficha. Si no coincide, sale «PIN incorrecto».",
+            logica: "Cada persona escribe el PIN de su ficha; si no coincide, sale «PIN incorrecto». A quien no tiene PIN solo le puede fichar quien tenga «Corregir fichajes», y queda registrado quién fichó por quién.",
           },
           {
             nombre: "Entrada / Inicio de pausa / Fin de pausa / Salida",
@@ -847,7 +858,7 @@ export const AYUDA_PERSONAL: AyudaArea = {
         campos: [
           { nombre: "Estado y Filtrar", queEs: "Todos, Pedidas, Aprobadas, Rechazadas o Anuladas." },
           { nombre: "Persona", queEs: "Al pulsarla se abre su ficha en la pestaña de ausencias." },
-          { nombre: "Tipo", queEs: "Vacaciones, Asuntos propios, Permiso retribuido, Baja por enfermedad, Baja por accidente, Nacimiento, Excedencia o Sin justificar." },
+          { nombre: "Tipo", queEs: "Vacaciones, Asuntos propios, Permiso retribuido, Baja por enfermedad o accidente no laboral, Baja por accidente de trabajo, Nacimiento, Excedencia o Sin justificar." },
           { nombre: "Desde / Hasta", queEs: "Primer y último día." },
           { nombre: "Días", queEs: "Días naturales, contando fines de semana." },
           { nombre: "Centro", queEs: "Centro principal de la persona cuando se registró." },
@@ -887,7 +898,7 @@ export const AYUDA_PERSONAL: AyudaArea = {
       { texto: "Las aprobadas salen en el cuadrante y avisan si hay turno ese día", ruta: "/personal/cuadrantes" },
       { texto: "Saldo de vacaciones de la persona", ruta: "/personal/empleados/[id]" },
       {
-        texto: "En la nómina: las bajas por enfermedad o accidente aprobadas pagan incapacidad temporal; «Sin justificar» y «Excedencia» descuentan días sin sueldo",
+        texto: "En la nómina: las bajas aprobadas pagan incapacidad temporal (enfermedad o accidente no laboral desde el 4.º día; accidente de trabajo desde el día siguiente); «Sin justificar» y «Excedencia» descuentan días sin sueldo",
         ruta: "/personal/nominas",
       },
       { texto: "Días de ausencia por tipo en el fichero para la gestoría", ruta: "/personal/nomina" },
@@ -1004,7 +1015,7 @@ export const AYUDA_PERSONAL: AyudaArea = {
           {
             nombre: "Datos hasta",
             queEs: "Fecha hasta la que se pueden guardar sus datos (protección de datos).",
-            logica: "Un año desde el alta con consentimiento; 90 días sin él. El borrado automático aún no está hecho: hay que borrarlos a mano pasada la fecha.",
+            logica: "Un año desde el alta con consentimiento; 90 días sin él. Pasada la fecha el candidato deja de salir y sus datos se borran: solos, la próxima vez que se apunte un candidato, o con el botón «Borrar sus datos ahora» del aviso de arriba. Los contratados no se borran (ya tienen su ficha).",
           },
           {
             nombre: "Estado, Nota y Cambiar",
@@ -1024,8 +1035,8 @@ export const AYUDA_PERSONAL: AyudaArea = {
         titulo: "Bolsa de candidatos (sin oferta concreta)",
         campos: [
           {
-            nombre: "Nombre, Apellidos, Teléfono, Correo, Notas, consentimiento y Añadir a la bolsa",
-            queEs: "Guarda a alguien para llamarle cuando haga falta. Mismas reglas que en las ofertas.",
+            nombre: "Centro, Nombre, Apellidos, Teléfono, Correo, Notas, consentimiento y Añadir a la bolsa",
+            queEs: "Guarda a alguien para llamarle cuando haga falta, en la bolsa del centro elegido (por defecto, el de arriba). Mismas reglas que en las ofertas.",
           },
         ],
       },
@@ -1046,7 +1057,8 @@ export const AYUDA_PERSONAL: AyudaArea = {
       },
     ],
     logica: [
-      "Las ofertas se filtran por el centro elegido arriba. La bolsa de candidatos se ve completa, sin filtrar por centro.",
+      "Las ofertas y la bolsa se filtran por el centro elegido arriba (o todos tus centros). Solo se apuntan candidatos a ofertas abiertas de tus centros; para una oferta cubierta o cerrada, reábrela o usa la bolsa.",
+      "Aviso «N candidatos han pasado su fecha de borrado»: cuántos de tus centros ya no se pueden guardar. «Borrar sus datos ahora» los borra (necesita «Publicar ofertas, gestionar y contratar candidatos»); queda registrado cuántos, sin sus datos.",
     ],
     influye: [
       { texto: "Al contratar se crea la ficha de empleado", ruta: "/personal/empleados" },
@@ -1134,7 +1146,7 @@ export const AYUDA_PERSONAL: AyudaArea = {
           { nombre: "Horas fichadas", queEs: "Horas trabajadas según los fichajes del periodo." },
           {
             nombre: "Horas extra / Horas complementarias",
-            queEs: "Horas pagadas por encima del turno.",
+            queEs: "Horas pagadas por encima del turno. Se llaman «complementarias» si el contrato es a tiempo parcial o de menos de 40 h/semana (la misma regla que el cálculo).",
             logica:
               "Por cada día fichado: horas fichadas − horas del turno del cuadrante. Solo cuenta si pasa de 15 minutos; un día fichado sin turno cuenta entero. El total se redondea hacia abajo a cuartos de hora. A tiempo completo se pagan a la hora ordinaria × 1,25; a tiempo parcial (o jornada de menos de 40 h) son «complementarias», sin recargo.",
           },
@@ -1155,7 +1167,7 @@ export const AYUDA_PERSONAL: AyudaArea = {
             nombre: "Devengos",
             queEs: "Lo que cobra: Salario base, Mejora voluntaria, complementos, prorrata o paga extra, horas extra e incapacidad temporal.",
             logica:
-              "Paga = salario bruto anual ÷ pagas. «Salario base» es la parte de la tabla del convenio (salario base de la categoría × jornada ÷ 40); «Mejora voluntaria» es lo que se paga por encima. Se pagan por días: paga ÷ 30 × días pagados. Prorrata de pagas extra = paga × (pagas − 12) ÷ 12 al mes. Si no se prorratean, la paga entera se cobra en junio y diciembre.",
+              "Paga = salario bruto anual ÷ pagas. «Salario base» es la parte de la tabla del convenio (salario base de la categoría × jornada ÷ 40); «Mejora voluntaria» es lo que se paga por encima. Se pagan por días: paga ÷ 30 × días pagados. Prorrata de pagas extra = paga × (pagas − 12) ÷ 12 al mes. Si no se prorratean (norma general, a comprobar con la gestoría y el convenio): la de verano se gana de enero a junio y se cobra en junio; la de Navidad, de julio a diciembre y se cobra en diciembre; cada una = paga × (pagas − 12) ÷ 2 × días del semestre con contrato y sin baja ni ausencia sin sueldo ÷ días del semestre. En el mes de la baja se cobra la parte ganada del semestre.",
           },
           {
             nombre: "Deducciones",
@@ -1182,7 +1194,7 @@ export const AYUDA_PERSONAL: AyudaArea = {
           {
             nombre: "Cálculo de ejemplo",
             queEs:
-              "Los porcentajes de Seguridad Social, el IRPF orientativo, el recargo de las horas extra (1,25) y la incapacidad temporal son DE EJEMPLO, no son los legales del año: hay que comprobarlos con la gestoría.",
+              "Los porcentajes de Seguridad Social, el IRPF orientativo, el recargo de las horas extra (1,25) y la incapacidad temporal son DE EJEMPLO, no son los legales del año: hay que comprobarlos con la gestoría. Debajo, las reglas generales que se aplican a las pagas extra y a las bajas (muchos convenios las cambian).",
           },
           { nombre: "Gestoría (nóminas)", queEs: "Pendiente: importar los recibos oficiales de la gestoría, compararlos con este cálculo y publicarlos en el portal del empleado." },
         ],
@@ -1191,7 +1203,9 @@ export const AYUDA_PERSONAL: AyudaArea = {
     logica: [
       "Mes comercial de 30 días: quien está todo el mes en alta cobra 30 días, también en febrero o en meses de 31.",
       "Si en el mes hay varios contratos, se usa el último (el que manda a fin de mes).",
-      "Bajas médicas (enfermedad o accidente aprobadas), según el día de la baja: días 1 a 3 sin prestación; 4 a 15 al 60 % a cargo de la empresa; 16 a 20 al 60 % y desde el 21 al 75 % en pago delegado. Base diaria = base de cotización normal ÷ 30. Son reglas de ejemplo.",
+      "Baja por enfermedad o accidente no laboral (aprobada), según el día de la baja: días 1 a 3 sin prestación; 4 a 15 al 60 % a cargo de la empresa; 16 a 20 al 60 % y desde el 21 al 75 % en pago delegado. Base diaria = base de cotización normal ÷ 30.",
+      "Baja por accidente de trabajo (aprobada): el día del accidente se paga como trabajado; desde el día siguiente, 75 % de la base diaria en pago delegado (lo paga la mutua; la empresa lo adelanta y lo descuenta). La base real del accidente suma la media de horas extra del año anterior: lo ajusta la gestoría.",
+      "Son reglas generales de ejemplo: compruébalas siempre con la gestoría (el convenio puede mejorar la prestación o cambiar las pagas).",
       "Ausencias «Sin justificar» y «Excedencia» aprobadas: días sin sueldo y sin cotizar.",
       "Ejemplo (porcentajes de ejemplo): 21.000 € al año, 14 pagas prorrateadas, indefinido, todo el mes → paga 1.500 €, prorrata 250 €, bruto 1.750 €; SS trabajador ≈ 113,75 €; IRPF orientativo 11 % = 192,50 €; neto ≈ 1.443,75 €; SS empresa ≈ 562,63 €; coste empresa ≈ 2.312,63 €.",
     ],
@@ -1199,7 +1213,7 @@ export const AYUDA_PERSONAL: AyudaArea = {
       { texto: "Las nóminas de la persona salen en su ficha", ruta: "/personal/empleados/[id]" },
       { texto: "Las horas extra salen de los fichajes y del cuadrante", ruta: "/personal/fichajes" },
       {
-        texto: "Por ahora estas nóminas no pasan solas a Contabilidad ni al Cuadro de mando: el Cuadro usa el coste por horas (fichajes × coste/hora)",
+        texto: "El coste empresa de estas nóminas (también en borrador) manda en el Cuadro de mando: el personal de ese centro y mes es su coste empresa repartido por días, y solo los meses sin nóminas usan las horas × coste/hora. En Contabilidad (resumen) sale por sociedad junto a lo apuntado como personal, para comprobar que cuadra; no se suma a los gastos, para no contarlo dos veces",
         ruta: "/cuadro",
       },
     ],
@@ -1257,7 +1271,7 @@ export const AYUDA_PERSONAL: AyudaArea = {
             nombre: "Descargar CSV de horas",
             queEs: "Descarga un fichero para Excel (separado por punto y coma, con coma decimal) con una fila por persona.",
             logica:
-              "Descarga el mes y la sociedad que se están viendo: si cambias el mes, pulsa antes «Ver». Columnas: sociedad, CIF, código, nombre, DNI, NSS, centro, contrato, jornada, horas de contrato del mes, horas de cuadrante, horas fichadas, horas extra, días de cada tipo de ausencia, alta y baja en el mes.",
+              "Descarga el mes y la sociedad escritos en el formulario (no hace falta pulsar antes «Ver»). Columnas: sociedad, CIF, código, nombre, DNI, NSS, centro, contrato, jornada, horas de contrato del mes, horas de cuadrante, horas fichadas, horas extra, días de cada tipo de ausencia, alta y baja en el mes.",
           },
           { nombre: "Sociedad", queEs: "La del contrato, si no la de la ficha, si no la del centro principal." },
           { nombre: "Empleado / Centro", queEs: "Nombre con código y centro principal." },
@@ -1268,9 +1282,9 @@ export const AYUDA_PERSONAL: AyudaArea = {
           },
           { nombre: "Fichadas", queEs: "Horas reales fichadas en el mes." },
           {
-            nombre: "Extra",
-            queEs: "Horas fichadas por encima de las de contrato del mes.",
-            logica: "Fichadas − Contrato mes, si sale positivo. Ojo: se calcula distinto que las horas extra de la pantalla «Nóminas» (allí es lo fichado por encima de cada turno).",
+            nombre: "Extra o complementarias",
+            queEs: "Horas fichadas por encima del turno del cuadrante en el mes (complementarias si el contrato es a tiempo parcial).",
+            logica: "La misma regla que la pantalla «Nóminas»: por cada día fichado, horas fichadas − horas del turno; solo cuenta si pasa de 15 minutos; un día fichado sin turno cuenta entero; el total se redondea hacia abajo a cuartos de hora.",
           },
           { nombre: "Ausencias", queEs: "Días de ausencias aprobadas en el mes (todas juntas; en el fichero van por tipo)." },
           { nombre: "Alta / baja", queEs: "Fecha de alta o de baja si caen en el mes." },
@@ -1363,7 +1377,7 @@ export const AYUDA_PERSONAL: AyudaArea = {
     paraQue:
       "Portal del propio empleado, pensado para el móvil: fichar la entrada, las pausas y la salida, ver sus próximos turnos y su saldo de vacaciones, y pedir vacaciones o permisos.",
     quien:
-      "Quien tenga el permiso «Usar el portal del empleado» y cuyo usuario esté vinculado a su ficha de empleado. Si no está vinculado, sale un aviso para pedírselo a Recursos Humanos.",
+      "Quien tenga el permiso «Usar el portal del empleado» y cuyo usuario esté enlazado a su ficha de empleado (en la ficha, campo «Usuario de acceso»). Si no está enlazado, sale un aviso para pedírselo a Recursos Humanos.",
     secciones: [
       {
         titulo: "Cabecera",
@@ -1379,7 +1393,7 @@ export const AYUDA_PERSONAL: AyudaArea = {
         campos: [
           {
             nombre: "Centro",
-            queEs: "Solo sale si puede trabajar en varios centros. Por defecto, el del turno de hoy o su centro principal.",
+            queEs: "Solo sale si puede trabajar en varios centros. Por defecto, el del turno de hoy (aunque su semana esté aún en borrador) o su centro principal.",
           },
           {
             nombre: "Botones Entrada / Inicio de pausa / Fin de pausa / Salida",
@@ -1394,7 +1408,7 @@ export const AYUDA_PERSONAL: AyudaArea = {
       {
         titulo: "Mis próximos turnos",
         campos: [
-          { nombre: "Día, Centro, Horario, Horas", queEs: "Turnos de hoy y los 13 días siguientes, con las horas de trabajo." },
+          { nombre: "Día, Centro, Horario, Horas", queEs: "Turnos de hoy y los 13 días siguientes, con las horas de trabajo.", logica: "Solo salen las semanas cuyo cuadrante está publicado en ese centro; los borradores aún pueden cambiar y no se enseñan." },
         ],
       },
       {

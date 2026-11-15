@@ -104,10 +104,16 @@ const tramos = z
     "Horario no válido: usa tramos como 13:00-16:00, 20:00-00:30 o «cerrado»",
   );
 
+const aforo = (que: string) =>
+  z
+    .number({ message: `Espacios: el aforo ${que} tiene que ser un número entero (por ejemplo: Terraza, 40, 10)` })
+    .int(`Espacios: el aforo ${que} tiene que ser un número entero`)
+    .min(0, `Espacios: el aforo ${que} no puede ser negativo`);
+
 export const Espacio = z.object({
-  nombre: z.string().trim().min(1),
-  sentados: z.number().int().min(0),
-  dePie: z.number().int().min(0),
+  nombre: z.string().trim().min(1, "Espacios: falta el nombre"),
+  sentados: aforo("sentado"),
+  dePie: aforo("de pie"),
 });
 
 export const HorarioCentro = z.object({
@@ -157,17 +163,24 @@ export const PlantillaMarca = z.object({
 });
 export type PlantillaMarca = z.infer<typeof PlantillaMarca>;
 
-/** CIF/NIF español (forma, no dígito de control). */
+/** Marca de «CIF por confirmar» (la usa la semilla y se puede escribir en el formulario). Solo una por cadena: el CIF no se repite. */
+export const CIF_PENDIENTE = "PENDIENTE";
+
+/** CIF/NIF español (forma, no dígito de control), o «PENDIENTE» si aún no se sabe. */
 export const cif = z
   .string()
   .trim()
   .toUpperCase()
   .transform((v) => v.replace(/[\s.-]/g, ""))
-  .refine((v) => /^[ABCDEFGHJNPQRSUVW]\d{7}[0-9A-J]$/.test(v) || /^[0-9XYZ]\d{7}[A-Z]$/.test(v), "CIF no válido (por ejemplo B88600374)");
+  .refine(
+    (v) => v === CIF_PENDIENTE || /^[ABCDEFGHJNPQRSUVW]\d{7}[0-9A-J]$/.test(v) || /^[0-9XYZ]\d{7}[A-Z]$/.test(v),
+    "CIF no válido (por ejemplo B88600374, o «PENDIENTE» si aún no lo sabes)",
+  );
 
 export const DatosSociedad = z.object({
   razonSocial: z.string().trim().min(3, "Falta la razón social"),
-  cif,
+  // en la ficha de la sociedad, dejarlo en blanco = pendiente
+  cif: z.preprocess((v) => (typeof v === "string" && v.trim() !== "" ? v : CIF_PENDIENTE), cif),
   domicilio: opcional(z.string().trim()),
   email: opcional(correo),
   iban: opcional(

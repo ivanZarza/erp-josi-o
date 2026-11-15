@@ -73,7 +73,7 @@ export const AYUDA_CLIENTES: AyudaArea = {
           { nombre: "Notas de sala", queEs: "Notas internas para el equipo de sala." },
           {
             nombre: "Origen",
-            queEs: "Cómo se creó la ficha, tal como está guardado: MANUAL (a mano), RESERVA (al reservar) o EVENTO (al pedir un evento).",
+            queEs: "Cómo se creó la ficha: A mano, Reserva (al reservar), Solicitud de evento (al pedir un evento), Web o CoverManager.",
           },
           {
             nombre: "Consentimiento reserva, Correo comercial, WhatsApp comercial",
@@ -126,6 +126,7 @@ export const AYUDA_CLIENTES: AyudaArea = {
           {
             nombre: "Correo",
             queEs: "Correo del cliente. Se guarda en minúsculas.",
+            logica: "Si ya hay otro cliente activo con ese correo, sale «Ya hay un cliente con ese correo» y no se crea.",
             influye: "Si la reserva no trae teléfono, se busca al cliente por el correo.",
           },
           { nombre: "Cumpleaños", queEs: "Fecha de nacimiento." },
@@ -174,7 +175,7 @@ export const AYUDA_CLIENTES: AyudaArea = {
           {
             nombre: "Nota media",
             queEs: "Media de las notas de sus encuestas respondidas (de 1 a 5).",
-            logica: "Usa las 20 encuestas más recientes. Verde desde 4; rojo con 2 o menos; naranja en medio.",
+            logica: "Usa las 20 encuestas más recientes. Verde desde 4; rojo con 2 o menos; naranja en medio (los mismos límites que en Encuestas).",
           },
         ],
       },
@@ -185,7 +186,7 @@ export const AYUDA_CLIENTES: AyudaArea = {
             nombre: "Formulario (Nombre, Apellidos, Teléfono, Correo, Cumpleaños, Etiquetas, Alergias, Preferencias, Notas de sala)",
             queEs: "Los mismos campos que al dar de alta. Pulsa «Guardar cambios» para guardar.",
             logica:
-              "El teléfono se pasa a formato internacional. Los campos que dejes vacíos se borran. Sin permiso de edición solo se ven las preferencias y las notas.",
+              "El teléfono se pasa a formato internacional. Los campos que dejes vacíos se borran. Si el teléfono o el correo ya los tiene otro cliente activo, sale un aviso y no se guarda. Sin permiso de edición solo se ven las preferencias y las notas.",
             influye: "Las alergias salen en rojo en la lista de clientes y en el aviso de arriba de la ficha. Las reservas no las toman de aquí: se apuntan en cada reserva.",
           },
           { nombre: "Etiquetas (arriba a la derecha)", queEs: "Etiquetas del cliente; VIP en azul." },
@@ -196,7 +197,7 @@ export const AYUDA_CLIENTES: AyudaArea = {
         campos: [
           { nombre: "Fecha, Local, Personas", queEs: "Día de la visita, local y número de personas de la reserva." },
           { nombre: "Importe", queEs: "Lo que gastó, si se conoce." },
-          { nombre: "Origen", queEs: "De dónde viene la visita (RESERVA cuando sale de una reserva terminada)." },
+          { nombre: "Origen", queEs: "De dónde viene la visita («Reserva» cuando sale de una reserva terminada)." },
           {
             nombre: "Cómo se apuntan",
             queEs: "Se crean solas cuando una reserva del cliente pasa a «Terminada». Se ven las 50 más recientes.",
@@ -224,7 +225,7 @@ export const AYUDA_CLIENTES: AyudaArea = {
           },
           {
             nombre: "Lo acepta / Retirar",
-            queEs: "Apunta que el cliente acepta o que retira su permiso, con la fecha y hora de ahora.",
+            queEs: "Apunta que el cliente acepta o que retira su permiso, con la fecha y hora de ahora. Sale el aviso «Consentimiento registrado» (o el error, si no se ha podido).",
           },
           {
             nombre: "Historial de consentimientos",
@@ -270,7 +271,7 @@ export const AYUDA_CLIENTES: AyudaArea = {
           {
             nombre: "Nota media",
             queEs: "Media de todas las encuestas respondidas de los locales elegidos, y cuántas respuestas hay.",
-            logica: "No depende del filtro de estado. Verde desde 4; rojo con 2,5 o menos; naranja en medio.",
+            logica: "No depende del filtro de estado. Verde desde 4; rojo con 2 o menos; naranja en medio (los mismos límites que en la ficha del cliente).",
           },
           {
             nombre: "Sin respuesta",
@@ -368,7 +369,7 @@ export const AYUDA_CLIENTES: AyudaArea = {
             queEs: "Suma del importe inicial de todas las tarjetas de la lista, en cualquier estado.",
             logica: "Depende de la búsqueda y del estado elegidos.",
           },
-          { nombre: "Caducan en 30 días", queEs: "Tarjetas activas que caducan en los próximos 30 días." },
+          { nombre: "Caducan en 30 días", queEs: "Tarjetas activas que caducan en los próximos 30 días (días de Madrid)." },
         ],
       },
       {
@@ -391,14 +392,14 @@ export const AYUDA_CLIENTES: AyudaArea = {
           {
             nombre: "Estado",
             queEs: "Activa, Agotada (saldo a cero), Caducada o Anulada.",
-            logica: "Al abrir esta pantalla, las tarjetas activas con la fecha de caducidad ya pasada se marcan solas como caducadas.",
+            logica: "Al abrir esta pantalla, las tarjetas activas con la fecha de caducidad ya pasada (el día siguiente a la caducidad, en hora de Madrid) se marcan solas como caducadas.",
           },
         ],
       },
       {
         titulo: "Detalle de la tarjeta",
         campos: [
-          { nombre: "Comprador, Correo comprador, Mensaje, Origen", queEs: "Datos de la venta. Origen MANUAL es emitida desde aquí." },
+          { nombre: "Comprador, Correo comprador, Mensaje, Origen", queEs: "Datos de la venta. Origen «A mano» es emitida desde aquí; «Web», vendida en la web." },
           {
             nombre: "Movimientos (Fecha, Movimiento, Local, Importe, Saldo, Nota)",
             queEs: "Cada operación: Emisión, Canje o Anulación, con el local, el importe (en negativo lo que se descuenta) y el saldo que quedó.",
@@ -407,7 +408,7 @@ export const AYUDA_CLIENTES: AyudaArea = {
             nombre: "Canjear (€), Local, nota y «Canjear»",
             queEs: "Descuenta un importe del saldo cuando el cliente paga con la tarjeta. Solo en tarjetas activas.",
             logica:
-              "El importe tiene que ser mayor que cero y no superar el saldo. No se puede si está caducada. Si la tarjeta es de una marca, el local tiene que ser de esa marca. Si el saldo llega a cero, la tarjeta pasa a «Agotada». Si no eliges local, se usa el local elegido arriba.",
+              "El importe tiene que ser mayor que cero y no superar el saldo; admite coma decimal (12,50). No se puede si está caducada (vale hasta el final de su día de caducidad, hora de Madrid). Si la tarjeta es de una marca, hay que decir el local (si no eliges ninguno, se usa el elegido arriba) y tiene que ser de esa marca; sin local sale un aviso y no se canjea. Las de todo el grupo se pueden canjear sin local. Si el saldo llega a cero, la tarjeta pasa a «Agotada».",
             influye: "Queda en los movimientos de la tarjeta y en el registro de cambios.",
           },
           {
@@ -420,8 +421,8 @@ export const AYUDA_CLIENTES: AyudaArea = {
       {
         titulo: "Emitir tarjeta",
         campos: [
-          { nombre: "Importe (€)", queEs: "Valor de la tarjeta (mayor que cero, hasta 5.000 €). Por defecto 100." },
-          { nombre: "Caduca", queEs: "Fecha de caducidad. Por defecto, dentro de un año." },
+          { nombre: "Importe (€)", queEs: "Valor de la tarjeta (mayor que cero, hasta 5.000 €). Por defecto 100. Admite coma decimal." },
+          { nombre: "Caduca", queEs: "Fecha de caducidad (vale todo ese día). Por defecto, dentro de un año." },
           { nombre: "Válida en", queEs: "«Todo el grupo» o «Solo» una marca." },
           { nombre: "Para (destinatario)", queEs: "A quién se regala." },
           { nombre: "Comprador y Correo del comprador", queEs: "Quién la compra." },

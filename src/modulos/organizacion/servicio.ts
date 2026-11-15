@@ -12,7 +12,9 @@ import { Prisma } from "@/generated/prisma/client";
 import type { EstadoCentro, TipoCentro } from "@/generated/prisma/enums";
 import { ErrorNegocio } from "./errores";
 import {
+  CIF_PENDIENTE,
   DIAS,
+  ESTADOS_CENTRO,
   type DatosCentro,
   type DatosMarca,
   type DatosSociedad,
@@ -46,9 +48,19 @@ export function datosExtra(v: unknown): DatosExtraCentro {
   return v && typeof v === "object" && !Array.isArray(v) ? (v as DatosExtraCentro) : {};
 }
 
+/**
+ * Horario sin los días en blanco; undefined si no queda ninguno (así un horario vacío no pisa
+ * el del local modelo ni deja al local nuevo con siete días vacíos).
+ */
+export function horarioConDatos(h: PlantillaMarca["horario"]): PlantillaMarca["horario"] {
+  if (!h) return undefined;
+  const dias = Object.entries(h).filter(([, v]) => typeof v === "string" && v.trim() !== "");
+  return dias.length ? (Object.fromEntries(dias) as PlantillaMarca["horario"]) : undefined;
+}
+
 export function leerPlantilla(v: unknown): PlantillaMarca {
   const p = v && typeof v === "object" && !Array.isArray(v) ? (v as Partial<PlantillaMarca>) : {};
-  return { areas: Array.isArray(p.areas) ? p.areas : [], centroModeloId: p.centroModeloId, horario: p.horario, horaCorte: p.horaCorte, notas: p.notas };
+  return { areas: Array.isArray(p.areas) ? p.areas : [], centroModeloId: p.centroModeloId, horario: horarioConDatos(p.horario), horaCorte: p.horaCorte, notas: p.notas };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -123,13 +135,23 @@ export async function guardarAreasCentro(ctx: Contexto, centroId: string, activa
 }
 
 /** Desde «Módulos contratados»: en qué centros está activa un área. */
+/**
+ * Desde «Módulos contratados»: en qué centros está activa un área. Solo se tocan los centros que ve
+ * quien guarda (los demás no salen en la pantalla y se quedan como estaban). Cada cambio queda
+ * también en el historial del centro (entidad «Centro», acción «areas»).
+ */
 export async function guardarCentrosDeModulo(ctx: Contexto, moduloId: string, centroIds: string[]) {
   const man = moduloPorId(moduloId);
   if (!man || man.nucleo) throw new ErrorNegocio("Módulo no válido");
   if (!ctx.tieneModulo(moduloId)) throw new ErrorNegocio("El módulo no está contratado por la cadena");
+  // fuera de la transacción: la conexión es única (max: 1) y una consulta suelta dentro la bloquearía
+  const ambito = await ambitoCentros(ctx);
   const prisma = await db();
   await prisma.$transaction(async (tx) => {
-    const centros = await tx.centro.findMany({ where: { tenantId: ctx.tenant.id, estado: { not: "CERRADO" } }, include: { modulos: true } });
+    const centros = await tx.centro.findMany({
+      where: { tenantId: ctx.tenant.id, estado: { not: "CERRADO" }, ...(ambito ? { id: { in: ambito } } : {}) },
+      include: { modulos: true },
+    });
     const cambios: { centro: string; activo: boolean }[] = [];
     for (const c of centros) {
       if (man.tiposCentro && man.tiposCentro.length && !man.tiposCentro.includes(c.tipo)) continue;
@@ -143,6 +165,7 @@ export async function guardarCentrosDeModulo(ctx: Contexto, moduloId: string, ce
         const dependiente = MODULOS.find((m) => m.requiere?.includes(moduloId) && areasActivas(c, ctx.contratados).includes(m.id));
         if (dependiente) throw new ErrorNegocio(`En ${c.nombre}, ${dependiente.nombre} usa ${man.nombre}: desactívalo antes`);
       }
+      const areasAntes = areasActivas(c, ctx.contratados);
       await fijarAreasHeredadas(tx, c.id, c.tipo, ctx.contratados);
       await tx.centroModulo.upsert({
         where: { centroId_modulo: { centroId: c.id, modulo: moduloId } },
@@ -150,6 +173,16 @@ export async function guardarCentrosDeModulo(ctx: Contexto, moduloId: string, ce
         update: { activo: despues },
       });
       cambios.push({ centro: c.codigo, activo: despues });
+      const areasDespues = despues ? Array.from(new Set([...areasAntes, moduloId])) : areasAntes.filter((a) => a !== moduloId);
+      await auditar(tx, {
+        tenantId: ctx.tenant.id,
+        usuarioId: ctx.usuario.id,
+        entidad: "Centro",
+        entidadId: c.id,
+        accion: "areas",
+        antes: areasAntes,
+        despues: { areas: areasDespues, desde: "Módulos contratados" },
+      });
     }
     if (cambios.length)
       await auditar(tx, { tenantId: ctx.tenant.id, usuarioId: ctx.usuario.id, entidad: "CentroModulo", entidadId: moduloId, accion: "centros", despues: cambios });
@@ -160,17 +193,16 @@ export async function guardarCentrosDeModulo(ctx: Contexto, moduloId: string, ce
  * Cuando la cadena contrata un área nueva: los centros que ya tienen sus áreas fijadas
  * (filas en CentroModulo) la reciben activa si encaja con su tipo. Lo llama Usuarios › Módulos.
  */
-export async function extenderAreaNueva(tx: Tx, tenantId: string, moduloId: string) {
+export async function extenderAreaNueva(tx: Tx, tenantId: string, moduloId: string, usuarioId?: string) {
   const man = moduloPorId(moduloId);
   if (!man) return;
-  const centros = await tx.centro.findMany({ where: { tenantId, modulos: { some: {} } }, select: { id: true, tipo: true } });
+  const centros = await tx.centro.findMany({ where: { tenantId, modulos: { some: {} } }, select: { id: true, tipo: true, modulos: { select: { modulo: true } } } });
   for (const c of centros) {
     if (man.tiposCentro && man.tiposCentro.length && !man.tiposCentro.includes(c.tipo)) continue;
-    await tx.centroModulo.upsert({
-      where: { centroId_modulo: { centroId: c.id, modulo: moduloId } },
-      create: { centroId: c.id, modulo: moduloId, activo: true },
-      update: {},
-    });
+    if (c.modulos.some((m) => m.modulo === moduloId)) continue; // ya tenía fila: se respeta lo que hubiera
+    await tx.centroModulo.create({ data: { centroId: c.id, modulo: moduloId, activo: true } });
+    // queda en el historial del centro
+    await auditar(tx, { tenantId, usuarioId, entidad: "Centro", entidadId: c.id, accion: "areas", despues: { activada: moduloId, desde: "Módulos contratados" } });
   }
 }
 
@@ -186,14 +218,23 @@ const incluirCentro = {
   _count: { select: { ajustesProducto: true, ambitos: true } },
 } satisfies Prisma.CentroInclude;
 
+/** Estados de un filtro: uno («ABIERTO») o varios separados por comas («ABIERTO,TEMPORADA»); los no válidos se ignoran. */
+export function estadosDelFiltro(estado?: string): EstadoCentro[] {
+  return (estado ?? "").split(",").filter((e): e is EstadoCentro => (ESTADOS_CENTRO as readonly string[]).includes(e));
+}
+
+/** Filtro «Abiertos» de la lista de centros: abiertos y de temporada (los dos están funcionando). */
+export const FILTRO_ABIERTOS = "ABIERTO,TEMPORADA";
+
 export async function listarCentros(ctx: Contexto, filtro?: { estado?: string; marcaId?: string; sociedadId?: string }) {
   const prisma = await db();
   const ambito = await ambitoCentros(ctx);
+  const estados = estadosDelFiltro(filtro?.estado);
   return prisma.centro.findMany({
     where: {
       tenantId: ctx.tenant.id,
       ...(ambito ? { id: { in: ambito } } : {}),
-      ...(filtro?.estado ? { estado: filtro.estado as EstadoCentro } : {}),
+      ...(estados.length ? { estado: { in: estados } } : {}),
       ...(filtro?.marcaId ? { marcaId: filtro.marcaId } : {}),
       ...(filtro?.sociedadId ? { sociedadId: filtro.sociedadId } : {}),
     },
@@ -213,6 +254,25 @@ export async function obtenerCentro(ctx: Contexto, id: string) {
 export async function listarEdificios(ctx: Contexto) {
   const prisma = await db();
   return prisma.edificio.findMany({ where: { tenantId: ctx.tenant.id }, include: { centros: { select: { codigo: true } } }, orderBy: [{ ciudad: "asc" }, { direccion: "asc" }] });
+}
+
+/**
+ * Opciones del selector «Edificio compartido» al editar un centro: los demás edificios y, si el suyo
+ * lo comparte con otros centros, también el suyo (y sale elegido, para que guardar no lo separe).
+ */
+export function opcionesEdificio(
+  edificios: { id: string; direccion: string; ciudad: string; centros: { codigo: string }[] }[],
+  centro: { codigo: string; edificioId: string | null },
+): { opciones: { id: string; nombre: string }[]; seleccionado?: string } {
+  const actual = edificios.find((e) => e.id === centro.edificioId);
+  const compartido = !!actual && actual.centros.some((c) => c.codigo !== centro.codigo);
+  const opciones = edificios
+    .filter((e) => e.id !== centro.edificioId || compartido)
+    .map((e) => {
+      const otros = e.centros.map((c) => c.codigo).filter((c) => c !== centro.codigo);
+      return { id: e.id, nombre: `${e.direccion}, ${e.ciudad}${otros.length ? ` (${otros.join(", ")})` : ""}${e.id === centro.edificioId ? " · el actual" : ""}` };
+    });
+  return { opciones, seleccionado: compartido ? actual?.id : undefined };
 }
 
 /** Teléfono y correo únicos entre los centros de la cadena. */
@@ -406,6 +466,7 @@ export async function crearLocal(ctx: Contexto, d: NuevoLocal): Promise<string> 
     // Horario y espacios de partida: del local copiado o de la plantilla de marca
     const extraOrigen = origen ? datosExtra(origen.datos) : {};
     const datos: DatosExtraCentro = {
+      // la plantilla solo trae horario si tiene algún día escrito (leerPlantilla quita los vacíos)
       horario: d.origen === "copiar" ? extraOrigen.horario : (plantilla?.horario ?? extraOrigen.horario),
       espacios: d.origen === "copiar" ? extraOrigen.espacios : undefined,
       servicios: d.origen === "copiar" ? extraOrigen.servicios : undefined,
@@ -490,7 +551,10 @@ export interface PuntoRevision {
 /** Paso 14: lo que falta antes de abrir (los graves impiden abrir). */
 export async function revisionApertura(ctx: Contexto, centroId: string): Promise<PuntoRevision[]> {
   const prisma = await db();
-  const c = await prisma.centro.findFirst({ where: { id: centroId, tenantId: ctx.tenant.id }, include: { modulos: true, edificio: true, _count: { select: { ajustesProducto: true, ambitos: true } } } });
+  const c = await prisma.centro.findFirst({
+    where: { id: centroId, tenantId: ctx.tenant.id },
+    include: { modulos: true, edificio: true, sociedad: { select: { cif: true } }, _count: { select: { ajustesProducto: true, ambitos: true } } },
+  });
   if (!c) throw new ErrorNegocio("Centro no encontrado");
   const extra = datosExtra(c.datos);
   const areas = areasActivas(c, ctx.contratados);
@@ -498,6 +562,7 @@ export async function revisionApertura(ctx: Contexto, centroId: string): Promise
   const puntos: PuntoRevision[] = [
     { texto: "Marca", ok: c.tipo !== "LOCAL" || !!c.marcaId, grave: true, paso: "datos" },
     { texto: "Sociedad", ok: !!c.sociedadId, grave: true, paso: "datos" },
+    ...(c.sociedad?.cif === CIF_PENDIENTE ? [{ texto: "CIF de la sociedad (está pendiente)", ok: false, grave: false, paso: "datos" }] : []),
     { texto: "Dirección", ok: !!c.edificio, grave: true, paso: "datos" },
     { texto: "Teléfono del local", ok: !!c.telefono, grave: false, paso: "datos" },
     { texto: "Correo del local", ok: !!c.email, grave: false, paso: "datos" },
@@ -560,7 +625,8 @@ export async function guardarPlantillaMarca(ctx: Contexto, id: string, p: Planti
     const m = await tx.marca.findFirst({ where: { id, tenantId: ctx.tenant.id } });
     if (!m) throw new ErrorNegocio("Marca no encontrada");
     if (p.centroModeloId && !(await tx.centro.findFirst({ where: { id: p.centroModeloId, tenantId: ctx.tenant.id } }))) throw new ErrorNegocio("Local modelo no encontrado");
-    const limpia: PlantillaMarca = { ...p, areas: p.areas.filter((a) => ctx.contratados.includes(a) && !moduloPorId(a)?.nucleo) };
+    // los días en blanco no se guardan: si no queda ninguno, la plantilla no tiene horario
+    const limpia: PlantillaMarca = { ...p, horario: horarioConDatos(p.horario), areas: p.areas.filter((a) => ctx.contratados.includes(a) && !moduloPorId(a)?.nucleo) };
     await tx.marca.update({ where: { id }, data: { plantilla: limpia as Prisma.InputJsonValue } });
     await auditar(tx, { tenantId: ctx.tenant.id, usuarioId: ctx.usuario.id, entidad: "Marca", entidadId: id, accion: "plantilla", antes: m.plantilla, despues: limpia });
   });

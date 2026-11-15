@@ -122,7 +122,7 @@ export async function PaginaPedidoNuevo({ area, searchParams }: PropsPagina) {
   const ctx = await exigir(t.m, `${t.m}:pedidos:crear`);
   const sp = await searchParams;
   const prisma = await db();
-  const origenes = await centrosQueSirven(prisma, ctx.tenant.id);
+  const origenes = await centrosQueSirven(prisma, ctx.tenant.id, area);
   const destinos = centrosDelArea(ctx, area).filter((c) => !origenes.some((o) => o.id === c.id));
 
   if (origenes.length === 0 || destinos.length === 0) {
@@ -131,14 +131,14 @@ export async function PaginaPedidoNuevo({ area, searchParams }: PropsPagina) {
         <Cabecera titulo="Nuevo pedido" />
         <Vacio>
           {origenes.length === 0
-            ? "La cadena no tiene obrador ni almacén central del que pedir."
+            ? `La cadena no tiene ningún obrador ni almacén central abierto con ${t.nombre} activada del que pedir.`
             : "Para pedir hay que elegir arriba un local (los pedidos los hace un local al obrador)."}
         </Vacio>
       </>
     );
   }
   const destinoId = destinos.length === 1 ? destinos[0].id : uno(sp, "destino");
-  const origenId = origenes.length === 1 ? origenes[0].id : uno(sp, "origen") || origenes[0].id;
+  const origenId = origenes.find((o) => o.id === uno(sp, "origen"))?.id ?? origenes[0].id;
   const destino = destinos.find((d) => d.id === destinoId);
 
   if (!destino) {
@@ -316,7 +316,10 @@ export async function PaginaPedido({ area, searchParams, params }: PropsPaginaId
           <Tarjeta titulo="Confirmar lo recibido">
             <form action={accionRecibirPedido} className="space-y-3">
               <Ocultos area={area} volver={volver} id={p.id} />
-              <p className="text-sm text-slate-600">Si ha llegado algo distinto de lo servido, cambia la cantidad: el stock del local se regulariza y queda anotado.</p>
+              <p className="text-sm text-slate-600">
+                Si ha llegado algo distinto de lo servido, cambia la cantidad. Lo que falte se apunta como merma del local («Falta al recibir»); lo que sobre se descuenta también
+                del centro que sirve. Explica la diferencia en la nota.
+              </p>
               <Tabla
                 clave={(l) => l.id}
                 filas={p.lineas.filter((l) => num(l.servida) > 0 || num(l.pedida) > 0)}

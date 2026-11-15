@@ -4,7 +4,7 @@ import { exigir } from "@/kernel/contexto";
 import { fecha, fechaHora, euros, numero } from "@/kernel/formato";
 import { Cabecera, Cifra, BotonEnlace, Boton, Entrada, Selector, Etiqueta } from "@/ui";
 import { TablaDesplegable, DatosDetalle } from "@/ui/tabla-desplegable";
-import { listarSolicitudes, marcasYLocales, estadosSiguientes, NOMBRE_ESTADO, NOMBRE_TIPO, ORDEN_EMBUDO, type EstadoEvento, type TipoEvento } from "@/modulos/eventos/servicio";
+import { listarSolicitudes, marcasYLocales, estadosSiguientes, nombreOrigen, NOMBRE_ESTADO, NOMBRE_TIPO, ORDEN_EMBUDO, type EstadoEvento, type TipoEvento } from "@/modulos/eventos/servicio";
 import { cambiarEstadoAccion } from "@/modulos/eventos/acciones";
 import { AvisosUrl, EtiquetaEstadoEvento, PestanasEventos, param, type Busqueda } from "@/modulos/eventos/ui";
 
@@ -94,7 +94,7 @@ export default async function Solicitudes({ searchParams }: { searchParams: Busq
                   datos={[
                     { etiqueta: "Teléfono", valor: s.telefono ?? "—" },
                     { etiqueta: "Correo", valor: s.email ?? "—" },
-                    { etiqueta: "Origen", valor: s.origen },
+                    { etiqueta: "Origen", valor: nombreOrigen(s.origen) },
                     { etiqueta: "Marca", valor: s.marcaId ? nombreMarca[s.marcaId] : "—" },
                     { etiqueta: "Lo que quiere gastar", valor: s.presupuestoCliente ? euros(s.presupuestoCliente) : "—" },
                     { etiqueta: "Último presupuesto", valor: ultimo ? `${ultimo.numero} (v${ultimo.version}) · ${euros(ultimo.total)}` : "—" },

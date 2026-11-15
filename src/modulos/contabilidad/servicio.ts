@@ -10,6 +10,7 @@ import { auditar } from "@/kernel/eventos";
 import { siguienteNumero } from "@/kernel/numeracion";
 import { fecha as fechaEs, euros, numero as numeroEs } from "@/kernel/formato";
 import type { Prisma, GrupoCategoriaContable } from "@/generated/prisma/client";
+import { costeNominasPorCentroYMes } from "@/modulos/personal/servicio";
 import {
   FacturaRecibidaEsquema,
   FacturaEmitidaEsquema,
@@ -17,6 +18,7 @@ import {
   PagoEsquema,
   CategoriaEsquema,
   EmitidaFueraEsquema,
+  TIPOS_IVA,
   type LineaFactura,
 } from "./esquemas";
 
@@ -49,7 +51,7 @@ export function mesActual(): string {
   return hoyISO().slice(0, 7);
 }
 
-function calcularLineas(lineas: LineaFactura[]) {
+function calcularLineas<T extends LineaFactura>(lineas: T[]) {
   const calculadas = lineas.map((l, i) => {
     const base = redondear(l.cantidad * l.precio);
     const cuotaIva = redondear((base * l.tipoIva) / 100);
@@ -204,12 +206,46 @@ export async function crearFacturaRecibida(ctx: Contexto, entrada: unknown) {
     proveedorNombre = p.nombre;
     proveedorCif = proveedorCif ?? p.cif ?? undefined;
   }
+  // categoría de la factura: tiene que existir y estar activa
+  const categoria = await prisma.categoriaContable.findFirst({ where: { id: d.categoriaId, tenantId: ctx.tenant.id, activo: true } });
+  if (!categoria) throw new ErrorContable("Categoría no encontrada.");
+  // albarán (compra recibida) que factura: mismo proveedor y centro; si no hay líneas, se copian las suyas
+  let centroId = d.centroId;
+  let proveedorId = d.proveedorId;
+  let lineasFactura: (LineaFactura & { productoId?: string })[] = d.lineas;
+  if (d.pedidoCompraId) {
+    const compra = await prisma.pedidoCompra.findFirst({
+      where: { id: d.pedidoCompraId, tenantId: ctx.tenant.id, estado: { in: ["RECIBIDO", "RECIBIDO_PARCIAL"] } },
+      include: { proveedor: { select: { nombre: true, cif: true } }, lineas: { include: { producto: { select: { nombre: true, iva: true } } } } },
+    });
+    if (!compra) throw new ErrorContable("Albarán no encontrado (tiene que ser una compra ya recibida).");
+    if (d.proveedorId && d.proveedorId !== compra.proveedorId) throw new ErrorContable(`Ese albarán es de ${compra.proveedor.nombre}, no del proveedor elegido.`);
+    if (centroId && centroId !== compra.centroId) throw new ErrorContable("Ese albarán se recibió en otro centro: elige el centro del albarán (o déjalo vacío).");
+    centroId = compra.centroId;
+    proveedorId = compra.proveedorId;
+    await comprobarSociedadCentro(ctx, d.sociedadId, centroId);
+    if (!d.proveedorId) {
+      proveedorNombre = compra.proveedor.nombre;
+      proveedorCif = proveedorCif ?? compra.proveedor.cif ?? undefined;
+    }
+    const otra = await prisma.facturaRecibida.findFirst({ where: { tenantId: ctx.tenant.id, pedidoCompraId: compra.id, estado: { not: "ANULADA" } }, select: { numero: true } });
+    if (otra) throw new ErrorContable(`Ese albarán ya está en la factura ${otra.numero}.`);
+    if (lineasFactura.length === 0)
+      lineasFactura = compra.lineas
+        .filter((l) => Number(l.recibida ?? l.cantidad) > 0)
+        .map((l) => {
+          const iva = Number(l.producto.iva);
+          if (!(TIPOS_IVA as readonly number[]).includes(iva)) throw new ErrorContable(`«${l.producto.nombre}» tiene un IVA del ${iva} %, que no es un tipo válido: escribe las líneas a mano.`);
+          return { concepto: l.producto.nombre, cantidad: Number(l.recibida ?? l.cantidad), precio: Number(l.precio), tipoIva: iva, productoId: l.productoId };
+        });
+  }
+  if (lineasFactura.length === 0) throw new ErrorContable("La factura necesita al menos una línea (o elige el albarán para copiar las suyas).");
   if (!proveedorNombre) throw new ErrorContable("Elige un proveedor o escribe su nombre.");
   const duplicada = await prisma.facturaRecibida.findFirst({
     where: { tenantId: ctx.tenant.id, sociedadId: d.sociedadId, numeroProveedor: d.numeroProveedor, proveedorNombre, estado: { not: "ANULADA" } },
   });
   if (duplicada) throw new ErrorContable(`Esa factura ya está registrada (${duplicada.numero}).`);
-  const c = calcularLineas(d.lineas);
+  const c = calcularLineas(lineasFactura);
   return prisma.$transaction(async (tx) => {
     const numero = await siguienteNumero(tx, ctx.tenant.id, "FR");
     const f = await tx.facturaRecibida.create({
@@ -217,12 +253,13 @@ export async function crearFacturaRecibida(ctx: Contexto, entrada: unknown) {
         tenantId: ctx.tenant.id,
         numero,
         numeroProveedor: d.numeroProveedor,
-        proveedorId: d.proveedorId,
+        proveedorId,
         proveedorNombre,
         proveedorCif,
         sociedadId: d.sociedadId,
-        centroId: d.centroId,
+        centroId,
         categoriaId: d.categoriaId,
+        pedidoCompraId: d.pedidoCompraId,
         fecha: aFecha(d.fecha),
         vencimiento: d.vencimiento ? aFecha(d.vencimiento) : null,
         base: c.base,
@@ -239,12 +276,13 @@ export async function crearFacturaRecibida(ctx: Contexto, entrada: unknown) {
             base: l.base,
             cuotaIva: l.cuotaIva,
             categoriaId: l.categoriaId ?? d.categoriaId,
+            productoId: l.productoId ?? null,
             orden: l.orden,
           })),
         },
       },
     });
-    await auditar(tx, { tenantId: ctx.tenant.id, usuarioId: ctx.usuario.id, entidad: "FacturaRecibida", entidadId: f.id, accion: "crear", despues: { numero, total: c.total } });
+    await auditar(tx, { tenantId: ctx.tenant.id, usuarioId: ctx.usuario.id, entidad: "FacturaRecibida", entidadId: f.id, accion: "crear", despues: { numero, total: c.total, albaran: d.pedidoCompraId ?? null } });
     return f;
   });
 }
@@ -420,7 +458,47 @@ export async function revisarFacturasRecibidas(tenantId: string, facturas: Factu
       }
     }
   }
+
+  // 3) Enlazada a un albarán pero con las líneas escritas a mano (sin producto): se compara el total sin IVA
+  //    de la factura con lo recibido en el albarán (cantidad recibida × precio).
+  const porTotal = activas.filter((f) => f.pedidoCompraId && !f.lineas.some((l) => l.productoId));
+  if (porTotal.length) {
+    const lineasAlbaran = await prisma.pedidoCompraLinea.findMany({
+      where: { pedidoId: { in: porTotal.map((f) => f.pedidoCompraId!) }, pedido: { tenantId } },
+      select: { pedidoId: true, cantidad: true, recibida: true, precio: true, pedido: { select: { albaran: true, numero: true } } },
+    });
+    for (const f of porTotal) {
+      const suyas = lineasAlbaran.filter((l) => l.pedidoId === f.pedidoCompraId);
+      if (suyas.length === 0) continue;
+      const recibido = redondear(suyas.reduce((s, l) => s + Number(l.recibida ?? l.cantidad) * Number(l.precio), 0));
+      const facturado = redondear(f.lineas.reduce((s, l) => s + Number(l.cantidad) * Number(l.precio), 0));
+      const d = redondear(facturado - recibido);
+      if (Math.abs(d) > Math.max(0.05, recibido * 0.005))
+        anadir(f.id, {
+          tono: "error",
+          texto: `La factura no cuadra con su albarán ${suyas[0].pedido.albaran ?? suyas[0].pedido.numero}: facturado ${euros(facturado)} y recibido ${euros(recibido)} sin IVA (${d > 0 ? "+" : ""}${euros(d)}${d > 0 ? ", para reclamar un abono" : ""}).`,
+        });
+    }
+  }
   return avisos;
+}
+
+/** Compras recibidas (albaranes) de los centros de la selección que aún no están enlazadas a ninguna factura, para elegirlas al registrar una. */
+export async function albaranesSinFactura(ctx: Contexto, dias = 90) {
+  const prisma = await db();
+  const ids = centrosFiltro(ctx);
+  const [compras, facturadas] = await Promise.all([
+    prisma.pedidoCompra.findMany({
+      where: { tenantId: ctx.tenant.id, centroId: { in: ids }, estado: { in: ["RECIBIDO", "RECIBIDO_PARCIAL"] }, recibidoEn: { gte: new Date(Date.now() - dias * DIA_MS) } },
+      select: { id: true, numero: true, albaran: true, recibidoEn: true, centroId: true, proveedor: { select: { nombre: true } }, lineas: { select: { cantidad: true, recibida: true, precio: true } } },
+      orderBy: { recibidoEn: "desc" },
+    }),
+    prisma.facturaRecibida.findMany({ where: { tenantId: ctx.tenant.id, estado: { not: "ANULADA" }, pedidoCompraId: { not: null } }, select: { pedidoCompraId: true } }),
+  ]);
+  const ya = new Set(facturadas.map((f) => f.pedidoCompraId));
+  return compras
+    .filter((c) => !ya.has(c.id))
+    .map((c) => ({ id: c.id, texto: `${c.proveedor.nombre} · ${c.albaran ?? c.numero} · ${fechaEs(c.recibidoEn)} · ${euros(redondear(c.lineas.reduce((s, l) => s + Number(l.recibida ?? l.cantidad) * Number(l.precio), 0)))} sin IVA`, centroId: c.centroId }));
 }
 
 // ---------- facturas emitidas (solo preparadas: NO certificadas) ----------
@@ -694,6 +772,7 @@ export async function resumenPorSociedad(ctx: Contexto, mes: string) {
   ]);
   const sociedades = await prisma.sociedad.findMany({ where: { tenantId: ctx.tenant.id, id: { in: a.sociedadIds } }, orderBy: { razonSocial: "asc" } });
   const v = (lista: { sociedadId: string; _sum: Record<string, unknown> }[], id: string, campo: string) => Number((lista.find((x) => x.sociedadId === id)?._sum[campo] as number | null) ?? 0);
+  const nominas = await nominasPorSociedad(ctx, a, mes);
   return sociedades.map((s) => ({
     sociedad: s,
     porPagar: redondear(v(porPagarFR, s.id, "total") + v(porPagarG, s.id, "total")),
@@ -701,41 +780,152 @@ export async function resumenPorSociedad(ctx: Contexto, mes: string) {
     gastosMes: v(gastosMes, s.id, "base"),
     comprasMes: v(recibidasMes, s.id, "base"),
     pendientesRevisar: pendientesRevisar.find((x) => x.sociedadId === s.id)?._count._all ?? 0,
+    /** null = Personal no contratado o sin permiso para ver nóminas. */
+    nominas: nominas ? { ...(nominas.nominas.get(s.id) ?? { costeEmpresa: 0, empleados: 0, borradores: 0 }), apuntado: nominas.apuntado.get(s.id) ?? 0 } : null,
   }));
+}
+
+/**
+ * Nóminas del mes que llegan desde Personal (coste empresa por sociedad, sumando sus centros) y lo apuntado
+ * en Contabilidad como personal, para compararlos. Solo se informa: no se suma a «gastos» ni al Cuadro desde
+ * aquí (el Cuadro lee las nóminas de Personal directamente), para no contar dos veces.
+ */
+async function nominasPorSociedad(ctx: Contexto, a: Ambito, mes: string) {
+  if (!ctx.tieneModulo("personal") || !(ctx.puede("personal:nominas:ver") || ctx.puede("personal:costes:ver"))) return null;
+  const prisma = await db();
+  const r = rangoMes(mes);
+  const [filas, centros, apuntado] = await Promise.all([
+    costeNominasPorCentroYMes(ctx.tenant.id, a.centroIds, mes, mes),
+    prisma.centro.findMany({ where: { tenantId: ctx.tenant.id, id: { in: a.centroIds } }, select: { id: true, sociedadId: true } }),
+    // con un centro elegido, solo lo de ese centro (igual que el resto del resumen)
+    personalApuntadoPorSociedad(ctx.tenant.id, { ...a, sociedadIds: ctx.centroActivo ? [] : a.sociedadIds }, r.desde, r.hasta),
+  ]);
+  const sociedadDe = new Map(centros.map((c) => [c.id, c.sociedadId]));
+  const nominas = new Map<string, { costeEmpresa: number; empleados: number; borradores: number }>();
+  for (const f of filas) {
+    const sociedadId = sociedadDe.get(f.centroId);
+    if (!sociedadId) continue;
+    const x = nominas.get(sociedadId) ?? { costeEmpresa: 0, empleados: 0, borradores: 0 };
+    x.costeEmpresa = redondear(x.costeEmpresa + f.costeEmpresa);
+    x.empleados += f.empleados;
+    x.borradores += f.borradores;
+    nominas.set(sociedadId, x);
+  }
+  return { nominas, apuntado };
 }
 
 // ---------- para el Cuadro de mando (exportado) ----------
 
+/** Qué suma cada cifra del Cuadro desde Contabilidad: grupos de categoría. */
+export type GrupoCuadro = "gastos" | "personal";
+const GRUPOS_CUADRO: Record<GrupoCuadro, GrupoCategoriaContable[]> = { gastos: ["GASTO_FIJO", "GASTO_VARIABLE"], personal: ["PERSONAL"] };
+
+/** Un apunte de Contabilidad que suma en el Cuadro (base sin IVA). `centroId` null = de la sociedad, sin centro. */
+export interface ApunteCuadro {
+  id: string;
+  centroId: string | null;
+  sociedadId: string;
+  fecha: Date;
+  documento: string;
+  concepto: string;
+  categoria: string;
+  importe: number;
+}
+
 /**
- * Gastos (base sin IVA) por centro y día: gastos registrados + facturas recibidas, SOLO de categorías
- * de gasto fijo o variable. La mercancía NO entra aquí (el Cuadro la lee de las compras del núcleo) ni el
- * personal (el Cuadro lo lee de Personal): si entraran, se contarían dos veces. Un gasto enlazado a una
- * factura recibida tampoco suma (ya suma la factura).
+ * Apuntes de Contabilidad que suman en el Cuadro de mando, sin IVA:
+ * - «gastos»: categorías de gasto fijo o variable; «personal»: categorías de Personal (el Cuadro solo las usa
+ *   si Personal no está contratado: con Personal, el coste sale de las nóminas o de las horas y sumarlas
+ *   aquí lo contaría dos veces).
+ * - Gastos registrados (sin los enlazados a una factura, que ya suma la factura) y facturas recibidas
+ *   **línea a línea**: cada línea con su categoría o, si no tiene, la de la factura. Una factura que mezcla
+ *   mercancía y gastos suma solo la parte de gasto.
+ * - `centroIds`: lo imputado a esos centros; `sociedadesSinCentro`: lo de esas sociedades sin centro.
+ * Sin sesión: quien llama ya ha comprobado permisos y centros.
+ */
+export async function apuntesContablesCuadro(
+  tenantId: string,
+  donde: { centroIds?: string[]; sociedadesSinCentro?: string[] },
+  desde: Date,
+  hasta: Date,
+  grupo: GrupoCuadro,
+): Promise<ApunteCuadro[]> {
+  const centroIds = donde.centroIds ?? [];
+  const sociedades = donde.sociedadesSinCentro ?? [];
+  if (centroIds.length === 0 && sociedades.length === 0) return [];
+  const prisma = await db();
+  const categorias = await prisma.categoriaContable.findMany({ where: { tenantId, grupo: { in: GRUPOS_CUADRO[grupo] } }, select: { id: true, nombre: true } });
+  if (categorias.length === 0) return [];
+  const nombres = new Map(categorias.map((c) => [c.id, c.nombre]));
+  const ids = Array.from(nombres.keys());
+  const ambitoCentro = { OR: [{ centroId: { in: centroIds } }, { centroId: null, sociedadId: { in: sociedades } }] };
+  const [gastos, lineas] = await Promise.all([
+    prisma.gastoContable.findMany({ where: { tenantId, estado: { not: "ANULADO" }, categoriaId: { in: ids }, facturaRecibidaId: null, fecha: { gte: desde, lt: hasta }, ...ambitoCentro }, orderBy: { fecha: "asc" } }),
+    prisma.facturaRecibidaLinea.findMany({
+      where: {
+        factura: { tenantId, estado: { not: "ANULADA" }, fecha: { gte: desde, lt: hasta }, ...ambitoCentro },
+        OR: [{ categoriaId: { in: ids } }, { categoriaId: null, factura: { categoriaId: { in: ids } } }],
+      },
+      select: { base: true, categoriaId: true, factura: { select: { id: true, numero: true, proveedorNombre: true, centroId: true, sociedadId: true, fecha: true, categoriaId: true, base: true } } },
+    }),
+  ]);
+  const porFactura = new Map<string, ApunteCuadro & { categorias: Set<string>; baseFactura: number }>();
+  for (const l of lineas) {
+    const f = l.factura;
+    const cat = nombres.get((l.categoriaId ?? f.categoriaId)!) ?? "—";
+    const x = porFactura.get(f.id) ?? { id: f.id, centroId: f.centroId, sociedadId: f.sociedadId, fecha: f.fecha, documento: f.numero, concepto: f.proveedorNombre, categoria: "", importe: 0, categorias: new Set<string>(), baseFactura: Number(f.base) };
+    x.importe += Number(l.base);
+    x.categorias.add(cat);
+    porFactura.set(f.id, x);
+  }
+  const facturas: ApunteCuadro[] = Array.from(porFactura.values()).map(({ categorias, baseFactura, ...x }) => ({
+    ...x,
+    importe: redondear(x.importe),
+    categoria: Array.from(categorias).join(", "),
+    concepto: Math.abs(redondear(x.importe) - baseFactura) > 0.005 ? `${x.concepto} (solo la parte de ${grupo === "gastos" ? "gasto" : "personal"}: ${euros(redondear(x.importe))} de ${euros(baseFactura)})` : x.concepto,
+  }));
+  return [
+    ...gastos.map((g) => ({ id: g.id, centroId: g.centroId, sociedadId: g.sociedadId, fecha: g.fecha, documento: "Gasto", concepto: g.concepto, categoria: nombres.get(g.categoriaId) ?? "—", importe: Number(g.base) })),
+    ...facturas,
+  ].sort((x, y) => x.fecha.getTime() - y.fecha.getTime());
+}
+
+/**
+ * Gastos (base sin IVA) por centro y día para el Cuadro de mando: solo categorías de gasto fijo o variable
+ * (ver apuntesContablesCuadro). La mercancía no entra (el Cuadro la lee del stock o de los tickets) ni el
+ * personal (lo lee de Personal): si entraran, se contarían dos veces.
  */
 export async function gastosPorCentroYDia(tenantId: string, centroIds: string[], desde: Date, hasta: Date) {
-  const prisma = await db();
-  const categoriasGasto = await prisma.categoriaContable.findMany({ where: { tenantId, grupo: { in: ["GASTO_FIJO", "GASTO_VARIABLE"] } }, select: { id: true } });
-  const ids = categoriasGasto.map((c) => c.id);
-  const [gastos, facturas] = await Promise.all([
-    prisma.gastoContable.groupBy({ by: ["centroId", "fecha"], where: { tenantId, centroId: { in: centroIds }, estado: { not: "ANULADO" }, categoriaId: { in: ids }, facturaRecibidaId: null, fecha: { gte: desde, lt: hasta } }, _sum: { base: true } }),
-    prisma.facturaRecibida.groupBy({ by: ["centroId", "fecha"], where: { tenantId, centroId: { in: centroIds }, estado: { not: "ANULADA" }, categoriaId: { in: ids }, fecha: { gte: desde, lt: hasta } }, _sum: { base: true } }),
-  ]);
-  return [...gastos, ...facturas].map((g) => ({ centroId: g.centroId as string, fecha: g.fecha, importe: Number(g._sum.base ?? 0) }));
+  const apuntes = await apuntesContablesCuadro(tenantId, { centroIds }, desde, hasta, "gastos");
+  return apuntes.map((g) => ({ centroId: g.centroId as string, fecha: g.fecha, importe: g.importe }));
 }
 
 /** Detalle de los gastos de un centro en un rango (para enlazar desde el Cuadro). */
 export async function detalleGastosCentro(tenantId: string, centroId: string, desde: Date, hasta: Date) {
+  return apuntesContablesCuadro(tenantId, { centroIds: [centroId] }, desde, hasta, "gastos");
+}
+
+/**
+ * Facturas recibidas de unos centros con líneas sin categoría (ni la suya ni la de la factura): no suman en
+ * ninguna cifra del Cuadro. Para avisar en el detalle.
+ */
+export async function facturasSinCategoria(tenantId: string, centroIds: string[], desde: Date, hasta: Date) {
   const prisma = await db();
-  const categoriasGasto = await prisma.categoriaContable.findMany({ where: { tenantId, grupo: { in: ["GASTO_FIJO", "GASTO_VARIABLE"] } } });
-  const nombres = new Map(categoriasGasto.map((c) => [c.id, c.nombre]));
-  const [gastos, facturas] = await Promise.all([
-    prisma.gastoContable.findMany({ where: { tenantId, centroId, estado: { not: "ANULADO" }, categoriaId: { in: Array.from(nombres.keys()) }, facturaRecibidaId: null, fecha: { gte: desde, lt: hasta } }, orderBy: { fecha: "asc" } }),
-    prisma.facturaRecibida.findMany({ where: { tenantId, centroId, estado: { not: "ANULADA" }, categoriaId: { in: Array.from(nombres.keys()) }, fecha: { gte: desde, lt: hasta } }, orderBy: { fecha: "asc" } }),
-  ]);
-  return [
-    ...gastos.map((g) => ({ id: g.id, fecha: g.fecha, documento: "Gasto", concepto: g.concepto, categoria: nombres.get(g.categoriaId) ?? "—", importe: Number(g.base) })),
-    ...facturas.map((f) => ({ id: f.id, fecha: f.fecha, documento: f.numero, concepto: f.proveedorNombre, categoria: (f.categoriaId && nombres.get(f.categoriaId)) || "—", importe: Number(f.base) })),
-  ].sort((x, y) => x.fecha.getTime() - y.fecha.getTime());
+  return prisma.facturaRecibida.findMany({
+    where: { tenantId, centroId: { in: centroIds }, estado: { not: "ANULADA" }, fecha: { gte: desde, lt: hasta }, categoriaId: null, lineas: { some: { categoriaId: null } } },
+    select: { id: true, numero: true, proveedorNombre: true, base: true },
+  });
+}
+
+/**
+ * Coste de personal apuntado en Contabilidad (categorías de Personal, sin IVA) por sociedad en un rango.
+ * Para comparar con el coste empresa de las nóminas de Personal en el resumen (nunca se suman las dos).
+ */
+async function personalApuntadoPorSociedad(tenantId: string, ambitoSociedad: Ambito, desde: Date, hasta: Date) {
+  const apuntes = await apuntesContablesCuadro(tenantId, { centroIds: ambitoSociedad.centroIds, sociedadesSinCentro: ambitoSociedad.sociedadIds }, desde, hasta, "personal");
+  const porSociedad = new Map<string, number>();
+  for (const a of apuntes) porSociedad.set(a.sociedadId, redondear((porSociedad.get(a.sociedadId) ?? 0) + a.importe));
+  return porSociedad;
 }
 
 // ---------- exportación para la gestoría ----------
@@ -763,7 +953,8 @@ export async function exportarMesCsv(
   const r = rangoMes(mes);
   const d = await diccionarios(ctx);
   const soc = d.sociedades.get(sociedadId)!;
-  const donde = { tenantId: ctx.tenant.id, sociedadId, fecha: { gte: r.desde, lt: r.hasta } };
+  // solo lo que el usuario ve: centros de su selección y, con «todos mis centros», lo de la sociedad sin centro
+  const donde = { ...a.donde(sociedadId), fecha: { gte: r.desde, lt: r.hasta } };
   const [recibidas, gastos, emitidas] = await Promise.all([
     prisma.facturaRecibida.findMany({ where: { ...donde, estado: { not: "ANULADA" } }, include: { lineas: true }, orderBy: { fecha: "asc" } }),
     prisma.gastoContable.findMany({ where: { ...donde, estado: { not: "ANULADO" }, facturaRecibidaId: null }, orderBy: { fecha: "asc" } }),
@@ -812,9 +1003,9 @@ export async function exportarMesCsv(
   return { nombre: `contabilidad_${soc.cif}_${mes}.csv`, contenido };
 }
 
-/** Ids de los centros de una sociedad que ve el usuario (para sumar sus ventas en la exportación). */
+/** Ids de los centros de una sociedad que ve el usuario en su selección (para sumar sus ventas en la exportación). */
 export async function centrosDeSociedad(ctx: Contexto, sociedadId: string): Promise<string[]> {
   const prisma = await db();
-  const centros = await prisma.centro.findMany({ where: { tenantId: ctx.tenant.id, sociedadId, id: { in: ctx.centros.map((c) => c.id) } }, select: { id: true } });
+  const centros = await prisma.centro.findMany({ where: { tenantId: ctx.tenant.id, sociedadId, id: { in: centrosFiltro(ctx) } }, select: { id: true } });
   return centros.map((c) => c.id);
 }

@@ -1,17 +1,19 @@
 /** Validación (zod) de los formularios de Contabilidad. */
 import { z } from "zod";
+import { numeroEs } from "@/kernel/esquemas";
 
 const texto = (max = 200) => z.string().trim().max(max);
 const opcional = z.preprocess((v) => (v === "" || v === null ? undefined : v), z.string().trim().optional());
 const fechaISO = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha no válida");
 const fechaOpcional = z.preprocess((v) => (v === "" || v === null ? undefined : v), fechaISO.optional());
-const importe = z.coerce.number({ message: "Importe no válido" }).finite();
+// Números escritos a mano: «6,5», «1.234,5», «1.500» o «6.5» (numeroEs del núcleo)
+const importe = numeroEs("Importe no válido");
 
 export const TIPOS_IVA = [21, 10, 4, 0] as const;
 
 export const LineaFacturaEsquema = z.object({
   concepto: texto(300).min(1, "Falta el concepto de una línea"),
-  cantidad: z.coerce.number().positive("La cantidad debe ser mayor que cero"),
+  cantidad: numeroEs("Cantidad no válida").pipe(z.number().positive("La cantidad debe ser mayor que cero")),
   precio: importe,
   tipoIva: z.coerce.number().refine((v) => (TIPOS_IVA as readonly number[]).includes(v), "Tipo de IVA no válido"),
   categoriaId: opcional,
@@ -27,9 +29,13 @@ export const FacturaRecibidaEsquema = z.object({
   numeroProveedor: texto(60).min(1, "Falta el número de factura del proveedor"),
   fecha: fechaISO,
   vencimiento: fechaOpcional,
-  categoriaId: opcional,
+  // obligatoria: sin categoría la factura no se puede llevar ni al Cuadro de mando ni a la cuenta de la gestoría
+  categoriaId: z.string({ message: "Elige la categoría de la factura (se usa en las líneas que no tengan la suya)" }).min(1, "Elige la categoría de la factura (se usa en las líneas que no tengan la suya)"),
+  // compra recibida (albarán) que factura: permite cruzarla aunque las líneas no lleven producto
+  pedidoCompraId: opcional,
   notas: opcional,
-  lineas: z.array(LineaFacturaEsquema).min(1, "La factura necesita al menos una línea"),
+  // vacías = se copian las líneas del albarán enlazado (con su producto)
+  lineas: z.array(LineaFacturaEsquema),
 });
 export type FacturaRecibidaDatos = z.infer<typeof FacturaRecibidaEsquema>;
 
@@ -61,7 +67,7 @@ export const GastoEsquema = z.object({
   vencimiento: fechaOpcional,
   concepto: texto(300).min(1, "Falta el concepto"),
   proveedorNombre: opcional,
-  base: importe,
+  base: importe.pipe(z.number().positive("El importe sin IVA tiene que ser mayor que cero (los abonos y devoluciones no se apuntan como gasto)")),
   tipoIva: z.coerce.number().refine((v) => (TIPOS_IVA as readonly number[]).includes(v), "Tipo de IVA no válido"),
   recurrente: z.preprocess((v) => v === "on" || v === "true" || v === true, z.boolean()),
   notas: opcional,
@@ -89,7 +95,7 @@ export const ExportarEsquema = z.object({
   mes: z.string().regex(/^\d{4}-\d{2}$/, "Mes no válido"),
 });
 
-/** Lee las líneas de un formulario con campos linea_<campo>_<n> (filas vacías se ignoran). */
+/** Lee las líneas de un formulario con campos linea_<campo>_<n> (filas vacías se ignoran). Los números los lee el esquema. */
 export function lineasDeFormulario(form: FormData, maximo = 20) {
   const lineas: Record<string, unknown>[] = [];
   for (let i = 0; i < maximo; i++) {
@@ -98,8 +104,8 @@ export function lineasDeFormulario(form: FormData, maximo = 20) {
     if (!concepto && !precio) continue;
     lineas.push({
       concepto,
-      cantidad: decimalEs(form.get(`linea_cantidad_${i}`) || "1"),
-      precio: decimalEs(precio),
+      cantidad: String(form.get(`linea_cantidad_${i}`) ?? "").trim() || "1",
+      precio,
       tipoIva: form.get(`linea_iva_${i}`) ?? "21",
       categoriaId: form.get(`linea_categoria_${i}`) ?? "",
     });
@@ -107,18 +113,12 @@ export function lineasDeFormulario(form: FormData, maximo = 20) {
   return lineas;
 }
 
-/** Acepta «1.234,56», «1234,56» o «1234.56». */
-export function decimalEs(v: FormDataEntryValue | null): string {
-  const s = String(v ?? "").trim().replace(/\s|€/g, "");
-  if (s.includes(",")) return s.replace(/\./g, "").replace(",", ".");
-  return s;
-}
-
-export function objetoDeFormulario(form: FormData, camposDecimales: string[] = []) {
+/** Campos del formulario (sin las líneas). Los números se leen en el esquema con numeroEs, que entiende la coma. */
+export function objetoDeFormulario(form: FormData) {
   const o: Record<string, unknown> = {};
   for (const [k, v] of form.entries()) {
     if (k.startsWith("linea_") || k.startsWith("$ACTION")) continue;
-    o[k] = camposDecimales.includes(k) ? decimalEs(v) : v;
+    o[k] = v;
   }
   return o;
 }

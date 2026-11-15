@@ -20,6 +20,8 @@ export default async function Vencimientos({ searchParams }: { searchParams: Par
   const volver = `/contabilidad/vencimientos?${new URLSearchParams({ hasta, ...(sociedadId ? { sociedad: sociedadId } : {}) }).toString()}`;
   const pagos = lista.filter((v) => v.tipo === "PAGO");
   const cobros = lista.filter((v) => v.tipo === "COBRO");
+  const pagosVencidos = pagos.filter((v) => v.vencido);
+  const cobrosVencidos = cobros.filter((v) => v.vencido);
   const suma = (l: typeof lista) => redondear(l.reduce((s, v) => s + v.total, 0));
 
   return (
@@ -35,10 +37,11 @@ export default async function Vencimientos({ searchParams }: { searchParams: Par
         </div>
       </Filtros>
       <div className="mb-4">
-        <Rejilla columnas={3}>
+        <Rejilla columnas={4}>
           <Cifra etiqueta="A pagar" valor={euros(suma(pagos))} detalle={`${numero(pagos.length)} pagos`} />
-          <Cifra etiqueta="Ya vencido" valor={euros(suma(lista.filter((v) => v.vencido && v.tipo === "PAGO")))} tono={lista.some((v) => v.vencido) ? "error" : "ok"} />
+          <Cifra etiqueta="Pagos ya vencidos" valor={euros(suma(pagosVencidos))} detalle={`${numero(pagosVencidos.length)} pagos`} tono={pagosVencidos.length ? "error" : "ok"} />
           <Cifra etiqueta="A cobrar" valor={euros(suma(cobros))} detalle={`${numero(cobros.length)} cobros`} />
+          <Cifra etiqueta="Cobros ya vencidos" valor={euros(suma(cobrosVencidos))} detalle={`${numero(cobrosVencidos.length)} cobros`} tono={cobrosVencidos.length ? "aviso" : "ok"} />
         </Rejilla>
       </div>
       <TablaDesplegable
@@ -46,7 +49,8 @@ export default async function Vencimientos({ searchParams }: { searchParams: Par
         columnas={[{ titulo: "Vence" }, { titulo: "Tipo" }, { titulo: "Tercero" }, { titulo: "Documento", secundaria: true }, { titulo: "Sociedad", secundaria: true }, { titulo: "Importe", alinear: "derecha" }]}
         filas={lista.map((v) => ({
           id: `${v.origen}-${v.id}`,
-          tono: v.vencido ? ("error" as const) : undefined,
+          // rojo: pago vencido (hay que pagar ya); naranja: cobro vencido (hay que reclamarlo)
+          tono: v.vencido ? (v.tipo === "PAGO" ? ("error" as const) : ("aviso" as const)) : undefined,
           celdas: [
             v.vencimiento ? fecha(v.vencimiento) : "Sin fecha",
             <Etiqueta key="t" tono={v.tipo === "PAGO" ? "aviso" : "info"}>

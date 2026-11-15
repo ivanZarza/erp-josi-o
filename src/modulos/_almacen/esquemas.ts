@@ -5,7 +5,7 @@ import { leerNumeroES } from "@/nucleo/comun-almacen";
 
 export const EsquemaArea = z.enum(["BEBIDAS", "COMIDAS"]);
 
-export const UNIDADES = ["UD", "BOTELLA", "KG", "L", "CAJA", "LATA", "BARRIL", "PAQUETE", "BANDEJA"] as const;
+export const UNIDADES = ["UD", "BOTELLA", "KG", "L", "CAJA", "LATA", "BARRIL", "PAQUETE", "BANDEJA", "RACION"] as const;
 export const TIPOS_IVA = ["0", "4", "10", "21"] as const;
 
 const id = z.string().trim().min(1, "Falta un dato obligatorio.").max(40);

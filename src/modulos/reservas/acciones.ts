@@ -32,7 +32,9 @@ export async function crearReservaAccion(form: FormData) {
     destino =
       r.tipo === "evento"
         ? `/eventos/${r.id}?ok=${encodeURIComponent(`Grupo grande: se ha creado la solicitud de evento ${r.numero}`)}`
-        : `/reservas?fecha=${d.fecha}&ok=${encodeURIComponent(r.sinMesa ? "Reserva guardada sin mesa: asígnala en sala" : "Reserva guardada")}`;
+        : `/reservas?fecha=${d.fecha}&ok=${encodeURIComponent(
+            [r.estado === "SOLICITADA" ? "Reserva guardada como «Solicitada»: confírmala cuando hables con el cliente" : "Reserva guardada", r.sinMesa ? "sin mesa (asígnala en sala)" : null].filter(Boolean).join(", "),
+          )}`;
   } catch (e) {
     destino = conError("/reservas/nueva", e);
   }
@@ -98,7 +100,10 @@ export async function guardarAjustesAccion(form: FormData) {
   const ctx = await exigir("reservas", "reservas:reglas:editar");
   let destino = "/reservas/reglas?ok=Reglas%20guardadas";
   try {
-    await s.guardarAjustes(ctx, esquemaAjustes.parse(leerFormulario(form)));
+    const hasta = form.getAll("duracionHasta").map(String);
+    const minutos = form.getAll("duracionMinutos").map(String);
+    const duraciones = hasta.map((h, i) => ({ hasta: h.trim(), minutos: (minutos[i] ?? "").trim() }));
+    await s.guardarAjustes(ctx, esquemaAjustes.parse({ ...leerFormulario(form), duraciones }));
   } catch (e) {
     destino = conError("/reservas/reglas", e);
   }
@@ -133,14 +138,28 @@ export async function guardarMesaAccion(form: FormData) {
 
 export async function activarMesaAccion(form: FormData) {
   const ctx = await exigir("reservas", "reservas:planos:editar");
-  await s.activarMesa(ctx, String(form.get("id") ?? ""), form.get("activo") === "1");
+  const activo = form.get("activo") === "1";
+  let destino = `/reservas/mesas?ok=${encodeURIComponent(activo ? "Mesa activada" : "Mesa desactivada")}`;
+  try {
+    await s.activarMesa(ctx, String(form.get("id") ?? ""), activo);
+  } catch (e) {
+    destino = conError("/reservas/mesas", e);
+  }
   revalidatePath("/reservas/mesas");
   revalidatePath("/reservas/plano");
+  redirect(destino);
 }
 
 export async function activarEspacioAccion(form: FormData) {
   const ctx = await exigir("reservas", "reservas:planos:editar");
-  await s.activarEspacio(ctx, String(form.get("id") ?? ""), form.get("activo") === "1");
+  const activo = form.get("activo") === "1";
+  let destino = `/reservas/mesas?ok=${encodeURIComponent(activo ? "Espacio activado" : "Espacio desactivado")}`;
+  try {
+    await s.activarEspacio(ctx, String(form.get("id") ?? ""), activo);
+  } catch (e) {
+    destino = conError("/reservas/mesas", e);
+  }
   revalidatePath("/reservas/mesas");
   revalidatePath("/reservas/plano");
+  redirect(destino);
 }

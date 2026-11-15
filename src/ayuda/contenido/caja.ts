@@ -21,7 +21,7 @@ export const AYUDA_CAJA: AyudaArea = {
             nombre: "Venta de ayer (fecha)",
             queEs: "Venta neta (sin IVA) de ayer, sumando los locales de tu selección.",
             logica:
-              "Suma la venta neta de las jornadas de ayer que salen en la tabla de abajo (es decir, dentro de las fechas del filtro). Debajo dice cuántos locales tienen ya la jornada de ayer metida de cuántos hay.",
+              "Suma la venta neta de las jornadas de ayer (en hora de Madrid) de los locales de tu selección, sean cuales sean las fechas del filtro de la tabla. Debajo dice cuántos locales tienen ya la jornada de ayer metida de cuántos hay.",
           },
           {
             nombre: "Venta del periodo",
@@ -84,7 +84,7 @@ export const AYUDA_CAJA: AyudaArea = {
             nombre: "Guardar ventas / Guardar corrección",
             queEs: "Guarda la jornada del local y día elegidos.",
             logica:
-              "Si ese día ya existía metido a mano, se sobrescribe y el cambio queda en el registro de cambios (antes y después). No deja guardar si la jornada se calcula desde tickets o viene del TPV: en ese caso sale un aviso y el formulario no aparece.",
+              "Si ese día ya existía metido a mano, se sobrescribe y el cambio queda en el registro de cambios (antes y después). No deja guardar si la jornada se calcula desde tickets o viene del TPV: en ese caso sale un aviso y el formulario no aparece. Si después se apuntan o importan tickets de un día metido a mano, mandan los tickets: la jornada se recalcula con ellos, las cifras a mano quedan en el registro de cambios («sustituir por tickets») y en las notas de la jornada, y quien guarda el ticket recibe un aviso.",
           },
         ],
       },
@@ -120,7 +120,7 @@ export const AYUDA_CAJA: AyudaArea = {
           },
           {
             nombre: "Ver los tickets",
-            queEs: "Solo en jornadas calculadas desde tickets: abre la pantalla Tickets con ese día y ese local elegido para apuntar.",
+            queEs: "Solo en jornadas calculadas desde tickets: abre la pantalla Tickets con ese día y solo los tickets de ese local.",
           },
           {
             nombre: "Corregir",
@@ -181,7 +181,7 @@ export const AYUDA_CAJA: AyudaArea = {
         campos: [
           {
             nombre: "Local",
-            queEs: "Se apunta en el local elegido arriba o en «Local para apuntar» de los filtros. Sin local elegido no aparece el formulario.",
+            queEs: "Se apunta en el local elegido arriba o en «Local» de los filtros de la lista. Sin local elegido no aparece el formulario.",
             logica: "Si el local no tiene ninguna carta activa, sale un aviso: hay que crearla en Comidas o Bebidas.",
           },
           { nombre: "Mesa", queEs: "Opcional. Número o nombre de la mesa." },
@@ -253,16 +253,17 @@ export const AYUDA_CAJA: AyudaArea = {
         titulo: "Filtros",
         campos: [
           {
-            nombre: "Local para apuntar",
-            queEs: "Solo si tienes varios locales. Elige con qué local (y con qué carta) se apuntan e importan tickets.",
-            logica: "No filtra la lista: la lista enseña los tickets de todos los locales de tu selección. Para ver solo un local, elígelo en el selector de centro de arriba.",
+            nombre: "Local",
+            queEs: "Solo si tienes varios locales. Filtra la lista y las cifras de arriba a ese local, y es el local (con su carta) en el que se apuntan e importan tickets.",
+            logica: "«Todos» enseña los tickets de todos los locales de tu selección; para apuntar o importar hay que elegir uno.",
           },
           { nombre: "Desde", queEs: "Primer día de negocio. Por defecto, el día antes de «Hasta»." },
           { nombre: "Hasta", queEs: "Último día de negocio. Por defecto, hoy." },
           { nombre: "Estado", queEs: "Todos, Abiertos, Cobrados, Anulados o «Con anulaciones» (tickets anulados o con alguna línea anulada)." },
           {
             nombre: "Mesa, número o camarero",
-            queEs: "Busca por la mesa (exacta), por parte del número del ticket o por parte del nombre del camarero escrito a mano.",
+            queEs: "Busca por un trozo de la mesa, del número del ticket o del camarero, sin distinguir mayúsculas.",
+            logica: "El camarero se busca en el nombre escrito (a mano o del TPV) y, si Personal está contratado, en el nombre y apellidos del empleado elegido en el ticket.",
           },
         ],
       },
@@ -423,7 +424,7 @@ export const AYUDA_CAJA: AyudaArea = {
         titulo: "Hacer cierre de caja",
         campos: [
           { nombre: "Local", queEs: "Local que se cierra." },
-          { nombre: "Día de negocio", queEs: "Día que se cierra. Por defecto, ayer (o el día elegido arriba). No admite días futuros en el calendario." },
+          { nombre: "Día de negocio", queEs: "Día que se cierra. Por defecto, ayer (o el día elegido arriba). No admite días futuros: el calendario no los deja elegir y el servidor los rechaza." },
           { nombre: "Efectivo contado", queEs: "Dinero contado en el cajón al cerrar. Obligatorio." },
           {
             nombre: "Efectivo teórico",
@@ -470,7 +471,7 @@ export const AYUDA_CAJA: AyudaArea = {
           {
             nombre: "Detalle del cierre",
             queEs:
-              "Fondo inicial, Efectivo de las ventas, Retiradas y pagos con caja (neto: entradas de cambio − retiradas − pagos), Tarjeta (ventas + propinas), Propinas en efectivo, Tarjeta (banco), Diferencia tarjeta (banco − teórica), Fondo que se deja, Motivo, Cerrado por, Revisado por, Revisado el y Comentario de finanzas.",
+              "Fondo inicial, Efectivo de las ventas, Entradas de cambio, Retiradas y pagos con caja (en negativo), Tarjeta (ventas + propinas), Propinas en efectivo, Tarjeta (banco), Diferencia tarjeta (banco − teórica), Fondo que se deja, Motivo, Cerrado por, Revisado por, Revisado el y Comentario de finanzas.",
           },
           {
             nombre: "Comentario, Validar y Rechazar",
@@ -552,7 +553,7 @@ export const AYUDA_CAJA: AyudaArea = {
             nombre: "Detalle de la fila",
             queEs:
               "Precio medio sin IVA (venta ÷ unidades), Coste teórico por unidad (coste ÷ unidades servidas, invitadas incluidas), Invitadas, Peso en la venta (% de esta fila sobre la venta total) y una tabla por mes o por día con unidades, venta, coste y margen.",
-            logica: "En esa tabla por mes o día, las unidades incluyen las invitadas.",
+            logica: "En esa tabla por mes o día, «Unidades» son las cobradas (igual que en la fila) y las invitadas van en su propia columna.",
           },
         ],
       },

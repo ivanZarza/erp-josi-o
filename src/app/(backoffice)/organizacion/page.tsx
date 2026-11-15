@@ -3,7 +3,7 @@ import { moduloPorId } from "@/kernel/registro";
 import { Boton, BotonEnlace, Cabecera, Cifra, Etiqueta, Rejilla, Selector } from "@/ui";
 import { DatosDetalle, TablaDesplegable } from "@/ui/tabla-desplegable";
 import { fecha } from "@/kernel/formato";
-import { areasActivas, datosExtra, listarCentros, listarMarcas, listarSociedades, NOMBRE_ESTADO, NOMBRE_TIPO } from "@/modulos/organizacion/servicio";
+import { areasActivas, datosExtra, FILTRO_ABIERTOS, listarCentros, listarMarcas, listarSociedades, NOMBRE_ESTADO, NOMBRE_TIPO } from "@/modulos/organizacion/servicio";
 import { AvisosPagina, EtiquetaEstado, param, textoHorario, type ParametrosPagina } from "@/modulos/organizacion/vistas";
 import { ESTADOS_CENTRO } from "@/modulos/organizacion/esquemas";
 
@@ -24,7 +24,7 @@ export default async function CentrosPagina({ searchParams }: { searchParams: Pa
       <AvisosPagina sp={sp} />
       <div className="mb-4">
         <Rejilla columnas={4}>
-          <Cifra etiqueta="Abiertos" valor={cuenta("ABIERTO") + cuenta("TEMPORADA")} tono="ok" href="/organizacion?estado=ABIERTO" />
+          <Cifra etiqueta="Abiertos" valor={cuenta("ABIERTO") + cuenta("TEMPORADA")} tono="ok" href={`/organizacion?estado=${FILTRO_ABIERTOS}`} />
           <Cifra etiqueta="En preparación" valor={cuenta("PREPARACION")} tono={cuenta("PREPARACION") ? "aviso" : "normal"} href="/organizacion?estado=PREPARACION" />
           <Cifra etiqueta="Cerrados temporalmente" valor={cuenta("CERRADO_TEMPORAL")} href="/organizacion?estado=CERRADO_TEMPORAL" />
           <Cifra etiqueta="Cerrados" valor={cuenta("CERRADO")} href="/organizacion?estado=CERRADO" />
@@ -34,6 +34,7 @@ export default async function CentrosPagina({ searchParams }: { searchParams: Pa
       <form method="get" className="mb-4 flex flex-wrap items-end gap-2">
         <Selector name="estado" defaultValue={filtro.estado ?? ""} className="w-auto">
           <option value="">Todos los estados</option>
+          <option value={FILTRO_ABIERTOS}>Abiertos y de temporada</option>
           {ESTADOS_CENTRO.map((e) => (
             <option key={e} value={e}>
               {NOMBRE_ESTADO[e]}

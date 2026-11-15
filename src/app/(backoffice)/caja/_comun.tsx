@@ -1,5 +1,6 @@
 /** Piezas comunes de las pantallas de Caja (solo de este módulo). */
 import { Aviso } from "@/ui";
+import { numeroCampo } from "@/kernel/formato";
 
 export type ParametrosBusqueda = Promise<Record<string, string | string[] | undefined>>;
 
@@ -15,9 +16,7 @@ export function Avisos({ sp }: { sp: Record<string, string | string[] | undefine
   return <div className="mb-4">{error ? <Aviso tono="error">{error}</Aviso> : <Aviso tono="ok">{ok}</Aviso>}</div>;
 }
 
-/** Valor de un Decimal para un campo de formulario («1234,5»), sin separador de miles. */
-const formatoCampo = new Intl.NumberFormat("es-ES", { maximumFractionDigits: 2, useGrouping: false });
+/** Valor de un Decimal para un campo de formulario («1234,5»), sin separador de miles (numeroCampo del núcleo). */
 export function valorCampo(v: { toString(): string } | number | null | undefined): string {
-  if (v === null || v === undefined) return "";
-  return formatoCampo.format(Number(v.toString()));
+  return numeroCampo(v);
 }

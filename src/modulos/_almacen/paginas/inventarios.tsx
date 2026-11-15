@@ -8,7 +8,7 @@ import { TablaDesplegable, DatosDetalle } from "@/ui/tabla-desplegable";
 import { listarInventarios, leerInventario, cuentasInventario, nombrePorDefecto, movimientosDesdeApertura } from "@/nucleo/inventarios";
 import { UMBRAL_APROBACION_INVENTARIO, num, r3 } from "@/nucleo/comun-almacen";
 import { almacenesDeCentros } from "@/nucleo/stock";
-import { accionCrearInventario, accionGuardarRecuento, accionAprobarInventario, accionReabrirInventario } from "../acciones";
+import { accionCrearInventario, accionGuardarRecuento, accionAprobarInventario, accionReabrirInventario, accionCancelarInventario } from "../acciones";
 import { Recuento } from "../recuento";
 import { EtiquetaInventario, Mensajes, Ocultos, rutaVolver, textosArea, unidad, veCentro, type PropsPagina, type PropsPaginaId } from "../comun";
 import { centrosDelArea } from "./resumen";
@@ -81,6 +81,8 @@ export async function PaginaInventarios({ area, searchParams }: PropsPagina) {
           vacio="Todavía no hay inventarios."
           filas={inventarios.map((i) => {
             const c = cuentasInventario(i.lineas);
+            // a ciegas: mientras se cuenta no se enseña ninguna diferencia; cancelado: no se aplicó nada
+            const conDiferencias = i.estado === "PENDIENTE_APROBACION" || i.estado === "CERRADO";
             return {
               id: i.id,
               tono: i.estado === "PENDIENTE_APROBACION" ? ("aviso" as const) : undefined,
@@ -90,9 +92,13 @@ export async function PaginaInventarios({ area, searchParams }: PropsPagina) {
                 </Link>,
                 i.almacen ? `${i.centro.nombre} · ${i.almacen.nombre}` : `${i.centro.nombre} · todo`,
                 `${numero(c.contadas)} de ${numero(c.lineas)}`,
-                <span key="d" className={c.diferenciaEuros < 0 ? "text-red-600" : c.diferenciaEuros > 0 ? "text-emerald-600" : ""}>
-                  {euros(c.diferenciaEuros)}
-                </span>,
+                conDiferencias ? (
+                  <span key="d" className={c.diferenciaEuros < 0 ? "text-red-600" : c.diferenciaEuros > 0 ? "text-emerald-600" : ""}>
+                    {euros(c.diferenciaEuros)}
+                  </span>
+                ) : (
+                  <span key="d" className="text-slate-400">{i.estado === "ABIERTO" ? "a ciegas" : "—"}</span>
+                ),
                 fecha(i.createdAt),
                 <EtiquetaInventario key="e" estado={i.estado} />,
               ],
@@ -102,11 +108,15 @@ export async function PaginaInventarios({ area, searchParams }: PropsPagina) {
                     datos={[
                       { etiqueta: "Número", valor: i.numero },
                       { etiqueta: "Abierto", valor: fechaHora(i.createdAt) },
-                      { etiqueta: "Cerrado", valor: i.cerradoEn ? fechaHora(i.cerradoEn) : "—" },
-                      { etiqueta: "Líneas con diferencia", valor: numero(c.conDiferencia) },
-                      { etiqueta: "Diferencia en unidades", valor: numero(c.diferenciaUnidades, 3) },
-                      { etiqueta: "Diferencia en €", valor: euros(c.diferenciaEuros) },
-                      { etiqueta: "Descuadre (suma sin signo)", valor: euros(c.descuadreEuros) },
+                      { etiqueta: i.estado === "CANCELADO" ? "Cancelado" : "Cerrado", valor: i.cerradoEn ? fechaHora(i.cerradoEn) : "—" },
+                      ...(conDiferencias
+                        ? [
+                            { etiqueta: "Líneas con diferencia", valor: numero(c.conDiferencia) },
+                            { etiqueta: "Diferencia en unidades", valor: numero(c.diferenciaUnidades, 3) },
+                            { etiqueta: "Diferencia en €", valor: euros(c.diferenciaEuros) },
+                            { etiqueta: "Descuadre (suma sin signo)", valor: euros(c.descuadreEuros) },
+                          ]
+                        : [{ etiqueta: "Diferencias", valor: i.estado === "ABIERTO" ? "No se ven hasta terminar el recuento (a ciegas)" : "No se aplicó nada: está cancelado" }]),
                     ]}
                   />
                   <BotonEnlace href={`/${t.m}/inventarios/${i.id}`}>{i.estado === "ABIERTO" ? "Seguir contando" : "Ver inventario"}</BotonEnlace>
@@ -132,7 +142,9 @@ export async function PaginaInventario({ area, searchParams, params }: PropsPagi
   const c = cuentasInventario(inv.lineas);
   const puedeContar = inv.estado === "ABIERTO" && ctx.puede(`${t.m}:inventarios:crear`);
   const puedeCerrar = ctx.puede(`${t.m}:inventarios:cerrar`);
-  const movidos = inv.estado !== "CERRADO" ? await movimientosDesdeApertura(prisma, ctx.tenant.id, area, inv) : 0;
+  // cancelar: contando, quien cuenta; pendiente de aprobación, quien puede cerrar
+  const puedeCancelar = (inv.estado === "ABIERTO" && ctx.puede(`${t.m}:inventarios:crear`)) || (inv.estado === "PENDIENTE_APROBACION" && puedeCerrar);
+  const movidos = inv.estado === "ABIERTO" || inv.estado === "PENDIENTE_APROBACION" ? await movimientosDesdeApertura(prisma, ctx.tenant.id, area, inv) : 0;
 
   const lineas = [...inv.lineas].sort(
     (a, b) => (a.producto.familia?.orden ?? 99) - (b.producto.familia?.orden ?? 99) || a.producto.nombre.localeCompare(b.producto.nombre),
@@ -202,7 +214,10 @@ export async function PaginaInventario({ area, searchParams, params }: PropsPagi
           </Aviso>
         )}
 
-        {(puedeCerrar || inv.estado === "CERRADO") && (
+        {inv.estado === "CANCELADO" && <Aviso>Inventario cancelado{inv.cerradoEn ? ` el ${fechaHora(inv.cerradoEn)}` : ""}: no se ha ajustado nada de stock.</Aviso>}
+
+        {/* a ciegas: las diferencias solo se ven al terminar el recuento (pendiente de aprobación) o ya cerrado */}
+        {((puedeCerrar && inv.estado === "PENDIENTE_APROBACION") || inv.estado === "CERRADO") && (
           <>
             <Rejilla columnas={4}>
               <Cifra etiqueta="Diferencia" valor={euros(c.diferenciaEuros)} tono={c.diferenciaEuros < 0 ? "error" : "normal"} />
@@ -240,6 +255,21 @@ export async function PaginaInventario({ area, searchParams, params }: PropsPagi
               </Boton>
             </form>
           </div>
+        )}
+
+        {puedeCancelar && (
+          <Tarjeta titulo="Cancelar el inventario">
+            <form action={accionCancelarInventario} className="flex flex-wrap items-end gap-2">
+              <Ocultos area={area} volver={volver} id={inv.id} />
+              <div className="min-w-60 flex-1">
+                <Entrada name="motivo" placeholder="Motivo (opcional): se empezó mal, hay que repetirlo…" />
+              </div>
+              <Boton variante="peligro" type="submit">
+                Cancelar sin ajustar el stock
+              </Boton>
+            </form>
+            <p className="mt-2 text-xs text-slate-500">No cambia el stock y deja empezar otro inventario en {inv.almacen ? inv.almacen.nombre : "este centro"}. Lo contado se conserva en el historial.</p>
+          </Tarjeta>
         )}
       </div>
     </>

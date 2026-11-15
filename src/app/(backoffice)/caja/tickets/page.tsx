@@ -114,8 +114,9 @@ export default async function Tickets({ searchParams }: { searchParams: Parametr
       </>
     );
 
-  const filtro = { desde, hasta, estado, q };
   const centroValido = centros.some((c) => c.id === centroForm);
+  // el local elegido sirve para apuntar tickets Y filtra la lista (sin local elegido: todos los de tu selección)
+  const filtro = { desde, hasta, estado, q, centroId: centroValido ? centroForm : undefined };
   const [tickets, resumen, carta, empleados] = await Promise.all([
     listarTickets(ctx, filtro),
     resumenTickets(ctx, filtro),
@@ -142,14 +143,14 @@ export default async function Tickets({ searchParams }: { searchParams: Parametr
           valor={euros(resumen.anulaciones)}
           detalle={`${numero(resumen.lineasAnuladas)} líneas y ${numero(resumen.anulados)} tickets · invitaciones ${euros(resumen.invitaciones)}`}
           tono={resumen.anulados > 0 ? "aviso" : "normal"}
-          href={`/caja/tickets?desde=${desde}&hasta=${hasta}&estado=CON_ANULACIONES`}
+          href={`/caja/tickets?${new URLSearchParams({ desde, hasta, estado: "CON_ANULACIONES", ...(centroValido ? { centro: centroForm } : {}) }).toString()}`}
         />
       </Rejilla>
 
       {puedeCrear && (
         <Tarjeta titulo="Apuntar un ticket" className="mt-4">
           {!centroValido ? (
-            <Aviso>Elige un local arriba (o en la lista de tickets) para apuntar tickets con su carta.</Aviso>
+            <Aviso>Elige un local en el filtro de la lista (más abajo) para apuntar tickets con su carta.</Aviso>
           ) : carta.length === 0 ? (
             <Aviso tono="aviso">{nombreCentro.get(centroForm)} no tiene carta activa: crea la carta en Comidas o Bebidas.</Aviso>
           ) : (
@@ -216,7 +217,7 @@ export default async function Tickets({ searchParams }: { searchParams: Parametr
             <HuecoIntegracion nombre="Programa de caja (TPV)" descripcion="Conexión directa con Revo, Ágora, Last.app o Chift pendiente (P-03). Mientras, se pueden importar los tickets en CSV o en el formato propio del ERP (JSON)" />
           </div>
           {!centroValido ? (
-            <Aviso>Elige un local arriba para importar sus tickets.</Aviso>
+            <Aviso>Elige un local en el filtro de la lista (más abajo) para importar sus tickets.</Aviso>
           ) : (
             <form action={accionImportarTpv} className="space-y-3">
               <input type="hidden" name="volver" value={volver} />
@@ -247,9 +248,9 @@ export default async function Tickets({ searchParams }: { searchParams: Parametr
 
       <form method="get" className="mb-4 mt-6 flex flex-wrap items-end gap-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
         {centros.length > 1 && (
-          <Campo etiqueta="Local para apuntar">
+          <Campo etiqueta="Local">
             <Selector name="centro" defaultValue={centroForm}>
-              <option value="">Elige…</option>
+              <option value="">Todos (para apuntar, elige uno)</option>
               {centros.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.nombre}
@@ -273,7 +274,7 @@ export default async function Tickets({ searchParams }: { searchParams: Parametr
             <option value="CON_ANULACIONES">Con anulaciones</option>
           </Selector>
         </Campo>
-        <Campo etiqueta="Mesa, número o camarero">
+        <Campo etiqueta="Mesa, número o camarero" ayuda="Trozo del texto, sin distinguir mayúsculas">
           <Entrada name="q" defaultValue={q ?? ""} />
         </Campo>
         <Boton type="submit" variante="secundario">

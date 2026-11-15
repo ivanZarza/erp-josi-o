@@ -491,15 +491,15 @@ export async function sembrar(prisma: PrismaClient, ctx: ContextoPruebas) {
   const borrar = aDia(sumarDias(hoy, 355));
   await prisma.candidato.createMany({
     data: [
-      { tenantId: t, ofertaId: oferta1, nombre: "Gonzalo", apellidos: "Arias Bermejo", telefono: telefono(), email: "gonzalo.arias@ejemplo.es", origen: "InfoJobs", estado: "PRUEBA", notas: "Prueba en parrilla el próximo martes de 18:00 a 23:00", consentimientoEn: consiente, borrarEn: borrar },
-      { tenantId: t, ofertaId: oferta1, nombre: "Thiago", apellidos: "Ferreira Lima", telefono: telefono(), origen: "Recomendación de Wilmer", estado: "ENTREVISTA", notas: "Ha trabajado en un asador de Buenos Aires", consentimientoEn: consiente, borrarEn: borrar },
-      { tenantId: t, ofertaId: oferta1, nombre: "Raquel", apellidos: "Soto Villa", email: "raquel.soto@ejemplo.es", origen: "Web", estado: "RECIBIDO", consentimientoEn: consiente, borrarEn: borrar },
-      { tenantId: t, ofertaId: oferta1, nombre: "Javier", apellidos: "Muñoz Pardo", telefono: telefono(), origen: "InfoJobs", estado: "DESCARTADO", notas: "Sin experiencia en brasa", borrarEn: aDia(sumarDias(hoy, 80)) },
-      { tenantId: t, ofertaId: oferta1, nombre: "Mihai", apellidos: "Ionescu", telefono: telefono(), origen: "Currículum en mano", estado: "OFERTA", notas: "Oferta enviada: 25.200 € brutos, incorporación el lunes", consentimientoEn: consiente, borrarEn: borrar },
-      { tenantId: t, ofertaId: oferta2, nombre: "Lucas", apellidos: "Prieto Gil", telefono: telefono(), email: "lucas.prieto@ejemplo.es", origen: "Web", estado: "RECIBIDO", consentimientoEn: consiente, borrarEn: borrar },
-      { tenantId: t, ofertaId: oferta2, nombre: "Aitana", apellidos: "León Ramos", telefono: telefono(), origen: "Instagram", estado: "ENTREVISTA", consentimientoEn: consiente, borrarEn: borrar },
+      { tenantId: t, ofertaId: oferta1, centroId, nombre: "Gonzalo", apellidos: "Arias Bermejo", telefono: telefono(), email: "gonzalo.arias@ejemplo.es", origen: "InfoJobs", estado: "PRUEBA", notas: "Prueba en parrilla el próximo martes de 18:00 a 23:00", consentimientoEn: consiente, borrarEn: borrar },
+      { tenantId: t, ofertaId: oferta1, centroId, nombre: "Thiago", apellidos: "Ferreira Lima", telefono: telefono(), origen: "Recomendación de Wilmer", estado: "ENTREVISTA", notas: "Ha trabajado en un asador de Buenos Aires", consentimientoEn: consiente, borrarEn: borrar },
+      { tenantId: t, ofertaId: oferta1, centroId, nombre: "Raquel", apellidos: "Soto Villa", email: "raquel.soto@ejemplo.es", origen: "Web", estado: "RECIBIDO", consentimientoEn: consiente, borrarEn: borrar },
+      { tenantId: t, ofertaId: oferta1, centroId, nombre: "Javier", apellidos: "Muñoz Pardo", telefono: telefono(), origen: "InfoJobs", estado: "DESCARTADO", notas: "Sin experiencia en brasa", borrarEn: aDia(sumarDias(hoy, 80)) },
+      { tenantId: t, ofertaId: oferta1, centroId, nombre: "Mihai", apellidos: "Ionescu", telefono: telefono(), origen: "Currículum en mano", estado: "OFERTA", notas: "Oferta enviada: 25.200 € brutos, incorporación el lunes", consentimientoEn: consiente, borrarEn: borrar },
+      { tenantId: t, ofertaId: oferta2, centroId, nombre: "Lucas", apellidos: "Prieto Gil", telefono: telefono(), email: "lucas.prieto@ejemplo.es", origen: "Web", estado: "RECIBIDO", consentimientoEn: consiente, borrarEn: borrar },
+      { tenantId: t, ofertaId: oferta2, centroId, nombre: "Aitana", apellidos: "León Ramos", telefono: telefono(), origen: "Instagram", estado: "ENTREVISTA", consentimientoEn: consiente, borrarEn: borrar },
       // sin teléfono ni correo, por probar el aviso de datos de contacto
-      { tenantId: t, ofertaId: oferta2, nombre: "Hugo", apellidos: "Serrano", origen: "Currículum en mano", estado: "RECIBIDO", notas: "Dejó el CV en la barra sin teléfono", borrarEn: aDia(sumarDias(hoy, 85)) },
+      { tenantId: t, ofertaId: oferta2, centroId, nombre: "Hugo", apellidos: "Serrano", origen: "Currículum en mano", estado: "RECIBIDO", notas: "Dejó el CV en la barra sin teléfono", borrarEn: aDia(sumarDias(hoy, 85)) },
     ],
   });
 

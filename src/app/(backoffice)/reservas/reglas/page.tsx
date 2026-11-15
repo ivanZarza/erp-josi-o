@@ -2,7 +2,7 @@ import { exigir } from "@/kernel/contexto";
 import { numero } from "@/kernel/formato";
 import { Cabecera, Tarjeta, Campo, Entrada, Selector, Boton, Aviso, Etiqueta } from "@/ui";
 import { TablaDesplegable } from "@/ui/tabla-desplegable";
-import { turnosYAjustes } from "@/modulos/reservas/servicio";
+import { turnosYAjustes, tablaDuraciones } from "@/modulos/reservas/servicio";
 import { guardarTurnoAccion, activarTurnoAccion, guardarAjustesAccion } from "@/modulos/reservas/acciones";
 import { AvisosUrl, PestanasReservas, type Busqueda } from "@/modulos/reservas/ui";
 
@@ -54,6 +54,9 @@ export default async function TurnosYReglas({ searchParams }: { searchParams: Bu
       </>
     );
   const { turnos, ajustes } = await turnosYAjustes(ctx, centro.id);
+  const duraciones = tablaDuraciones(ajustes.duracionPorPersonas);
+  // Las filas guardadas y, al menos, dos vacías para añadir (mínimo 4 filas)
+  const filasDuracion = [...duraciones, ...Array.from({ length: Math.max(2, 4 - duraciones.length) }, () => null)];
 
   return (
     <>
@@ -107,6 +110,22 @@ export default async function TurnosYReglas({ searchParams }: { searchParams: Bu
                 <input type="checkbox" name="elegirMesaInternet" defaultChecked={ajustes.elegirMesaInternet} /> El cliente puede elegir mesa en la web (fase R3)
               </label>
             </div>
+            <fieldset className="sm:col-span-3">
+              <legend className="mb-1 text-sm font-medium">Duración de mesa según personas</legend>
+              <p className="mb-2 text-xs text-suave">
+                Opcional. Si la rellenas, manda sobre la duración del turno. Cada fila: hasta cuántas personas y cuántos minutos. Los grupos más grandes que la última fila usan la duración de la última. Deja todas vacías para usar la del turno.
+              </p>
+              <div className="grid max-w-md grid-cols-2 gap-2">
+                <div className="text-xs font-medium text-suave">Hasta (personas)</div>
+                <div className="text-xs font-medium text-suave">Duración (min)</div>
+                {filasDuracion.map((f, i) => (
+                  <div key={i} className="contents">
+                    <Entrada type="number" name="duracionHasta" min={1} max={500} defaultValue={f?.hasta ?? ""} aria-label={`Hasta personas, fila ${i + 1}`} />
+                    <Entrada type="number" name="duracionMinutos" min={15} max={480} step={5} defaultValue={f?.minutos ?? ""} aria-label={`Duración en minutos, fila ${i + 1}`} />
+                  </div>
+                ))}
+              </div>
+            </fieldset>
             <div className="sm:col-span-3"><Boton type="submit">Guardar reglas</Boton></div>
           </form>
         </Tarjeta>

@@ -35,7 +35,7 @@ import {
 import type { DatosAlta, DatosContrato, DatosEmpleado, DatosAsignacion } from "./esquemas";
 import { NOMBRE_AUSENCIA, NOMBRE_CERTIFICADO } from "./esquemas";
 import { calcularJornadas, type Jornada } from "./jornadas";
-import { prepararNominasMes, guardarNominas } from "./nominas";
+import { prepararNominasMes, guardarNominas, horasExtraDeJornadas } from "./nominas";
 export { calcularJornadas, type Jornada };
 
 /** Error con mensaje para enseñar al usuario. */
@@ -111,7 +111,13 @@ export function costeHoraContrato(c: ContratoCoste | null | undefined): number |
   return (salario * (1 + aNumero(c.porcentajeCotizacion) / 100)) / (jornada * SEMANAS_EFECTIVAS);
 }
 
-/** Contrato en vigor un día (el más reciente que lo cubre). */
+/**
+ * Contrato en vigor un día: el más reciente cuyas fechas cubren ese día (inicio ≤ día ≤ fin).
+ * Mandan las fechas, no el campo `activo` (que solo marca el último contrato sin cerrar): un contrato
+ * finalizado con fecha futura sigue en vigor hasta esa fecha y uno nuevo no lo está hasta su inicio.
+ * Los anulados antes de empezar (baja antes de su inicio) quedan con fin anterior al inicio y no cubren ningún día.
+ * Es la única regla: la usan la lista, la ficha, los avisos, el cuadrante, los costes y las nóminas.
+ */
 export function contratoVigente<T extends { fechaInicio: Date; fechaFin: Date | null; activo: boolean }>(contratos: T[], dia: string): T | undefined {
   const d = aDia(dia).getTime();
   return contratos
@@ -191,9 +197,21 @@ export async function crearTurnoTipo(ctx: Contexto, d: { centroId?: string; nomb
   return prisma.turnoTipo.create({ data: { tenantId: ctx.tenant.id, ...d } });
 }
 
+/** ¿Ve el usuario todos los centros de la cadena? (para tocar lo que es común a todos). */
+export async function veTodaLaCadena(ctx: Contexto): Promise<boolean> {
+  const prisma = await db();
+  const total = await prisma.centro.count({ where: { tenantId: ctx.tenant.id } });
+  return ctx.centros.length >= total;
+}
+
+/** Retira un turno tipo. Los comunes a toda la cadena (sin centro) solo los retira quien ve todos los centros. */
 export async function desactivarTurnoTipo(ctx: Contexto, id: string) {
   const prisma = await db();
-  await prisma.turnoTipo.updateMany({ where: { id, tenantId: ctx.tenant.id }, data: { activo: false } });
+  const t = await prisma.turnoTipo.findFirst({ where: { id, tenantId: ctx.tenant.id } });
+  if (!t) throw new ErrorPersonal("Turno tipo no encontrado.");
+  if (t.centroId) exigirCentro(ctx, t.centroId);
+  else if (!(await veTodaLaCadena(ctx))) throw new ErrorPersonal("Este turno tipo es común a todos los centros de la cadena: solo lo puede retirar quien ve todos los centros.");
+  await prisma.turnoTipo.update({ where: { id: t.id }, data: { activo: false } });
 }
 
 // =====================================================================
@@ -284,8 +302,34 @@ function datosFicha(d: DatosEmpleado) {
     puestoId: d.puestoId ?? null,
     categoriaId: d.categoriaId ?? null,
     pin: d.pin ?? null,
+    usuarioId: d.usuarioId ?? null,
     notas: d.notas ?? null,
   };
+}
+
+/**
+ * Usuarios de acceso (Ajustes → Usuarios) que se pueden enlazar a una ficha: los activos de la cadena
+ * que no están ya enlazados a otro empleado activo. Incluye el que ya tenga la ficha.
+ */
+export async function usuariosParaEnlazar(ctx: Contexto, empleadoId?: string) {
+  const prisma = await db();
+  const [usuarios, enlazados] = await Promise.all([
+    prisma.usuario.findMany({ where: { tenantId: ctx.tenant.id }, select: { id: true, nombre: true, email: true, activo: true }, orderBy: { nombre: "asc" } }),
+    prisma.empleado.findMany({ where: { tenantId: ctx.tenant.id, activo: true, usuarioId: { not: null }, ...(empleadoId ? { id: { not: empleadoId } } : {}) }, select: { usuarioId: true } }),
+  ]);
+  const ocupados = new Set(enlazados.map((x) => x.usuarioId));
+  const propio = empleadoId ? (await prisma.empleado.findFirst({ where: { id: empleadoId, tenantId: ctx.tenant.id }, select: { usuarioId: true } }))?.usuarioId : null;
+  return usuarios.filter((u) => u.id === propio || (u.activo && !ocupados.has(u.id)));
+}
+
+/** Comprueba que el usuario que se enlaza es de la cadena, está activo y no es de otro empleado activo. */
+async function comprobarUsuarioEnlazable(tx: Tx, ctx: Contexto, usuarioId: string | null | undefined, empleadoId?: string, actual?: string | null) {
+  if (!usuarioId || usuarioId === actual) return;
+  const u = await tx.usuario.findFirst({ where: { id: usuarioId, tenantId: ctx.tenant.id } });
+  if (!u) throw new ErrorPersonal("Usuario de acceso no encontrado.");
+  if (!u.activo) throw new ErrorPersonal(`El usuario ${u.email} está desactivado: actívalo antes en Ajustes → Usuarios.`);
+  const otro = await tx.empleado.findFirst({ where: { tenantId: ctx.tenant.id, usuarioId, activo: true, ...(empleadoId ? { id: { not: empleadoId } } : {}) } });
+  if (otro) throw new ErrorPersonal(`El usuario ${u.email} ya está enlazado a ${nombreCompleto(otro)} (${otro.codigo}).`);
 }
 
 /** Alta de empleado (y, si se da, su primer contrato). Devuelve el id. */
@@ -297,6 +341,7 @@ export async function altaEmpleado(ctx: Contexto, d: DatosAlta, contrato?: Datos
       const dup = await tx.empleado.findFirst({ where: { tenantId: ctx.tenant.id, dni: d.dni, activo: true } });
       if (dup) throw new ErrorPersonal(`Ya hay un empleado activo con el DNI ${d.dni} (${dup.codigo}).`);
     }
+    await comprobarUsuarioEnlazable(tx, ctx, d.usuarioId);
     const codigo = await siguienteCodigoEmpleado(tx, ctx.tenant.id);
     const centrosExtra = Array.from(new Set(d.centrosExtra.filter((c) => c && c !== d.centroPrincipalId)));
     const e = await tx.empleado.create({
@@ -320,6 +365,7 @@ export async function editarEmpleado(ctx: Contexto, id: string, d: DatosEmpleado
   const prisma = await db();
   await prisma.$transaction(async (tx) => {
     const antes = await empleadoAccesible(tx, ctx, id);
+    await comprobarUsuarioEnlazable(tx, ctx, d.usuarioId, id, antes.usuarioId);
     const datos = datosFicha(d);
     await tx.empleado.update({ where: { id }, data: datos });
     const extra = Array.from(new Set(d.centrosExtra.filter((c) => c && c !== d.centroPrincipalId)));
@@ -343,10 +389,13 @@ export async function editarEmpleado(ctx: Contexto, id: string, d: DatosEmpleado
   });
 }
 
-/** Baja: desactiva (nunca borra), finaliza el contrato en vigor y quita los turnos posteriores. */
-export async function bajaEmpleado(ctx: Contexto, id: string, d: { fecha: string; motivo: string }) {
+/**
+ * Baja: desactiva (nunca borra), finaliza el contrato en vigor, anula los que empezaban después,
+ * quita los turnos posteriores y desactiva al momento su usuario de acceso (si tiene uno enlazado).
+ */
+export async function bajaEmpleado(ctx: Contexto, id: string, d: { fecha: string; motivo: string }): Promise<{ usuarioDesactivado: boolean }> {
   const prisma = await db();
-  await prisma.$transaction(async (tx) => {
+  return prisma.$transaction(async (tx) => {
     const e = await empleadoAccesible(tx, ctx, id);
     if (!e.activo) throw new ErrorPersonal("El empleado ya está de baja.");
     if (d.fecha < diaISO(e.fechaAlta)) throw new ErrorPersonal("La fecha de baja es anterior al alta.");
@@ -354,22 +403,50 @@ export async function bajaEmpleado(ctx: Contexto, id: string, d: { fecha: string
     await tx.empleado.update({ where: { id }, data: { activo: false, fechaBaja: fecha, motivoBaja: d.motivo } });
     await tx.contrato.updateMany({ where: { empleadoId: id, activo: true }, data: { activo: false, motivoFin: `Baja: ${d.motivo}` } });
     await tx.contrato.updateMany({ where: { empleadoId: id, OR: [{ fechaFin: null }, { fechaFin: { gt: fecha } }], fechaInicio: { lte: fecha } }, data: { fechaFin: fecha } });
+    // contratos que aún no habían empezado: quedan anulados (fin el día antes de su inicio: no cubren ningún día)
+    const futuros = await tx.contrato.findMany({ where: { empleadoId: id, fechaInicio: { gt: fecha } } });
+    for (const c of futuros) {
+      await tx.contrato.update({ where: { id: c.id }, data: { activo: false, fechaFin: aDia(sumarDias(diaISO(c.fechaInicio), -1)), motivoFin: `Anulado por la baja: ${d.motivo}` } });
+    }
     const quitados = await tx.asignacionTurno.deleteMany({ where: { empleadoId: id, fecha: { gt: fecha } } });
     await tx.ausencia.updateMany({ where: { empleadoId: id, estado: "PEDIDA" }, data: { estado: "ANULADA", motivoRechazo: "Baja del empleado" } });
-    await auditar(tx, { tenantId: ctx.tenant.id, usuarioId: ctx.usuario.id, entidad: "Empleado", entidadId: id, accion: "BAJA", despues: { fecha: d.fecha, motivo: d.motivo, turnosQuitados: quitados.count } });
-    // Usuarios escucha este evento para desactivar su acceso al momento; la gestoría, para el finiquito.
+    // su usuario de acceso se desactiva al momento (la tabla es del núcleo; se deja auditado)
+    let usuarioDesactivado = false;
+    if (e.usuarioId) {
+      const u = await tx.usuario.findFirst({ where: { id: e.usuarioId, tenantId: ctx.tenant.id } });
+      if (u?.activo) {
+        await tx.usuario.update({ where: { id: u.id }, data: { activo: false } });
+        await auditar(tx, { tenantId: ctx.tenant.id, usuarioId: ctx.usuario.id, entidad: "Usuario", entidadId: u.id, accion: "DESACTIVAR", antes: { activo: true }, despues: { activo: false, motivo: `Baja del empleado ${e.codigo}` } });
+        usuarioDesactivado = true;
+      }
+    }
+    await auditar(tx, { tenantId: ctx.tenant.id, usuarioId: ctx.usuario.id, entidad: "Empleado", entidadId: id, accion: "BAJA", despues: { fecha: d.fecha, motivo: d.motivo, turnosQuitados: quitados.count, contratosAnulados: futuros.length, usuarioDesactivado } });
+    // Aviso para otros módulos (la gestoría, para el finiquito, cuando esté conectada). Hoy nadie lo escucha:
+    // por eso el usuario se desactiva aquí mismo.
     await emitir(tx, ctx.tenant.id, "personal.empleado.baja", { empleadoId: id, codigo: e.codigo, usuarioId: e.usuarioId, fecha: d.fecha, motivo: d.motivo, sociedadId: e.sociedadId });
+    return { usuarioDesactivado };
   });
 }
 
-/** Reingreso de un empleado dado de baja (por ejemplo, un fijo discontinuo al empezar la temporada). */
+/**
+ * Reingreso de un empleado dado de baja (por ejemplo, un fijo discontinuo al empezar la temporada).
+ * La fecha de alta pasa a ser la del reingreso (manda en nóminas, vacaciones y altas del mes), pero la
+ * primera alta se guarda en `fechaAntiguedad` para no perder la antigüedad. La baja anterior queda en la auditoría.
+ * Su usuario de acceso no se reactiva solo: se hace en Ajustes → Usuarios.
+ */
 export async function reactivarEmpleado(ctx: Contexto, id: string, fecha: string) {
   const prisma = await db();
   await prisma.$transaction(async (tx) => {
     const e = await empleadoAccesible(tx, ctx, id);
     if (e.activo) throw new ErrorPersonal("El empleado ya está activo.");
-    await tx.empleado.update({ where: { id }, data: { activo: true, fechaBaja: null, motivoBaja: null, fechaAlta: aDia(fecha) } });
-    await auditar(tx, { tenantId: ctx.tenant.id, usuarioId: ctx.usuario.id, entidad: "Empleado", entidadId: id, accion: "REINGRESO", despues: { fecha } });
+    if (e.fechaBaja && fecha <= diaISO(e.fechaBaja)) throw new ErrorPersonal("La fecha de reingreso tiene que ser posterior a la de la baja.");
+    if (e.dni) {
+      const dup = await tx.empleado.findFirst({ where: { tenantId: ctx.tenant.id, dni: e.dni, activo: true, id: { not: id } } });
+      if (dup) throw new ErrorPersonal(`Ya hay un empleado activo con el DNI ${e.dni} (${dup.codigo}).`);
+    }
+    const antiguedad = e.fechaAntiguedad ?? e.fechaAlta;
+    await tx.empleado.update({ where: { id }, data: { activo: true, fechaBaja: null, motivoBaja: null, fechaAlta: aDia(fecha), fechaAntiguedad: antiguedad } });
+    await auditar(tx, { tenantId: ctx.tenant.id, usuarioId: ctx.usuario.id, entidad: "Empleado", entidadId: id, accion: "REINGRESO", antes: { fechaAlta: diaISO(e.fechaAlta), fechaBaja: e.fechaBaja ? diaISO(e.fechaBaja) : null, motivoBaja: e.motivoBaja }, despues: { fecha, antiguedad: diaISO(antiguedad) } });
     await emitir(tx, ctx.tenant.id, "personal.empleado.alta", { empleadoId: id, codigo: e.codigo, centroId: e.centroPrincipalId, sociedadId: e.sociedadId, fechaAlta: fecha, reingreso: true });
   });
 }
@@ -459,7 +536,10 @@ export interface AvisoPersonal {
   fecha: Date | null;
 }
 
-/** Contratos que vencen en 30 días, periodos de prueba, certificados y documentos que caducan. */
+/**
+ * Contratos que vencen en 30 días, periodos de prueba, certificados y documentos que caducan, y
+ * personas activas sin contrato en vigor hoy. «En vigor» = contratoVigente (por fechas), igual que la lista.
+ */
 export async function avisosPersonal(ctx: Contexto, dias = DIAS_AVISO): Promise<AvisoPersonal[]> {
   const prisma = await db();
   const hoy = hoyMadrid();
@@ -468,7 +548,7 @@ export async function avisosPersonal(ctx: Contexto, dias = DIAS_AVISO): Promise<
   const empleados = await prisma.empleado.findMany({
     where: { tenantId: ctx.tenant.id, activo: true, centroPrincipalId: { in: centrosFiltro(ctx) } },
     include: {
-      contratos: { where: { activo: true } },
+      contratos: true,
       certificados: { where: { activo: true, caducaEn: { not: null, lte: limite } } },
       documentos: { where: { activo: true, caducaEn: { not: null, lte: limite } } },
     },
@@ -476,11 +556,21 @@ export async function avisosPersonal(ctx: Contexto, dias = DIAS_AVISO): Promise<
   const avisos: AvisoPersonal[] = [];
   for (const e of empleados) {
     const base = { empleadoId: e.id, empleado: nombreCompleto(e), centroId: e.centroPrincipalId };
-    if (e.contratos.length === 0) avisos.push({ ...base, tipo: "SIN_CONTRATO", tono: "error", texto: "Sin contrato en vigor", fecha: null });
-    for (const c of e.contratos) {
-      if (c.fechaFin && c.fechaFin < hoyD) avisos.push({ ...base, tipo: "CONTRATO_VENCIDO", tono: "error", texto: "Contrato vencido sin renovar ni finalizar", fecha: c.fechaFin });
-      else if (c.fechaFin && c.fechaFin <= limite) avisos.push({ ...base, tipo: "CONTRATO_VENCE", tono: "aviso", texto: "El contrato vence", fecha: c.fechaFin });
-      if (c.finPeriodoPrueba && c.finPeriodoPrueba >= hoyD && c.finPeriodoPrueba <= limite) avisos.push({ ...base, tipo: "PERIODO_PRUEBA", tono: "aviso", texto: "Termina el periodo de prueba", fecha: c.finPeriodoPrueba });
+    const vigente = contratoVigente(e.contratos, hoy);
+    // el próximo contrato que empieza después de hoy (renovación ya firmada o primer contrato)
+    const siguiente = e.contratos.filter((c) => c.fechaInicio > hoyD && (!c.fechaFin || c.fechaFin >= c.fechaInicio)).sort((a, b) => a.fechaInicio.getTime() - b.fechaInicio.getTime())[0];
+    if (!vigente) {
+      const vencido = e.contratos.find((c) => c.activo && c.fechaFin && c.fechaFin < hoyD);
+      if (vencido) avisos.push({ ...base, tipo: "CONTRATO_VENCIDO", tono: "error", texto: "Contrato vencido sin renovar ni finalizar", fecha: vencido.fechaFin });
+      else if (siguiente) avisos.push({ ...base, tipo: "SIN_CONTRATO", tono: "aviso", texto: "Sin contrato en vigor hasta que empiece el nuevo", fecha: siguiente.fechaInicio });
+      else avisos.push({ ...base, tipo: "SIN_CONTRATO", tono: "error", texto: "Sin contrato en vigor", fecha: null });
+    } else if (vigente.fechaFin && vigente.fechaFin <= limite) {
+      // si ya hay un contrato que empieza al día siguiente, no hay hueco: no se avisa
+      const renovado = siguiente && diaISO(siguiente.fechaInicio) <= sumarDias(diaISO(vigente.fechaFin), 1);
+      if (!renovado) avisos.push({ ...base, tipo: "CONTRATO_VENCE", tono: "aviso", texto: "El contrato vence", fecha: vigente.fechaFin });
+    }
+    for (const c of [vigente, siguiente]) {
+      if (c?.finPeriodoPrueba && c.finPeriodoPrueba >= hoyD && c.finPeriodoPrueba <= limite) avisos.push({ ...base, tipo: "PERIODO_PRUEBA", tono: "aviso", texto: "Termina el periodo de prueba", fecha: c.finPeriodoPrueba });
     }
     for (const c of e.certificados) {
       const caducado = c.caducaEn! < hoyD;
@@ -613,8 +703,10 @@ export async function cuadranteSemana(ctx: Contexto, centroId: string, lunesISO:
   const avisos: AvisoCuadrante[] = [];
   const totalesDia = dias.map(() => ({ horas: 0, coste: 0, personas: 0 }));
   const filas = empleados.map((e) => {
+    // para los avisos de la semana: el contrato del lunes (o, si empieza a mitad de semana, el del domingo)
     const contrato = contratoVigente(e.contratos, lunes) ?? contratoVigente(e.contratos, dias[6]);
-    const coste = costeHoraContrato(contrato);
+    // el coste, día a día con el contrato en vigor ese día (un cambio de contrato a mitad de semana cuenta)
+    const costeDia = dias.map((dia) => costeHoraContrato(contratoVigente(e.contratos, dia)));
     const celdas: CeldaCuadrante[] = dias.map((dia, i) => {
       const a = e.asignaciones.find((x) => diaISO(x.fecha) === dia);
       const aus = e.ausencias.find((x) => diaISO(x.desde) <= dia && diaISO(x.hasta) >= dia);
@@ -622,7 +714,7 @@ export async function cuadranteSemana(ctx: Contexto, centroId: string, lunesISO:
       if (propia) {
         const h = horasTurno(propia);
         totalesDia[i].horas += h;
-        totalesDia[i].coste += h * (coste ?? 0);
+        totalesDia[i].coste += h * (costeDia[i] ?? 0);
         totalesDia[i].personas += 1;
       }
       return {
@@ -645,7 +737,7 @@ export async function cuadranteSemana(ctx: Contexto, centroId: string, lunesISO:
       empleado: { id: e.id, nombre: nombreCompleto(e), puesto: e.puesto?.nombre ?? null, departamento: e.puesto?.departamento ?? null, prestado: e.centroPrincipalId !== centroId ? centros.get(e.centroPrincipalId)?.nombre ?? null : null },
       jornadaSemanal: contrato ? aNumero(contrato.jornadaSemanal) : null,
       horasSemana,
-      costeHora: coste,
+      costeHora: costeHoraContrato(contrato),
       celdas,
     };
   });
@@ -690,7 +782,10 @@ export async function quitarAsignacion(ctx: Contexto, id: string) {
   });
 }
 
-/** Si la semana ya estaba publicada, deja constancia del cambio para avisar a la plantilla. */
+/**
+ * Si la semana ya estaba publicada, deja constancia del cambio (evento personal.cuadrante.cambiado).
+ * Hoy nadie lo escucha: el aviso a la plantilla (portal, WhatsApp) está pendiente; la ayuda lo dice.
+ */
 async function marcarCambioPublicado(tx: Tx, ctx: Contexto, centroId: string, dia: string) {
   const sem = await tx.cuadranteSemana.findUnique({ where: { centroId_lunes: { centroId, lunes: aDia(lunesDe(dia)) } } });
   if (sem?.estado === "PUBLICADO") await emitir(tx, ctx.tenant.id, "personal.cuadrante.cambiado", { centroId, lunes: lunesDe(dia), dia });
@@ -738,20 +833,29 @@ export async function publicarCuadrante(ctx: Contexto, centroId: string, lunesIS
       create: { tenantId: ctx.tenant.id, centroId, lunes: aDia(lunes), estado: "PUBLICADO", publicadoPor: ctx.usuario.id, publicadoEn: new Date() },
       update: { estado: "PUBLICADO", publicadoPor: ctx.usuario.id, publicadoEn: new Date() },
     });
-    // el portal del empleado y WhatsApp escucharán este evento
+    // el portal ya enseña las semanas publicadas (turnosEmpleado). El evento queda para el aviso por WhatsApp (pendiente: hoy nadie lo escucha)
     await emitir(tx, ctx.tenant.id, "personal.cuadrante.publicado", { centroId, lunes });
   });
 }
 
-/** Próximos turnos de un empleado (para su ficha y su portal). */
-export async function turnosEmpleado(ctx: Contexto, empleadoId: string, desde: string, dias = 14) {
+/**
+ * Turnos de un empleado (para su ficha y su portal), con si su semana está publicada en ese centro.
+ * `soloPublicados`: el portal solo enseña las semanas publicadas (los borradores aún pueden cambiar).
+ */
+export async function turnosEmpleado(ctx: Contexto, empleadoId: string, desde: string, dias = 14, opciones: { soloPublicados?: boolean } = {}) {
   const prisma = await db();
   const centros = await mapaCentros(ctx);
   const lista = await prisma.asignacionTurno.findMany({
     where: { tenantId: ctx.tenant.id, empleadoId, fecha: { gte: aDia(desde), lte: aDia(sumarDias(desde, dias - 1)) } },
     orderBy: { fecha: "asc" },
   });
-  return lista.map((a) => ({ ...a, dia: diaISO(a.fecha), horas: horasTurno(a), centro: centros.get(a.centroId)?.nombre ?? "—" }));
+  const semanas = lista.length
+    ? await prisma.cuadranteSemana.findMany({ where: { tenantId: ctx.tenant.id, estado: "PUBLICADO", centroId: { in: Array.from(new Set(lista.map((a) => a.centroId))) }, lunes: { in: Array.from(new Set(lista.map((a) => lunesDe(diaISO(a.fecha))))).map(aDia) } } })
+    : [];
+  const publicadas = new Set(semanas.map((x) => `${x.centroId}|${diaISO(x.lunes)}`));
+  return lista
+    .map((a) => ({ ...a, dia: diaISO(a.fecha), horas: horasTurno(a), centro: centros.get(a.centroId)?.nombre ?? "—", publicado: publicadas.has(`${a.centroId}|${lunesDe(diaISO(a.fecha))}`) }))
+    .filter((a) => !opciones.soloPublicados || a.publicado);
 }
 
 // =====================================================================
@@ -781,7 +885,13 @@ export async function estadoFichaje(ctx: Contexto, empleadoId: string) {
   return { ultimo, permitidos: SIGUIENTE[estado] as ("ENTRADA" | "INICIO_PAUSA" | "FIN_PAUSA" | "SALIDA")[], olvido, dentro: estado === "ENTRADA" || estado === "FIN_PAUSA", enPausa: estado === "INICIO_PAUSA" };
 }
 
-/** Fichar ahora (desde la pantalla del empleado, la tableta del local o el móvil). */
+/**
+ * Fichar ahora. Quién puede fichar por quién:
+ * - MOVIL (portal, `propio`): cada uno lo suyo.
+ * - TABLETA del local: la persona escribe su PIN. Si no tiene PIN, solo puede ficharle quien tenga
+ *   «Corregir fichajes» (el encargado), y queda auditado.
+ * - PANTALLA (ficha del empleado, «Fichar ahora»): fichar por otro, solo con «Corregir fichajes»; auditado.
+ */
 export async function fichar(ctx: Contexto, d: { empleadoId: string; centroId: string; tipo: "ENTRADA" | "INICIO_PAUSA" | "FIN_PAUSA" | "SALIDA"; origen?: string; pin?: string; propio?: boolean }) {
   const prisma = await db();
   const e = await prisma.empleado.findFirst({ where: { id: d.empleadoId, tenantId: ctx.tenant.id, activo: true }, include: { centros: true } });
@@ -789,12 +899,28 @@ export async function fichar(ctx: Contexto, d: { empleadoId: string; centroId: s
   if (!d.propio) exigirCentro(ctx, d.centroId);
   const puede = e.centroPrincipalId === d.centroId || e.centros.some((c) => c.centroId === d.centroId);
   if (!puede) throw new ErrorPersonal("Ese centro no está entre los suyos.");
-  if (d.origen === "TABLETA" && e.pin && e.pin !== d.pin) throw new ErrorPersonal("PIN incorrecto.");
+  const encargado = ctx.puede("personal:fichajes:corregir");
+  let porOtro = false;
+  if (!d.propio) {
+    if (d.origen === "TABLETA") {
+      if (e.pin) {
+        if (e.pin !== d.pin) throw new ErrorPersonal("PIN incorrecto.");
+      } else if (!encargado) {
+        throw new ErrorPersonal("Esta persona no tiene PIN para fichar: ponlo en su ficha (o que la fiche su encargado).");
+      } else porOtro = true;
+    } else {
+      if (!encargado) throw new ErrorPersonal("Fichar por otra persona necesita el permiso «Corregir fichajes».");
+      porOtro = true;
+    }
+  }
   const est = await estadoFichaje(ctx, e.id);
   if (!est.permitidos.includes(d.tipo)) {
     throw new ErrorPersonal(`Ahora no se puede fichar «${d.tipo.toLowerCase().replace("_", " ")}». Lo siguiente es: ${est.permitidos.map((p) => p.toLowerCase().replace("_", " ")).join(" o ")}.`);
   }
-  await prisma.fichaje.create({ data: { tenantId: ctx.tenant.id, empleadoId: e.id, centroId: d.centroId, tipo: d.tipo, momento: new Date(), origen: d.origen ?? "PANTALLA", creadoPor: ctx.usuario.id } });
+  await prisma.$transaction(async (tx) => {
+    const f = await tx.fichaje.create({ data: { tenantId: ctx.tenant.id, empleadoId: e.id, centroId: d.centroId, tipo: d.tipo, momento: new Date(), origen: d.origen ?? "PANTALLA", creadoPor: ctx.usuario.id } });
+    if (porOtro) await auditar(tx, { tenantId: ctx.tenant.id, usuarioId: ctx.usuario.id, entidad: "Fichaje", entidadId: f.id, accion: "FICHAR_POR_OTRO", despues: { empleadoId: e.id, tipo: d.tipo, origen: f.origen, momento: f.momento.toISOString() } });
+  });
 }
 
 /** Fichaje añadido a mano por el encargado (se olvidó de fichar): siempre con motivo. */
@@ -1116,18 +1242,62 @@ export async function desactivarDocumento(ctx: Contexto, id: string) {
 // Selección
 // =====================================================================
 
+/** Candidatos que siguen dentro de plazo (los caducados no se enseñan aunque aún no se hayan borrado). */
+function candidatoEnPlazo(): Prisma.CandidatoWhereInput {
+  return { OR: [{ borrarEn: null }, { borrarEn: { gte: aDia(hoyMadrid()) } }, { estado: "CONTRATADO" }] };
+}
+
 export async function listarOfertas(ctx: Contexto, estado?: string) {
   const prisma = await db();
   return prisma.ofertaEmpleo.findMany({
     where: { tenantId: ctx.tenant.id, centroId: { in: centrosFiltro(ctx) }, ...(estado ? { estado: estado as never } : {}) },
-    include: { puesto: true, candidatos: { orderBy: { createdAt: "desc" } } },
+    include: { puesto: true, candidatos: { where: candidatoEnPlazo(), orderBy: { createdAt: "desc" } } },
     orderBy: [{ estado: "asc" }, { publicadaEn: "desc" }],
   });
 }
 
+/**
+ * Candidatos de unos centros: los de su bolsa o sus ofertas. Los antiguos de la bolsa sin centro
+ * (de antes de guardar el centro) se siguen viendo en todos los centros hasta que se borren.
+ */
+function candidatoDeCentros(ids: string[]): Prisma.CandidatoWhereInput {
+  return { OR: [{ centroId: { in: ids } }, { centroId: null, oferta: { centroId: { in: ids } } }, { centroId: null, ofertaId: null }] };
+}
+
+/** Bolsa (candidatos sin oferta) de los centros que ve el usuario. */
 export async function bolsaCandidatos(ctx: Contexto) {
   const prisma = await db();
-  return prisma.candidato.findMany({ where: { tenantId: ctx.tenant.id, ofertaId: null, estado: { notIn: ["CONTRATADO"] } }, orderBy: { createdAt: "desc" } });
+  return prisma.candidato.findMany({ where: { tenantId: ctx.tenant.id, ofertaId: null, estado: { notIn: ["CONTRATADO"] }, AND: [candidatoDeCentros(centrosFiltro(ctx)), candidatoEnPlazo()] }, orderBy: { createdAt: "desc" } });
+}
+
+/** Candidatos de los centros del usuario que ya han pasado su fecha de borrado (RGPD). */
+export async function candidatosCaducados(ctx: Contexto): Promise<number> {
+  const prisma = await db();
+  return prisma.candidato.count({ where: { tenantId: ctx.tenant.id, ...candidatoDeCentros(ctx.centros.map((c) => c.id)), borrarEn: { lt: aDia(hoyMadrid()) }, empleadoId: null, estado: { not: "CONTRATADO" } } });
+}
+
+/**
+ * Borra los datos de los candidatos que han pasado su fecha (`borrarEn`), de los centros del usuario
+ * (protección de datos). Los contratados no se tocan: sus datos ya están en su ficha de empleado.
+ * Se ejecuta sola al guardar un candidato y con el botón de Selección. Queda auditado (sin datos personales).
+ */
+export async function borrarCandidatosCaducados(ctx: Contexto): Promise<number> {
+  const prisma = await db();
+  return prisma.$transaction(async (tx) => {
+    const r = await tx.candidato.deleteMany({ where: { tenantId: ctx.tenant.id, ...candidatoDeCentros(ctx.centros.map((c) => c.id)), borrarEn: { lt: aDia(hoyMadrid()) }, empleadoId: null, estado: { not: "CONTRATADO" } } });
+    if (r.count) await auditar(tx, { tenantId: ctx.tenant.id, usuarioId: ctx.usuario.id, entidad: "Candidato", entidadId: "caducados", accion: "BORRAR_CADUCADOS", despues: { borrados: r.count, hasta: hoyMadrid() } });
+    return r.count;
+  });
+}
+
+/** Candidato de la cadena cuyo centro (el de su oferta o el de la bolsa) ve el usuario. */
+async function candidatoAccesible(ctx: Contexto, id: string) {
+  const prisma = await db();
+  const c = await prisma.candidato.findFirst({ where: { id, tenantId: ctx.tenant.id }, include: { oferta: true } });
+  if (!c) throw new ErrorPersonal("Candidato no encontrado.");
+  const centro = c.oferta?.centroId ?? c.centroId;
+  if (centro) exigirCentro(ctx, centro);
+  return c;
 }
 
 export async function crearOferta(ctx: Contexto, d: { centroId: string; puestoId?: string; titulo: string; descripcion?: string; tipoContrato?: string; jornada?: number; plazas: number }) {
@@ -1154,24 +1324,34 @@ export async function cambiarEstadoOferta(ctx: Contexto, id: string, estado: "AB
   });
 }
 
-export async function crearCandidato(ctx: Contexto, d: { ofertaId?: string; nombre: string; apellidos?: string; email?: string; telefono?: string; origen?: string; notas?: string; consentimiento: boolean }) {
+/** Candidato nuevo: a una oferta abierta de un centro del usuario o a la bolsa de un centro suyo. */
+export async function crearCandidato(ctx: Contexto, d: { ofertaId?: string; centroId?: string; nombre: string; apellidos?: string; email?: string; telefono?: string; origen?: string; notas?: string; consentimiento: boolean }) {
   const prisma = await db();
+  let centroId: string;
   if (d.ofertaId) {
     const o = await prisma.ofertaEmpleo.findFirst({ where: { id: d.ofertaId, tenantId: ctx.tenant.id } });
     if (!o) throw new ErrorPersonal("Oferta no encontrada.");
+    exigirCentro(ctx, o.centroId);
+    if (o.estado !== "ABIERTA") throw new ErrorPersonal("La oferta no está abierta: reábrela o apunta al candidato en la bolsa.");
+    centroId = o.centroId;
+  } else {
+    const c = d.centroId ?? ctx.centroActivo?.id;
+    if (!c) throw new ErrorPersonal("Elige el centro de la bolsa.");
+    exigirCentro(ctx, c);
+    centroId = c;
   }
   if (!d.email && !d.telefono) throw new ErrorPersonal("Indica al menos el teléfono o el correo del candidato.");
+  await borrarCandidatosCaducados(ctx);
   // RGPD: con consentimiento se guarda un año; sin él, hasta que se cierre el proceso (90 días).
   const borrarEn = aDia(sumarDias(hoyMadrid(), d.consentimiento ? 365 : 90));
   await prisma.candidato.create({
-    data: { tenantId: ctx.tenant.id, ofertaId: d.ofertaId, nombre: d.nombre, apellidos: d.apellidos, email: d.email, telefono: d.telefono, origen: d.origen, notas: d.notas, consentimientoEn: d.consentimiento ? new Date() : null, borrarEn },
+    data: { tenantId: ctx.tenant.id, ofertaId: d.ofertaId, centroId, nombre: d.nombre, apellidos: d.apellidos, email: d.email, telefono: d.telefono, origen: d.origen, notas: d.notas, consentimientoEn: d.consentimiento ? new Date() : null, borrarEn },
   });
 }
 
 export async function cambiarEstadoCandidato(ctx: Contexto, d: { candidatoId: string; estado: string; notas?: string }) {
   const prisma = await db();
-  const c = await prisma.candidato.findFirst({ where: { id: d.candidatoId, tenantId: ctx.tenant.id } });
-  if (!c) throw new ErrorPersonal("Candidato no encontrado.");
+  const c = await candidatoAccesible(ctx, d.candidatoId);
   if (c.estado === "CONTRATADO") throw new ErrorPersonal("El candidato ya está contratado.");
   if (d.estado === "CONTRATADO") throw new ErrorPersonal("Para contratar usa «Contratar»: crea su ficha de empleado.");
   await prisma.candidato.update({ where: { id: c.id }, data: { estado: d.estado as never, ...(d.notas ? { notas: [c.notas, d.notas].filter(Boolean).join("\n") } : {}) } });
@@ -1180,8 +1360,7 @@ export async function cambiarEstadoCandidato(ctx: Contexto, d: { candidatoId: st
 /** Contratar: pasa los datos del candidato a una ficha de empleado nueva sin volver a escribirlos. */
 export async function contratarCandidato(ctx: Contexto, d: { candidatoId: string; centroPrincipalId: string; puestoId?: string; fechaAlta: string }) {
   const prisma = await db();
-  const c = await prisma.candidato.findFirst({ where: { id: d.candidatoId, tenantId: ctx.tenant.id }, include: { oferta: true } });
-  if (!c) throw new ErrorPersonal("Candidato no encontrado.");
+  const c = await candidatoAccesible(ctx, d.candidatoId);
   if (c.empleadoId) throw new ErrorPersonal("Este candidato ya tiene ficha de empleado.");
   const empleadoId = await altaEmpleado(ctx, {
     nombre: c.nombre,
@@ -1310,8 +1489,9 @@ export interface FilaNomina {
 }
 
 /**
- * Variables del mes para la gestoría, por sociedad: horas previstas y reales, horas por encima
- * del contrato (jornada semanal × días del mes / 7), días de ausencia por tipo, altas y bajas.
+ * Variables del mes para la gestoría, por sociedad: horas previstas y reales, horas del contrato
+ * (jornada semanal × días en alta / 7, de referencia), horas extra (la misma regla que la nómina:
+ * horasExtraDeJornadas), días de ausencia por tipo, altas y bajas.
  */
 export async function variablesNomina(ctx: Contexto, mes: string, sociedadId?: string): Promise<FilaNomina[]> {
   const prisma = await db();
@@ -1344,12 +1524,13 @@ export async function variablesNomina(ctx: Contexto, mes: string, sociedadId?: s
     const socId = contrato?.sociedadId ?? e.sociedadId ?? centros.get(e.centroPrincipalId)?.sociedadId ?? null;
     if (sociedadId && socId !== sociedadId) continue;
     const soc = socId ? socMap.get(socId) : undefined;
-    const horasReales = jornadas.filter((j) => j.empleadoId === e.id).reduce((s, j) => s + j.horas, 0);
-    const horasPrevistas = e.asignaciones.reduce((s, a) => s + horasTurno(a), 0);
     const altaISO = diaISO(e.fechaAlta);
     const bajaISO = e.fechaBaja ? diaISO(e.fechaBaja) : null;
     const desdeE = altaISO > ini ? altaISO : ini;
     const hastaE = bajaISO && bajaISO < fin ? bajaISO : fin;
+    const suyas = jornadas.filter((j) => j.empleadoId === e.id);
+    const horasReales = suyas.reduce((s, j) => s + j.horas, 0);
+    const horasPrevistas = e.asignaciones.reduce((s, a) => s + horasTurno(a), 0);
     const jornada = contrato ? aNumero(contrato.jornadaSemanal) : 0;
     const horasContrato = (jornada * Math.max(0, diasEntre(desdeE, hastaE))) / 7;
     const ausencias: Record<string, number> = {};
@@ -1371,7 +1552,8 @@ export async function variablesNomina(ctx: Contexto, mes: string, sociedadId?: s
       horasPrevistas,
       horasReales,
       horasContrato,
-      horasExtra: Math.max(0, horasReales - horasContrato),
+      // la misma regla que la nómina (nominas.ts): lo fichado por encima del turno del cuadrante, día a día
+      horasExtra: horasExtraDeJornadas(suyas.filter((j) => j.dia >= desdeE && j.dia <= hastaE), e.asignaciones.map((a) => ({ dia: diaISO(a.fecha), turno: a }))),
       ausencias,
       alta: altaISO >= ini && altaISO <= fin ? altaISO : "",
       baja: bajaISO && bajaISO >= ini && bajaISO <= fin ? bajaISO : "",
@@ -1481,6 +1663,7 @@ export async function cambiarEstadoNominas(ctx: Contexto, d: { mes: string; cent
     });
     const total = afectadas.reduce((t, n) => ({ coste: t.coste + aNumero(n.costeEmpresa), neto: t.neto + aNumero(n.neto) }), { coste: 0, neto: 0 });
     await auditar(tx, { tenantId: ctx.tenant.id, usuarioId: ctx.usuario.id, entidad: "Nomina", entidadId: d.mes, accion: d.a === "CERRADA" ? "CERRAR" : "PAGAR", despues: { mes: d.mes, nominas: afectadas.length, ...total, fechaPago: d.fechaPago ?? null } });
+    // aviso para Contabilidad y el Cuadro de mando: hoy nadie lo escucha (leen costeNominasPorCentroYMes cuando lo necesitan)
     if (d.a === "CERRADA") {
       for (const centroId of Array.from(new Set(afectadas.map((n) => n.centroId)))) {
         const delCentro = afectadas.filter((n) => n.centroId === centroId);

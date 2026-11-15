@@ -5,7 +5,10 @@ import { ErrorNegocio, num, r4, type AreaAlmacen, type Tx } from "./comun-almace
 
 /**
  * Catálogo de productos de un área (Bebidas o Comidas). Motor común del núcleo.
- * Reglas: coste obligatorio salvo «sin coste» con motivo; un producto nunca se borra, se desactiva.
+ * Reglas: coste obligatorio salvo «sin coste» con motivo (se guarda en Producto.motivoSinCoste; si se quita
+ * «sin coste», el motivo se borra); un producto nunca se borra, se desactiva.
+ * «Unidades por formato de compra» (cajas de 6…): la propuesta de compra redondea a formatos completos y el
+ * texto del pedido al proveedor dice cuántos formatos son (compras.ts).
  */
 
 export interface DatosProducto {
@@ -97,6 +100,7 @@ export async function crearProducto(tx: Tx, tenantId: string, usuarioId: string,
       unidadesCompra: new Prisma.Decimal(d.unidadesCompra),
       costeUnitario: new Prisma.Decimal(r4(d.costeUnitario)),
       sinCoste: d.sinCoste,
+      motivoSinCoste: d.sinCoste ? d.motivoSinCoste?.trim() || null : null,
       iva: new Prisma.Decimal(d.iva),
       stockMinimo: new Prisma.Decimal(d.stockMinimo),
       codigoBarras: d.codigoBarras,
@@ -128,6 +132,7 @@ export async function editarProducto(tx: Tx, tenantId: string, usuarioId: string
       unidadesCompra: new Prisma.Decimal(d.unidadesCompra),
       costeUnitario: new Prisma.Decimal(r4(d.costeUnitario)),
       sinCoste: d.sinCoste,
+      motivoSinCoste: d.sinCoste ? d.motivoSinCoste?.trim() || null : null,
       iva: new Prisma.Decimal(d.iva),
       stockMinimo: new Prisma.Decimal(d.stockMinimo),
       codigoBarras: d.codigoBarras,
@@ -139,7 +144,7 @@ export async function editarProducto(tx: Tx, tenantId: string, usuarioId: string
     entidad: "Producto",
     entidadId: id,
     accion: num(antes.costeUnitario) !== r4(d.costeUnitario) ? "editar-con-cambio-de-coste" : "editar",
-    antes: { referencia: antes.referencia, nombre: antes.nombre, coste: num(antes.costeUnitario), sinCoste: antes.sinCoste, stockMinimo: num(antes.stockMinimo) },
+    antes: { referencia: antes.referencia, nombre: antes.nombre, coste: num(antes.costeUnitario), sinCoste: antes.sinCoste, motivoSinCoste: antes.motivoSinCoste, stockMinimo: num(antes.stockMinimo) },
     despues: { ...d },
   });
   return p;

@@ -5,6 +5,7 @@ import { siguienteNumero } from "@/kernel/numeracion";
 import { centrosFiltro, type Contexto } from "@/kernel/contexto";
 import { Prisma, type PrismaClient } from "@/generated/prisma/client";
 import { buscarOCrearCliente } from "@/modulos/clientes/servicio";
+import { espaciosDeCentros } from "@/modulos/reservas/servicio";
 import type { DatosSolicitud } from "./esquemas";
 
 /**
@@ -33,6 +34,17 @@ export const NOMBRE_TIPO: Record<TipoEvento, string> = {
   OTRO: "Otro",
 };
 export const ORDEN_EMBUDO: EstadoEvento[] = ["NUEVA", "CONTACTADA", "PRESUPUESTO", "ACEPTADA", "CELEBRADA"];
+/** Por dónde llegó la solicitud (columna `origen`). */
+export const NOMBRE_ORIGEN: Record<string, string> = {
+  MANUAL: "A mano",
+  WEB: "Web",
+  CORREO: "Correo",
+  TELEFONO: "Teléfono",
+  RESERVA: "Reserva de grupo grande",
+};
+export const nombreOrigen = (o: string) => NOMBRE_ORIGEN[o] ?? o;
+/** Una solicitud celebrada o perdida está cerrada: no se presupuesta ni se aceptan presupuestos. */
+export const estaCerrada = (e: EstadoEvento) => e === "CELEBRADA" || e === "PERDIDA";
 
 /** Paso al que se puede ir desde cada estado (además de «perdida»). */
 const SIGUIENTES: Record<EstadoEvento, EstadoEvento[]> = {
@@ -78,15 +90,32 @@ function filtroCentros(ctx: Contexto): Prisma.EventoSolicitudWhereInput {
   return { OR: [{ centroId: null }, { centroId: { in: centrosFiltro(ctx) } }] };
 }
 
+/**
+ * Comprueba local, espacio y marca elegidos: el local tiene que ser un local que ve el usuario,
+ * el espacio (de Reservas) tiene que ser de ese local y la marca, de la cadena.
+ * Devuelve la marca que le corresponde (la del local manda).
+ */
+async function comprobarLocal(tx: Tx, ctx: Contexto, d: { centroId?: string | null; espacioId?: string | null; marcaId?: string | null }) {
+  let marcaId = d.marcaId ?? null;
+  if (marcaId && !(await tx.marca.findFirst({ where: { tenantId: ctx.tenant.id, id: marcaId }, select: { id: true } }))) throw new ErrorEventos("Marca no válida");
+  if (d.centroId) {
+    if (!ctx.centros.some((c) => c.id === d.centroId && c.tipo === "LOCAL")) throw new ErrorEventos("Local no válido o sin acceso");
+    const c = await tx.centro.findFirst({ where: { tenantId: ctx.tenant.id, id: d.centroId }, select: { marcaId: true } });
+    if (!c) throw new ErrorEventos("Local no válido");
+    marcaId = c.marcaId ?? marcaId;
+  }
+  if (d.espacioId) {
+    if (!d.centroId) throw new ErrorEventos("Elige el local del espacio");
+    const espacios = ctx.tieneModulo("reservas") ? await espaciosDeCentros(ctx.tenant.id, [d.centroId]) : [];
+    if (!espacios.some((e) => e.id === d.espacioId)) throw new ErrorEventos("El espacio elegido no es de ese local");
+  }
+  return marcaId;
+}
+
 export async function crearSolicitud(ctx: Contexto, d: DatosSolicitud) {
   const prisma = await db();
   return prisma.$transaction(async (tx) => {
-    let marcaId = d.marcaId ?? null;
-    if (d.centroId) {
-      const c = await tx.centro.findFirst({ where: { tenantId: ctx.tenant.id, id: d.centroId } });
-      if (!c) throw new ErrorEventos("Local no válido");
-      marcaId = marcaId ?? c.marcaId;
-    }
+    const marcaId = await comprobarLocal(tx, ctx, d);
     const clienteId = ctx.tieneModulo("clientes")
       ? await buscarOCrearCliente(tx, ctx.tenant.id, { nombre: d.nombreContacto, telefono: d.telefono, email: d.email, origen: "EVENTO" }, [], ctx.usuario.id)
       : null;
@@ -108,7 +137,8 @@ export async function crearSolicitud(ctx: Contexto, d: DatosSolicitud) {
 
 export async function listarSolicitudes(ctx: Contexto, f: { estado?: string; tipo?: string; q?: string }) {
   const prisma = await db();
-  const where: Prisma.EventoSolicitudWhereInput = {
+  // El embudo cuenta con la misma búsqueda y tipo que la lista; solo el estado no se aplica (cada cifra es un estado)
+  const sinEstado: Prisma.EventoSolicitudWhereInput = {
     tenantId: ctx.tenant.id,
     AND: [
       filtroCentros(ctx),
@@ -116,9 +146,9 @@ export async function listarSolicitudes(ctx: Contexto, f: { estado?: string; tip
         ? [{ OR: [{ nombreContacto: { contains: f.q, mode: "insensitive" as const } }, { empresa: { contains: f.q, mode: "insensitive" as const } }, { numero: { contains: f.q.toUpperCase() } }] }]
         : []),
     ],
-    ...(f.estado ? { estado: f.estado as EstadoEvento } : {}),
     ...(f.tipo ? { tipo: f.tipo as TipoEvento } : {}),
   };
+  const where: Prisma.EventoSolicitudWhereInput = { ...sinEstado, ...(f.estado ? { estado: f.estado as EstadoEvento } : {}) };
   const [solicitudes, porEstado] = await Promise.all([
     prisma.eventoSolicitud.findMany({
       where,
@@ -126,7 +156,7 @@ export async function listarSolicitudes(ctx: Contexto, f: { estado?: string; tip
       include: { presupuestos: { orderBy: { version: "desc" }, take: 1 }, historial: { orderBy: { createdAt: "desc" }, take: 5 } },
       take: 300,
     }),
-    prisma.eventoSolicitud.groupBy({ by: ["estado"], where: { tenantId: ctx.tenant.id, ...filtroCentros(ctx) }, _count: { _all: true }, _sum: { personas: true } }),
+    prisma.eventoSolicitud.groupBy({ by: ["estado"], where: sinEstado, _count: { _all: true }, _sum: { personas: true } }),
   ]);
   const embudo = Object.fromEntries(porEstado.map((g) => [g.estado, { n: g._count._all, personas: g._sum.personas ?? 0 }])) as Partial<Record<EstadoEvento, { n: number; personas: number }>>;
   return { solicitudes, embudo };
@@ -162,12 +192,8 @@ export async function asignarLocal(ctx: Contexto, d: { id: string; centroId?: st
   const prisma = await db();
   const s = await prisma.eventoSolicitud.findFirst({ where: { tenantId: ctx.tenant.id, id: d.id, ...filtroCentros(ctx) } });
   if (!s) throw new ErrorEventos("Solicitud no encontrada");
-  let marcaId = s.marcaId;
-  if (d.centroId) {
-    const c = await prisma.centro.findFirst({ where: { tenantId: ctx.tenant.id, id: d.centroId } });
-    if (!c) throw new ErrorEventos("Local no válido");
-    marcaId = c.marcaId ?? marcaId;
-  }
+  if (estaCerrada(s.estado)) throw new ErrorEventos("La solicitud está cerrada");
+  const marcaId = await comprobarLocal(prisma, ctx, { centroId: d.centroId, espacioId: d.espacioId, marcaId: s.marcaId });
   await prisma.eventoSolicitud.update({
     where: { id: s.id },
     data: {
@@ -200,7 +226,7 @@ export async function crearPresupuesto(ctx: Contexto, d: { solicitudId: string; 
   return prisma.$transaction(async (tx) => {
     const s = await tx.eventoSolicitud.findFirst({ where: { tenantId: ctx.tenant.id, id: d.solicitudId, ...filtroCentros(ctx) } });
     if (!s) throw new ErrorEventos("Solicitud no encontrada");
-    if (s.estado === "CELEBRADA" || s.estado === "PERDIDA") throw new ErrorEventos("La solicitud está cerrada");
+    if (estaCerrada(s.estado)) throw new ErrorEventos("La solicitud está cerrada");
     const lineas: { menuId?: string; concepto: string; cantidad: number; precio: number; iva: number }[] = [];
     if (d.menuId) {
       const m = await tx.eventoMenu.findFirst({ where: { tenantId: ctx.tenant.id, id: d.menuId, activo: true } });
@@ -235,21 +261,42 @@ export async function crearPresupuesto(ctx: Contexto, d: { solicitudId: string; 
   });
 }
 
+/** Pasos de un presupuesto: borrador → enviado → aceptado o rechazado. */
+const SIGUIENTES_PRESUPUESTO: Record<string, string[]> = { BORRADOR: ["ENVIADO"], ENVIADO: ["ACEPTADO", "RECHAZADO"], ACEPTADO: [], RECHAZADO: [] };
+export function pasosPresupuesto(estado: string) {
+  return (SIGUIENTES_PRESUPUESTO[estado] ?? []) as ("ENVIADO" | "ACEPTADO" | "RECHAZADO")[];
+}
+
+/**
+ * Cambia el estado de un presupuesto (solo de solicitudes que ve el usuario y que no estén cerradas).
+ * Solo puede haber un presupuesto aceptado por solicitud: al aceptar uno, los demás que estuvieran
+ * en borrador, enviados o aceptados pasan a rechazados («sustituido por …»).
+ */
 export async function cambiarEstadoPresupuesto(ctx: Contexto, d: { id: string; estado: "ENVIADO" | "ACEPTADO" | "RECHAZADO" }) {
   const prisma = await db();
   await prisma.$transaction(async (tx) => {
-    const p = await tx.eventoPresupuesto.findFirst({ where: { tenantId: ctx.tenant.id, id: d.id }, include: { solicitud: true } });
+    const p = await tx.eventoPresupuesto.findFirst({ where: { tenantId: ctx.tenant.id, id: d.id, solicitud: filtroCentros(ctx) }, include: { solicitud: true } });
     if (!p) throw new ErrorEventos("Presupuesto no encontrado");
+    if (estaCerrada(p.solicitud.estado)) throw new ErrorEventos(`La solicitud está ${p.solicitud.estado === "PERDIDA" ? "perdida" : "celebrada"}: no se pueden cambiar sus presupuestos`);
+    if (!pasosPresupuesto(p.estado).includes(d.estado)) throw new ErrorEventos("Ese paso no se puede dar con este presupuesto");
+    if (d.estado === "ACEPTADO") {
+      const otros = await tx.eventoPresupuesto.findMany({ where: { solicitudId: p.solicitudId, id: { not: p.id }, estado: { in: ["BORRADOR", "ENVIADO", "ACEPTADO"] } } });
+      for (const o of otros) {
+        await tx.eventoPresupuesto.update({ where: { id: o.id }, data: { estado: "RECHAZADO" } });
+        await auditar(tx, { tenantId: ctx.tenant.id, usuarioId: ctx.usuario.id, entidad: "EventoPresupuesto", entidadId: o.id, accion: "rechazado", antes: { estado: o.estado }, despues: { estado: "RECHAZADO", motivo: `Sustituido por ${p.numero}` } });
+      }
+    }
     await tx.eventoPresupuesto.update({
       where: { id: p.id },
       data: { estado: d.estado, ...(d.estado === "ENVIADO" ? { enviadoEn: new Date() } : {}), ...(d.estado === "ACEPTADO" ? { aceptadoEn: new Date() } : {}) },
     });
     const s = p.solicitud;
     const nuevo: EstadoEvento | null =
-      d.estado === "ENVIADO" && (s.estado === "NUEVA" || s.estado === "CONTACTADA") ? "PRESUPUESTO" : d.estado === "ACEPTADO" && s.estado !== "CELEBRADA" ? "ACEPTADA" : null;
+      d.estado === "ENVIADO" && (s.estado === "NUEVA" || s.estado === "CONTACTADA") ? "PRESUPUESTO" : d.estado === "ACEPTADO" ? "ACEPTADA" : null;
     if (nuevo && nuevo !== s.estado) {
       await tx.eventoSolicitud.update({ where: { id: s.id }, data: { estado: nuevo } });
       await tx.eventoHistorial.create({ data: { solicitudId: s.id, desde: s.estado, hasta: nuevo, nota: `Presupuesto ${p.numero} ${d.estado === "ENVIADO" ? "enviado" : "aceptado"}`, usuarioId: ctx.usuario.id } });
+      if (nuevo === "ACEPTADA") await emitir(tx, ctx.tenant.id, "eventos.solicitud.aceptada", { solicitudId: s.id, centroId: s.centroId, espacioId: s.espacioId, fecha: s.fecha, personas: s.personas });
     }
     await auditar(tx, { tenantId: ctx.tenant.id, usuarioId: ctx.usuario.id, entidad: "EventoPresupuesto", entidadId: p.id, accion: d.estado.toLowerCase(), antes: { estado: p.estado }, despues: { estado: d.estado } });
   });

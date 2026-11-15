@@ -9,6 +9,7 @@ import type { Prisma } from "../../generated/prisma/client";
 import type { Tx } from "../../nucleo/motor-movimientos";
 import { cargarEscandallos, costesProductos, consumoDeVenta, descontarStockVentas, type EscandalloVenta, type LineaVendida } from "../../nucleo/consumo-ventas";
 import { insertarPorLotes, UMBRAL_LOTE_RAPIDO } from "../../nucleo/insertar-lotes";
+import { euros } from "../../kernel/formato";
 
 export class ErrorTicket extends Error {}
 
@@ -167,7 +168,7 @@ async function lotes<T>(filas: T[], n: number, fn: (l: T[]) => Promise<unknown>)
  * - Un ticket cobrado tiene que cuadrar: suma de cobros = total (tolerancia de 1 céntimo por línea).
  */
 export async function guardarTickets(tx: Tx, tenantId: string, tickets: TicketNuevo[], opciones: { usuarioId?: string | null; escandallos?: Map<string, EscandalloVenta>; costes?: Map<string, number> } = {}) {
-  if (tickets.length === 0) return { ids: [] as string[], movimientos: 0 };
+  if (tickets.length === 0) return { ids: [] as string[], movimientos: 0, jornadasSustituidas: [] as JornadaSustituida[] };
   const centroIds = Array.from(new Set(tickets.map((t) => t.centroId)));
   const platoIds = Array.from(new Set(tickets.flatMap((t) => t.lineas.map((l) => l.platoId).filter((x): x is string => !!x))));
   const [centros, escandallos, ajustes] = await Promise.all([
@@ -294,15 +295,16 @@ export async function guardarTickets(tx: Tx, tenantId: string, tickets: TicketNu
     );
   await lotes(filasCobro, 3000, (l) => tx.ticketCobro.createMany({ data: l }));
   const r = await descontarStockVentas(tx, tenantId, vendidas, { escandallos, costes });
-  await recalcularJornadas(
+  const jornadasSustituidas = await recalcularJornadas(
     tx,
     tenantId,
     Array.from(claveJornada).map((k) => {
       const [centroId, fecha] = k.split("|");
       return { centroId, fecha };
     }),
+    opciones.usuarioId,
   );
-  return { ids: filasTicket.map((t) => t.id as string), movimientos: r.movimientos };
+  return { ids: filasTicket.map((t) => t.id as string), movimientos: r.movimientos, jornadasSustituidas };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -480,9 +482,23 @@ export function calcularJornada(tickets: TicketParaJornada[]): JornadaCalculada 
   };
 }
 
-/** Recalcula y guarda la jornada de cada local y día a partir de sus tickets (por lotes). */
-export async function recalcularJornadas(tx: Tx, tenantId: string, claves: { centroId: string; fecha: string }[]) {
-  if (claves.length === 0) return;
+/** Jornada que estaba metida a mano (o importada sin tickets) y pasa a calcularse desde los tickets. */
+export interface JornadaSustituida {
+  centroId: string;
+  fecha: string;
+  ventaNeta: number;
+  comensales: number;
+  tickets: number;
+}
+
+/**
+ * Recalcula y guarda la jornada de cada local y día a partir de sus tickets (por lotes).
+ * Si el día ya tenía una jornada metida a mano (sin tickets), los tickets mandan: las cifras a mano se
+ * sustituyen, pero quedan en el historial (auditoría «sustituir por tickets» con las cifras de antes) y en
+ * las notas de la jornada. Devuelve las jornadas sustituidas para avisar a quien guarda.
+ */
+export async function recalcularJornadas(tx: Tx, tenantId: string, claves: { centroId: string; fecha: string }[], usuarioId?: string | null): Promise<JornadaSustituida[]> {
+  if (claves.length === 0) return [];
   const centroIds = Array.from(new Set(claves.map((c) => c.centroId)));
   const fechas = Array.from(new Set(claves.map((c) => c.fecha))).map(aFechaDia);
   const pedidas = new Set(claves.map((c) => `${c.centroId}|${c.fecha}`));
@@ -491,7 +507,10 @@ export async function recalcularJornadas(tx: Tx, tenantId: string, claves: { cen
       where: { tenantId, centroId: { in: centroIds }, fecha: { in: fechas } },
       select: { centroId: true, fecha: true, estado: true, turno: true, comensales: true, base: true, cuotaIva: true, descuentos: true, invitaciones: true, anulaciones: true, costeTeorico: true, origen: true, cobros: { select: { forma: true, importe: true, propina: true } } },
     }),
-    tx.jornadaVenta.findMany({ where: { tenantId, centroId: { in: centroIds }, fecha: { in: fechas } }, select: { id: true, centroId: true, fecha: true } }),
+    tx.jornadaVenta.findMany({
+      where: { tenantId, centroId: { in: centroIds }, fecha: { in: fechas } },
+      select: { id: true, centroId: true, fecha: true, desdeTickets: true, origen: true, ventaNeta: true, cuotaIva: true, comensales: true, tickets: true, notas: true, creadoPor: true, pagos: { select: { forma: true, importe: true } } },
+    }),
   ]);
   const porClave = new Map<string, TicketParaJornada[]>();
   for (const t of tickets) {
@@ -513,7 +532,8 @@ export async function recalcularJornadas(tx: Tx, tenantId: string, claves: { cen
     });
     porClave.set(k, lista);
   }
-  const yaHay = new Map(existentes.map((j) => [`${j.centroId}|${j.fecha.toISOString().slice(0, 10)}`, j.id]));
+  const yaHay = new Map(existentes.map((j) => [`${j.centroId}|${j.fecha.toISOString().slice(0, 10)}`, j]));
+  const sustituidas: JornadaSustituida[] = [];
   const nuevas: Prisma.JornadaVentaCreateManyInput[] = [];
   const pagosNuevos: Prisma.JornadaVentaPagoCreateManyInput[] = [];
   for (const [k, lista] of porClave) {
@@ -536,7 +556,15 @@ export async function recalcularJornadas(tx: Tx, tenantId: string, claves: { cen
       notas: `Calculada desde ${lista.length} tickets (${j.tickets} cobrados${lista.some((t) => t.estado === "ABIERTO") ? `, ${lista.filter((t) => t.estado === "ABIERTO").length} abiertos` : ""}${lista.some((t) => t.estado === "ANULADO") ? `, ${lista.filter((t) => t.estado === "ANULADO").length} anulados` : ""}).`,
     };
     const pagos = j.pagos.filter((p) => p.importe !== 0 || p.propina !== 0);
-    const id = yaHay.get(k);
+    const previa = yaHay.get(k);
+    const id = previa?.id;
+    if (previa && !previa.desdeTickets) {
+      // la jornada estaba metida a mano: se sustituye por la de los tickets, pero sin perder lo que había
+      const antes = { ventaNeta: Number(previa.ventaNeta), cuotaIva: Number(previa.cuotaIva), comensales: previa.comensales, tickets: previa.tickets, origen: previa.origen, notas: previa.notas, creadoPor: previa.creadoPor, pagos: previa.pagos.map((p) => ({ forma: p.forma, importe: Number(p.importe) })) };
+      datos.notas = `${datos.notas} Sustituye a las cifras metidas a mano (venta neta ${euros(antes.ventaNeta)}, ${antes.comensales} comensales, ${antes.tickets} tickets): ver el historial.`;
+      await tx.auditoria.create({ data: { tenantId, usuarioId: usuarioId ?? undefined, entidad: "JornadaVenta", entidadId: previa.id, accion: "sustituir por tickets", antes: antes as object, despues: { ventaNeta: j.ventaNeta, comensales: j.comensales, tickets: j.tickets } } });
+      sustituidas.push({ centroId, fecha, ventaNeta: antes.ventaNeta, comensales: antes.comensales, tickets: antes.tickets });
+    }
     if (id) {
       await tx.jornadaVenta.update({ where: { id }, data: datos });
       await tx.jornadaVentaPago.deleteMany({ where: { jornadaId: id } });
@@ -549,4 +577,5 @@ export async function recalcularJornadas(tx: Tx, tenantId: string, claves: { cen
   }
   await lotes(nuevas, 500, (l) => tx.jornadaVenta.createMany({ data: l }));
   await lotes(pagosNuevos, 2000, (l) => tx.jornadaVentaPago.createMany({ data: l }));
+  return sustituidas;
 }

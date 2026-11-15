@@ -6,7 +6,7 @@ import { TablaDesplegable, DatosDetalle } from "@/ui/tabla-desplegable";
 import * as s from "@/modulos/personal/servicio";
 import { calcularNominasAccion, estadoNominasAccion } from "@/modulos/personal/acciones";
 import { NOMBRE_ESTADO_NOMINA } from "@/modulos/personal/esquemas";
-import { TIPOS_NOMINA } from "@/modulos/personal/nominas";
+import { TIPOS_NOMINA, esTiempoParcial } from "@/modulos/personal/nominas";
 import { esMes, hoyMadrid, mesSiguiente, nombreMes } from "@/modulos/personal/fechas";
 import { EtiquetaContrato, Mensajes, Volver, Acciones, horasTexto, param, type Busqueda } from "../_componentes/comun";
 
@@ -180,7 +180,7 @@ export default async function Nominas({ searchParams }: { searchParams: Busqueda
             )}
           </div>
           <p className="mt-3 text-xs text-slate-500">
-            Calcular rehace solo los borradores (las cerradas y pagadas no se tocan). Toma el contrato en vigor, sus complementos, las horas extra de los fichajes (lo que pasa del turno del cuadrante en más de {TIPOS_NOMINA.toleranciaExtraMinutos} min) y las bajas y ausencias sin sueldo aprobadas.
+            Calcular rehace solo los borradores (las cerradas y pagadas no se tocan). Toma el contrato en vigor, sus complementos, las horas extra de los fichajes (lo que pasa del turno del cuadrante en más de {TIPOS_NOMINA.toleranciaExtraMinutos} min) y las bajas y ausencias sin sueldo aprobadas. Con menos de {TIPOS_NOMINA.jornadaCompleta} h/semana el contrato es a tiempo parcial y las horas de más son complementarias (sin recargo).
           </p>
         </Tarjeta>
       )}
@@ -231,7 +231,7 @@ export default async function Nominas({ searchParams }: { searchParams: Busqueda
                     { etiqueta: "Periodo", valor: `${fecha(n.desde)} – ${fecha(n.hasta)}` },
                     { etiqueta: "Días", valor: `${n.diasCotizados} cotizados${n.diasIT ? ` · ${n.diasIT} de baja (IT)` : ""}${n.diasSinSueldo ? ` · ${n.diasSinSueldo} sin sueldo` : ""}` },
                     { etiqueta: "Horas fichadas", valor: horasTexto(aNumero(n.horasTrabajadas)) },
-                    { etiqueta: n.tipoContrato === "PARCIAL" ? "Horas complementarias" : "Horas extra", valor: aNumero(n.horasExtra) ? horasTexto(aNumero(n.horasExtra)) : "—" },
+                    { etiqueta: esTiempoParcial(n.tipoContrato, aNumero(n.jornadaSemanal)) ? "Horas complementarias" : "Horas extra", valor: aNumero(n.horasExtra) ? horasTexto(aNumero(n.horasExtra)) : "—" },
                     { etiqueta: "Base contingencias comunes", valor: euros(n.baseCotizacion) },
                     { etiqueta: "Base profesionales", valor: euros(n.baseProfesionales) },
                     { etiqueta: "Retención IRPF", valor: `${porcentaje(n.irpfPorcentaje, 2)} · ${euros(n.irpf)}` },
@@ -275,6 +275,8 @@ export default async function Nominas({ searchParams }: { searchParams: Busqueda
       <div className="mt-6 space-y-3">
         <Aviso tono="aviso" titulo="Cálculo de ejemplo">
           Los porcentajes de Seguridad Social, la retención de IRPF, el recargo de las horas extra ({numero(TIPOS_NOMINA.recargoHorasExtra)}) y la incapacidad temporal son de ejemplo y hay que comprobarlos con la gestoría. La nómina oficial la hace la gestoría; esta sirve para conocer y revisar el coste de personal por centro y mes.
+          <br />
+          Se aplica la norma general, que muchos convenios cambian (compruébalo con la gestoría): pagas extra sin prorratear con devengo semestral (verano, de enero a junio; Navidad, de julio a diciembre), pagadas en proporción a los días del semestre con contrato y sin baja ni ausencia sin sueldo, y en el mes de la baja la parte ganada; baja por enfermedad común o accidente no laboral sin prestación los 3 primeros días; baja por accidente de trabajo con el día del accidente pagado como trabajado y el {TIPOS_NOMINA.it.pctAccidenteTrabajo} % desde el día siguiente.
         </Aviso>
         <HuecoIntegracion nombre="Gestoría (nóminas)" descripcion="Importar los recibos oficiales que haga la gestoría y comparar con este cálculo; publicarlos en el portal del empleado. Pendiente (P-04)" />
       </div>

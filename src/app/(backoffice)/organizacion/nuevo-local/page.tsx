@@ -69,7 +69,7 @@ export default async function NuevoLocalPagina({ searchParams }: { searchParams:
             <div className="space-y-3">
               <Campo etiqueta="Sociedad">
                 <Selector name="sociedadId" defaultValue="">
-                  <option value="">Sociedad nueva (escríbela abajo) o pendiente</option>
+                  <option value="">Sociedad nueva (escríbela abajo) o sin sociedad todavía</option>
                   {sociedades
                     .filter((s) => s.activo)
                     .map((s) => (
@@ -83,7 +83,7 @@ export default async function NuevoLocalPagina({ searchParams }: { searchParams:
                 <Campo etiqueta="Razón social nueva">
                   <Entrada name="sociedadRazon" />
                 </Campo>
-                <Campo etiqueta="CIF">
+                <Campo etiqueta="CIF" ayuda="Si aún no lo sabes, escribe PENDIENTE">
                   <Entrada name="sociedadCif" />
                 </Campo>
               </Rejilla>

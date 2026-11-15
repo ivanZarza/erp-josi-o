@@ -11,6 +11,8 @@ import { ErrorNegocio, num, r2, r3, type AreaAlmacen, type Tx } from "./comun-al
  * Cada línea son dos movimientos TRASPASO con el mismo documento TRA-…: − en el almacén de origen
  * y + en el de destino, al coste medio del producto. El stock del centro no cambia.
  * No se puede traspasar más de lo que hay en el almacén de origen.
+ * El origen puede ser el stock «Sin ubicar» del centro (origenId null): así se coloca en su almacén lo que
+ * entró antes de que el centro tuviera almacenes. El destino siempre es un almacén.
  */
 
 export interface LineaTraspaso {
@@ -23,15 +25,16 @@ export async function registrarTraspaso(
   tenantId: string,
   usuarioId: string,
   area: AreaAlmacen,
-  d: { centroId: string; origenId: string; destinoId: string; lineas: LineaTraspaso[]; nota?: string | null },
+  d: { centroId: string; origenId: string | null; destinoId: string; lineas: LineaTraspaso[]; nota?: string | null },
 ) {
   if (d.origenId === d.destinoId) throw new ErrorNegocio("El almacén de origen y el de destino tienen que ser distintos.");
   const [centro, almacenes] = await Promise.all([
     tx.centro.findFirst({ where: { id: d.centroId, tenantId } }),
-    tx.almacen.findMany({ where: { id: { in: [d.origenId, d.destinoId] }, centroId: d.centroId, activo: true } }),
+    tx.almacen.findMany({ where: { id: { in: [d.origenId, d.destinoId].filter((x): x is string => !!x) }, centroId: d.centroId, activo: true } }),
   ]);
   if (!centro) throw new ErrorNegocio("El centro no existe.");
-  const origen = almacenes.find((a) => a.id === d.origenId);
+  // origen null = «Sin ubicar» del centro
+  const origen = d.origenId === null ? { id: null, nombre: "Sin ubicar" } : almacenes.find((a) => a.id === d.origenId);
   const destino = almacenes.find((a) => a.id === d.destinoId);
   if (!origen || !destino) throw new ErrorNegocio("Los dos almacenes tienen que ser de ese centro y estar activos.");
 
@@ -80,9 +83,9 @@ export async function registrarTraspaso(
 /**
  * Productos que se pueden pasar de un almacén a otro: los que tienen stock en el origen, con lo que hay
  * en origen y en destino y una propuesta para reponer el destino si ese es su almacén por defecto y hay
- * máximo (hasta el máximo) o mínimo (hasta el mínimo) en el centro.
+ * máximo (hasta el máximo) o mínimo (hasta el mínimo) en el centro. origenId null = «Sin ubicar».
  */
-export async function catalogoTraspaso(tx: Tx, tenantId: string, area: AreaAlmacen, centroId: string, origenId: string, destinoId: string) {
+export async function catalogoTraspaso(tx: Tx, tenantId: string, area: AreaAlmacen, centroId: string, origenId: string | null, destinoId: string) {
   const [enOrigen, enDestino, total] = await Promise.all([
     stockEnCentro(tx, tenantId, area, centroId, origenId),
     stockEnCentro(tx, tenantId, area, centroId, destinoId),
