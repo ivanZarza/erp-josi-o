@@ -576,11 +576,32 @@ export async function listarRecargos(ctx: Contexto) {
     include: { marca: { select: { nombre: true } } },
     orderBy: [{ marcaId: "asc" }, { nombre: "asc" }],
   });
-  const recargos = await prisma.cartaRecargo.findMany({ where: { tenantId: ctx.tenant.id, centroId: { in: locales.map((l) => l.id) }, concepto: "Pan y aperitivo" } });
+  const [recargos, platos] = await Promise.all([
+    prisma.cartaRecargo.findMany({ where: { tenantId: ctx.tenant.id, centroId: { in: locales.map((l) => l.id) }, concepto: "Pan y aperitivo" } }),
+    // platos que pueden dar el escandallo del recargo: los de comidas de la marca del local o del propio local
+    prisma.cartaPlato.findMany({
+      where: { tenantId: ctx.tenant.id, area: "COMIDAS", activo: true, OR: [{ centroId: { in: locales.map((l) => l.id) } }, { centroId: null, marcaId: { in: locales.map((l) => l.marcaId).filter((x): x is string => !!x) } }] },
+      select: { id: true, nombre: true, marcaId: true, centroId: true },
+      orderBy: { nombre: "asc" },
+    }),
+  ]);
   const mapa = new Map(recargos.map((r) => [r.centroId, r]));
+  const nombrePlato = new Map(platos.map((p) => [p.id, p.nombre]));
   return locales.map((l) => {
     const r = mapa.get(l.id);
-    return { centroId: l.id, local: l.nombre, codigo: l.codigo, marca: l.marca?.nombre ?? "—", importe: r ? Number(r.importe) : null, iva: r ? Number(r.iva) : 10, activo: r?.activo ?? false, actualizado: r?.updatedAt ?? null };
+    return {
+      centroId: l.id,
+      local: l.nombre,
+      codigo: l.codigo,
+      marca: l.marca?.nombre ?? "—",
+      importe: r ? Number(r.importe) : null,
+      iva: r ? Number(r.iva) : 10,
+      activo: r?.activo ?? false,
+      actualizado: r?.updatedAt ?? null,
+      platoId: r?.platoId ?? null,
+      plato: r?.platoId ? (nombrePlato.get(r.platoId) ?? "—") : null,
+      platos: platos.filter((p) => p.centroId === l.id || (p.centroId === null && p.marcaId === l.marcaId)).map((p) => ({ id: p.id, nombre: p.nombre })),
+    };
   });
 }
 
@@ -1094,10 +1115,17 @@ export async function fijarRecargo(ctx: Contexto, datos: Record<string, unknown>
   const prisma = await db();
   if (!ctx.centros.some((c) => c.id === d.centroId)) throw new ErrorCarta("No tienes acceso a ese local");
   const antes = await prisma.cartaRecargo.findUnique({ where: { tenantId_centroId_concepto: { tenantId: ctx.tenant.id, centroId: d.centroId, concepto: "Pan y aperitivo" } } });
+  const platoId = d.platoId ?? null;
+  if (platoId) {
+    // el plato del escandallo tiene que ser de comidas, de la marca del local o del propio local
+    const centro = await prisma.centro.findFirst({ where: { id: d.centroId, tenantId: ctx.tenant.id }, select: { marcaId: true } });
+    const plato = await prisma.cartaPlato.findFirst({ where: { id: platoId, tenantId: ctx.tenant.id, area: "COMIDAS", OR: [{ centroId: d.centroId }, { centroId: null, marcaId: centro?.marcaId ?? "-" }] }, select: { id: true } });
+    if (!plato) throw new ErrorCarta("Ese plato no es de la carta de este local");
+  }
   await prisma.cartaRecargo.upsert({
     where: { tenantId_centroId_concepto: { tenantId: ctx.tenant.id, centroId: d.centroId, concepto: "Pan y aperitivo" } },
-    create: { tenantId: ctx.tenant.id, centroId: d.centroId, concepto: "Pan y aperitivo", importe: d.importe, iva: d.iva, activo: d.activo },
-    update: { importe: d.importe, iva: d.iva, activo: d.activo },
+    create: { tenantId: ctx.tenant.id, centroId: d.centroId, concepto: "Pan y aperitivo", importe: d.importe, iva: d.iva, activo: d.activo, platoId },
+    update: { importe: d.importe, iva: d.iva, activo: d.activo, platoId },
   });
   await auditar(prisma, {
     tenantId: ctx.tenant.id,
@@ -1105,8 +1133,8 @@ export async function fijarRecargo(ctx: Contexto, datos: Record<string, unknown>
     entidad: "CartaRecargo",
     entidadId: d.centroId,
     accion: "recargo pan y aperitivo",
-    antes: antes ? { importe: Number(antes.importe), activo: antes.activo } : null,
-    despues: { importe: d.importe, activo: d.activo },
+    antes: antes ? { importe: Number(antes.importe), iva: Number(antes.iva), activo: antes.activo, platoId: antes.platoId } : null,
+    despues: { importe: d.importe, iva: d.iva, activo: d.activo, platoId },
   });
 }
 

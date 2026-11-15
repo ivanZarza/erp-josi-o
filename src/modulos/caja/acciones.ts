@@ -17,6 +17,7 @@ import {
   cobrarTicketManual,
   anularLineaTicket,
   anularTicketManual,
+  cambiarComensalesTicket,
   abrirCaja,
   apuntarMovimientoCaja,
   importarTextoTpv,
@@ -75,7 +76,8 @@ export async function accionRegistrarTicket(form: FormData) {
     const aviso = r.jornadasSustituidas.length
       ? ` Ese día tenía las ventas metidas a mano (${euros(r.jornadasSustituidas[0].ventaNeta)}): desde ahora la jornada se calcula con los tickets y las cifras de antes quedan en el historial.`
       : "";
-    return `Ticket ${r.numero} guardado. El stock de lo pedido ya ha bajado.${aviso}`;
+    const pan = r.recargo ? (r.recargo.quitado ? ` «${r.recargo.concepto}» quitado (queda anulado con el motivo).` : ` Incluye «${r.recargo.concepto}»: ${euros(r.recargo.importe)}.`) : "";
+    return `Ticket ${r.numero} guardado. El stock de lo pedido ya ha bajado.${pan}${aviso}`;
   });
 }
 
@@ -84,6 +86,22 @@ export async function accionAnadirLineas(form: FormData) {
   await ejecutar(volver(form, "/caja/tickets"), async () => {
     await anadirLineasTicket(ctx, ticketDeFormulario(form));
     return "Líneas añadidas al ticket.";
+  });
+}
+
+export async function accionCambiarComensales(form: FormData) {
+  const ctx = await exigir("caja", "caja:tickets:crear");
+  await ejecutar(volver(form, "/caja/tickets"), async () => {
+    const r = await cambiarComensalesTicket(ctx, objetoDeFormulario(form));
+    const pan = {
+      ajustado: " El pan y aperitivo se ha ajustado a los comensales.",
+      añadido: " Se ha añadido el pan y aperitivo.",
+      quitado: " Sin comensales: el pan y aperitivo queda anulado.",
+      rechazado: " El pan y aperitivo sigue quitado (la mesa no lo toma).",
+      "sin recargo": "",
+      igual: "",
+    }[r.recargo];
+    return `Comensales cambiados.${pan}`;
   });
 }
 

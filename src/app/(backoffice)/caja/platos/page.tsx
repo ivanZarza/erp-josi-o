@@ -103,6 +103,7 @@ export default async function VentaPorPlato({ searchParams }: { searchParams: Pa
                   <span key="c">
                     {f.concepto}
                     {f.area === "BEBIDAS" ? <span className="ml-1 text-xs text-slate-500">(bebida)</span> : null}
+                    {f.recargo ? <span className="ml-1 text-xs text-slate-500">(por comensal)</span> : null}
                   </span>,
                   numero(f.unidades),
                   euros(f.importe),

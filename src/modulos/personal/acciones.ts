@@ -296,6 +296,13 @@ export async function borrarCandidatosCaducadosAccion(form: FormData) {
   });
 }
 
+export async function ampliarConservacionCandidatoAccion(form: FormData) {
+  await ejecutar(form, "personal:seleccion:editar", async (ctx, d) => {
+    await s.ampliarConservacionCandidato(ctx, String(d.candidatoId ?? ""));
+    return "Datos del candidato conservados un año más.";
+  });
+}
+
 export async function estadoCandidatoAccion(form: FormData) {
   await ejecutar(form, "personal:seleccion:editar", async (ctx, d) => {
     await s.cambiarEstadoCandidato(ctx, e.esquemaEstadoCandidato.parse(d));

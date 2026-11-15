@@ -1242,16 +1242,11 @@ export async function desactivarDocumento(ctx: Contexto, id: string) {
 // Selección
 // =====================================================================
 
-/** Candidatos que siguen dentro de plazo (los caducados no se enseñan aunque aún no se hayan borrado). */
-function candidatoEnPlazo(): Prisma.CandidatoWhereInput {
-  return { OR: [{ borrarEn: null }, { borrarEn: { gte: aDia(hoyMadrid()) } }, { estado: "CONTRATADO" }] };
-}
-
 export async function listarOfertas(ctx: Contexto, estado?: string) {
   const prisma = await db();
   return prisma.ofertaEmpleo.findMany({
     where: { tenantId: ctx.tenant.id, centroId: { in: centrosFiltro(ctx) }, ...(estado ? { estado: estado as never } : {}) },
-    include: { puesto: true, candidatos: { where: candidatoEnPlazo(), orderBy: { createdAt: "desc" } } },
+    include: { puesto: true, candidatos: { orderBy: { createdAt: "desc" } } },
     orderBy: [{ estado: "asc" }, { publicadaEn: "desc" }],
   });
 }
@@ -1264,10 +1259,13 @@ function candidatoDeCentros(ids: string[]): Prisma.CandidatoWhereInput {
   return { OR: [{ centroId: { in: ids } }, { centroId: null, oferta: { centroId: { in: ids } } }, { centroId: null, ofertaId: null }] };
 }
 
-/** Bolsa (candidatos sin oferta) de los centros que ve el usuario. */
+/**
+ * Bolsa (candidatos sin oferta) de los centros que ve el usuario. Salen también los que han pasado su
+ * plazo de conservación (Iván, 15/11: se pueden volver a llamar más adelante); la pantalla los marca.
+ */
 export async function bolsaCandidatos(ctx: Contexto) {
   const prisma = await db();
-  return prisma.candidato.findMany({ where: { tenantId: ctx.tenant.id, ofertaId: null, estado: { notIn: ["CONTRATADO"] }, AND: [candidatoDeCentros(centrosFiltro(ctx)), candidatoEnPlazo()] }, orderBy: { createdAt: "desc" } });
+  return prisma.candidato.findMany({ where: { tenantId: ctx.tenant.id, ofertaId: null, estado: { notIn: ["CONTRATADO"] }, ...candidatoDeCentros(centrosFiltro(ctx)) }, orderBy: { createdAt: "desc" } });
 }
 
 /** Candidatos de los centros del usuario que ya han pasado su fecha de borrado (RGPD). */
@@ -1279,7 +1277,8 @@ export async function candidatosCaducados(ctx: Contexto): Promise<number> {
 /**
  * Borra los datos de los candidatos que han pasado su fecha (`borrarEn`), de los centros del usuario
  * (protección de datos). Los contratados no se tocan: sus datos ya están en su ficha de empleado.
- * Se ejecuta sola al guardar un candidato y con el botón de Selección. Queda auditado (sin datos personales).
+ * Nunca se ejecuta sola (Iván, 15/11: los candidatos se pueden volver a llamar): solo con el botón de
+ * Selección. Queda auditado (sin datos personales).
  */
 export async function borrarCandidatosCaducados(ctx: Contexto): Promise<number> {
   const prisma = await db();
@@ -1287,6 +1286,20 @@ export async function borrarCandidatosCaducados(ctx: Contexto): Promise<number> 
     const r = await tx.candidato.deleteMany({ where: { tenantId: ctx.tenant.id, ...candidatoDeCentros(ctx.centros.map((c) => c.id)), borrarEn: { lt: aDia(hoyMadrid()) }, empleadoId: null, estado: { not: "CONTRATADO" } } });
     if (r.count) await auditar(tx, { tenantId: ctx.tenant.id, usuarioId: ctx.usuario.id, entidad: "Candidato", entidadId: "caducados", accion: "BORRAR_CADUCADOS", despues: { borrados: r.count, hasta: hoyMadrid() } });
     return r.count;
+  });
+}
+
+/**
+ * El candidato ha vuelto a dar su permiso para guardar sus datos: se conservan un año más desde hoy.
+ * Es lo que hay que hacer antes de llamar a alguien que ha pasado su plazo (protección de datos).
+ */
+export async function ampliarConservacionCandidato(ctx: Contexto, id: string) {
+  const c = await candidatoAccesible(ctx, id);
+  const prisma = await db();
+  const borrarEn = aDia(sumarDias(hoyMadrid(), 365));
+  await prisma.$transaction(async (tx) => {
+    await tx.candidato.update({ where: { id: c.id }, data: { consentimientoEn: new Date(), borrarEn } });
+    await auditar(tx, { tenantId: ctx.tenant.id, usuarioId: ctx.usuario.id, entidad: "Candidato", entidadId: c.id, accion: "AMPLIAR_CONSERVACION", antes: { borrarEn: c.borrarEn }, despues: { borrarEn } });
   });
 }
 
@@ -1341,7 +1354,6 @@ export async function crearCandidato(ctx: Contexto, d: { ofertaId?: string; cent
     centroId = c;
   }
   if (!d.email && !d.telefono) throw new ErrorPersonal("Indica al menos el teléfono o el correo del candidato.");
-  await borrarCandidatosCaducados(ctx);
   // RGPD: con consentimiento se guarda un año; sin él, hasta que se cierre el proceso (90 días).
   const borrarEn = aDia(sumarDias(hoyMadrid(), d.consentimiento ? 365 : 90));
   await prisma.candidato.create({

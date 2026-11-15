@@ -9,6 +9,7 @@ const fechaISO = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha no válida");
 const importe = (mensaje: string) => numeroEs(mensaje).pipe(z.number().min(0, mensaje));
 const importeOpcional = numeroEsOpcional("Importe no válido").pipe(z.number().min(0, "Los importes no pueden ser negativos").optional());
 const entero = (mensaje: string) => numeroEs(mensaje).pipe(z.number().int(mensaje).min(0, mensaje));
+const casilla = z.preprocess((v) => v === "on" || v === "true" || v === true, z.boolean());
 
 export const FORMAS_COBRO = ["EFECTIVO", "TARJETA", "BIZUM", "VALE", "CREDITO", "OTRA"] as const;
 export const NOMBRE_FORMA_COBRO: Record<(typeof FORMAS_COBRO)[number], string> = {
@@ -91,6 +92,9 @@ export const TicketFormEsquema = z.object({
   forma2: z.preprocess((v) => (v === "" ? undefined : v), z.enum(FORMAS_COBRO).optional()),
   importe2: importeOpcional,
   notas: opcional,
+  /** La mesa no toma pan y aperitivo: la línea del recargo se guarda anulada con este motivo. */
+  sinRecargo: casilla,
+  motivoSinRecargo: opcional,
   lineas: z
     .array(z.object({ platoId: z.string().min(1), formatoId: z.string().nullable(), cantidad: z.number({ message: "Una cantidad no es un número válido" }).positive("La cantidad tiene que ser mayor que cero"), invitacion: z.boolean() }))
     .min(1, "Añade al menos una línea"),
@@ -98,6 +102,8 @@ export const TicketFormEsquema = z.object({
 export type TicketFormDatos = z.infer<typeof TicketFormEsquema>;
 
 export const AnadirLineasEsquema = TicketFormEsquema.pick({ lineas: true }).extend({ id: z.string().min(1) });
+
+export const ComensalesEsquema = z.object({ id: z.string().min(1), comensales: entero("Los comensales no son válidos") });
 
 export const CobrarEsquema = z.object({
   id: z.string().min(1),

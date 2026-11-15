@@ -19,6 +19,25 @@ import {
 import { SelectorCantidades } from "../selector-cantidades";
 import { EtiquetaPedido, Mensajes, Ocultos, SelectorAlmacen, rutaVolver, textosArea, uno, unidad, veCentro, paraCampo, type PropsPagina, type PropsPaginaId } from "../comun";
 import { centrosDelArea } from "./resumen";
+import { facturacionDePedidoInterno, type FacturacionPedido } from "@/modulos/contabilidad/servicio";
+
+/** Texto de la fila «Factura entre sociedades» de la ficha del pedido. */
+function textoFacturacion(f: FacturacionPedido): string {
+  switch (f.tipo) {
+    case "facturado":
+      return `En la factura del obrador ${f.numeroOficial ?? f.referencia}${f.estado === "PREPARADA" ? " (preparada, sin emitir)" : ""}${f.espejo ? ` · en el local, factura recibida ${f.espejo}` : ""}`;
+    case "misma-sociedad":
+      return "Sin factura: el obrador y el local son de la misma sociedad (traspaso interno)";
+    case "sin-sociedad":
+      return "Sin factura: el obrador o el local no tiene sociedad asignada";
+    case "por-facturar":
+      return "Pendiente de facturar (Contabilidad → Facturas emitidas → Facturar pedidos del obrador)";
+    case "al-recibir":
+      return "Se factura cuando el local confirme la recepción, en la factura del mes en que se sirvió";
+    default:
+      return "—";
+  }
+}
 
 const ESTADOS = [
   ["", "Todos"],
@@ -228,6 +247,7 @@ export async function PaginaPedido({ area, searchParams, params }: PropsPaginaId
   const disponible = puedeServir ? await stockEnCentro(prisma, ctx.tenant.id, area, p.origenId) : new Map<string, number>();
   const almacenesOrigen = puedeServir ? await almacenesDeCentros(prisma, [p.origenId]) : [];
   const catalogo = puedeCambiar ? await catalogoParaPedir(prisma, ctx.tenant.id, area, p.origenId, p.destinoId) : [];
+  const facturacion = ctx.tieneModulo("contabilidad") ? await facturacionDePedidoInterno(ctx.tenant.id, p.id) : null;
 
   return (
     <>
@@ -249,6 +269,7 @@ export async function PaginaPedido({ area, searchParams, params }: PropsPaginaId
               { etiqueta: "Importe", valor: euros(importePedido(p)) },
               { etiqueta: "Albarán de salida", valor: p.albaran ?? "—" },
               { etiqueta: "Servido", valor: p.servidoEn ? fechaHora(p.servidoEn) : "—" },
+              ...(facturacion && facturacion.tipo !== "no-aplica" ? [{ etiqueta: "Factura entre sociedades", valor: textoFacturacion(facturacion) }] : []),
               { etiqueta: "Notas", valor: p.notas ? <span className="whitespace-pre-line">{p.notas}</span> : "—" },
             ]}
           />

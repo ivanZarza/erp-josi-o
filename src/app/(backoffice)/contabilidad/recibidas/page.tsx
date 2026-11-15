@@ -2,7 +2,7 @@ import { exigir } from "@/kernel/contexto";
 import { euros, fecha, numero } from "@/kernel/formato";
 import { Cabecera, BotonEnlace, Campo, Selector, Etiqueta, HuecoIntegracion, Tabla, Aviso } from "@/ui";
 import { TablaDesplegable, DatosDetalle } from "@/ui/tabla-desplegable";
-import { listarFacturasRecibidas, revisarFacturasRecibidas, sociedadesVisibles, diccionarios, hoyISO, redondear } from "@/modulos/contabilidad/servicio";
+import { listarFacturasRecibidas, revisarFacturasRecibidas, etiquetaRevision, sociedadesVisibles, diccionarios, hoyISO, redondear, type CuadreFactura } from "@/modulos/contabilidad/servicio";
 import { accionValidarFacturaRecibida, accionPagarFacturaRecibida, accionAnularFacturaRecibida } from "@/modulos/contabilidad/acciones";
 import { Avisos, Filtros, FiltroSociedad, FiltroMes, FormularioPago, BotonAccion, ESTADO_RECIBIDA, param, type ParametrosBusqueda } from "../_comun";
 
@@ -15,8 +15,9 @@ export default async function FacturasRecibidas({ searchParams }: { searchParams
   const hoy = hoyISO();
   const volver = `/contabilidad/recibidas?${new URLSearchParams(Object.entries(filtro).filter(([, v]) => v) as [string, string][]).toString()}`;
   const sumaTotal = redondear(facturas.filter((f) => f.estado !== "ANULADA").reduce((s, f) => s + Number(f.total), 0));
-  // «La factura no cuadra» con los albaranes y posibles duplicadas (solo se revisan las que no están pagadas)
+  // Cuadre con los albaranes y posibles duplicadas (solo se revisan las que no están pagadas)
   const revision = await revisarFacturasRecibidas(ctx.tenant.id, facturas.filter((f) => f.estado === "PENDIENTE" || f.estado === "VALIDADA"));
+  const conAvisos = Array.from(revision.values()).filter((r) => r.avisos.length > 0).length;
 
   return (
     <>
@@ -47,7 +48,7 @@ export default async function FacturasRecibidas({ searchParams }: { searchParams
       </Filtros>
 
       <TablaDesplegable
-        total={`${numero(facturas.length)} facturas · ${euros(sumaTotal)} con IVA (sin anuladas)${revision.size ? ` · ${numero(revision.size)} con avisos de revisión` : ""}`}
+        total={`${numero(facturas.length)} facturas · ${euros(sumaTotal)} con IVA (sin anuladas)${conAvisos ? ` · ${numero(conAvisos)} con avisos de revisión` : ""}`}
         vacio="No hay facturas con estos filtros. Registra la primera con «Registrar factura»."
         columnas={[
           { titulo: "Fecha" },
@@ -61,7 +62,10 @@ export default async function FacturasRecibidas({ searchParams }: { searchParams
         filas={facturas.map((f) => {
           const centro = f.centroId ? d.centros.get(f.centroId) : null;
           const vencida = f.vencimiento && f.estado !== "PAGADA" && f.estado !== "ANULADA" && f.vencimiento.toISOString().slice(0, 10) < hoy;
-          const avisos = revision.get(f.id) ?? [];
+          const r = revision.get(f.id);
+          const avisos = r?.avisos ?? [];
+          const etiqueta = etiquetaRevision(r);
+          const nAlbaranes = f.albaranes.length + (f.pedidoCompraId && !f.albaranes.some((a) => a.pedidoCompraId === f.pedidoCompraId) ? 1 : 0);
           return {
             id: f.id,
             tono: vencida ? ("error" as const) : f.estado === "PENDIENTE" || avisos.length ? ("aviso" as const) : undefined,
@@ -74,7 +78,7 @@ export default async function FacturasRecibidas({ searchParams }: { searchParams
               euros(f.total),
               <span key="e" className="flex flex-wrap gap-1">
                 <Etiqueta tono={ESTADO_RECIBIDA[f.estado].tono}>{ESTADO_RECIBIDA[f.estado].texto}</Etiqueta>
-                {avisos.length > 0 && <Etiqueta tono="error">{avisos.some((a) => a.texto.startsWith("Posible duplicada")) ? "¿Duplicada?" : "No cuadra"}</Etiqueta>}
+                {etiqueta && <Etiqueta tono={etiqueta === "Revisar" ? "aviso" : "error"}>{etiqueta}</Etiqueta>}
               </span>,
             ],
             detalle: (
@@ -96,7 +100,7 @@ export default async function FacturasRecibidas({ searchParams }: { searchParams
                     { etiqueta: "CIF del proveedor", valor: f.proveedorCif ?? "—" },
                     { etiqueta: "Centro", valor: centro?.nombre ?? "De la sociedad (sin centro)" },
                     { etiqueta: "Categoría", valor: (f.categoriaId && d.categorias.get(f.categoriaId)?.nombre) || "Sin categoría: las líneas sin la suya no suman en el Cuadro" },
-                    { etiqueta: "Albarán enlazado", valor: f.pedidoCompraId ? "Sí: se cruza con él" : "No: se cruza por fechas con los albaranes del proveedor" },
+                    { etiqueta: "Albaranes", valor: nAlbaranes ? `${numero(nAlbaranes)} enlazados: se cuadra con ellos` : f.facturaEmitidaId ? "Factura del obrador: va con sus pedidos internos" : "Ninguno enlazado: se cruza por fechas con los albaranes del proveedor" },
                     { etiqueta: "Base", valor: euros(f.base) },
                     { etiqueta: "IVA", valor: euros(f.cuotaIva) },
                     { etiqueta: "Origen", valor: f.origen === "MANUAL" ? "Alta a mano" : f.origen === "LECTURA_IA" ? "Leída con IA" : "Factura electrónica" },
@@ -105,6 +109,7 @@ export default async function FacturasRecibidas({ searchParams }: { searchParams
                     { etiqueta: "Notas", valor: f.notas ?? "—" },
                   ]}
                 />
+                {r?.cuadre && <Cuadre c={r.cuadre} />}
                 <Tabla
                   clave={(l) => l.id}
                   filas={f.lineas}
@@ -130,5 +135,60 @@ export default async function FacturasRecibidas({ searchParams }: { searchParams
         })}
       />
     </>
+  );
+}
+
+/** Cuadre de la factura con sus albaranes: albaranes, totales e IVA, línea a línea y albaranes del periodo sin factura. */
+function Cuadre({ c }: { c: CuadreFactura }) {
+  const dif = (d: number) => <span className={Math.abs(d) >= 0.05 ? "font-medium text-red-700" : "text-slate-500"}>{d > 0 ? "+" : ""}{euros(d)}</span>;
+  return (
+    <div className="space-y-3 rounded-lg border border-slate-200 p-3">
+      <p className="text-sm font-medium">
+        Cuadre con {c.modo === "enlazada" ? "sus albaranes" : "los albaranes del proveedor desde su factura anterior (no tiene albaranes enlazados)"}
+      </p>
+      <Tabla
+        clave={(a) => a.id}
+        filas={c.albaranes}
+        vacio="Ningún albarán del proveedor en ese periodo."
+        columnas={[
+          { titulo: "Albarán", celda: (a) => a.albaran ?? a.numero },
+          { titulo: "Compra", celda: (a) => a.numero },
+          { titulo: "Recibido", celda: (a) => fecha(a.recibidoEn) },
+          { titulo: "Sin IVA", celda: (a) => euros(a.base), alinear: "derecha" },
+          { titulo: "Otra factura", celda: (a) => a.otraFactura ?? "—" },
+        ]}
+      />
+      {c.totales && (
+        <Tabla
+          clave={(x) => x.clave}
+          filas={[...c.porIva.map((x) => ({ clave: `iva${x.tipo}`, texto: `Base al ${numero(x.tipo)} %`, facturado: x.facturado, albaranes: x.albaranes, diferencia: x.diferencia })), { clave: "total", texto: "Total sin IVA", ...c.totales }]}
+          columnas={[
+            { titulo: "Importe", celda: (x) => <span className={x.clave === "total" ? "font-medium" : undefined}>{x.texto}</span> },
+            { titulo: "Factura", celda: (x) => euros(x.facturado), alinear: "derecha" },
+            { titulo: "Albaranes", celda: (x) => euros(x.albaranes), alinear: "derecha" },
+            { titulo: "Diferencia", celda: (x) => dif(x.diferencia), alinear: "derecha" },
+          ]}
+        />
+      )}
+      {c.lineas.length > 0 && (
+        <Tabla
+          clave={(l) => l.concepto}
+          filas={c.lineas}
+          columnas={[
+            { titulo: "Producto", celda: (l) => l.concepto },
+            { titulo: "Facturado", celda: (l) => numero(l.cantidadFacturada, 3), alinear: "derecha" },
+            { titulo: "Recibido", celda: (l) => numero(l.cantidadRecibida, 3), alinear: "derecha" },
+            { titulo: "Precio factura", celda: (l) => (l.precioFacturado === null ? "—" : euros(l.precioFacturado, 4)), alinear: "derecha" },
+            { titulo: "Precio albarán", celda: (l) => (l.precioAlbaran === null ? "—" : euros(l.precioAlbaran, 4)), alinear: "derecha" },
+            { titulo: "Diferencia", celda: (l) => dif(l.diferencia), alinear: "derecha" },
+          ]}
+        />
+      )}
+      {c.faltan.length > 0 && (
+        <Aviso tono="aviso" titulo="Albaranes del mismo periodo sin factura">
+          {c.faltan.map((x) => `${x.albaran ?? x.numero} (${fecha(x.recibidoEn)}, ${euros(x.base)} sin IVA)`).join(" · ")}
+        </Aviso>
+      )}
+    </div>
   );
 }

@@ -3,7 +3,8 @@
  *
  * 1. Tickets de las 8 semanas hasta ayer, uno por mesa: cada reserva TERMINADA o SENTADA del día (las «sin
  *    reserva» ya vienen de Reservas) es un ticket con sus líneas de la carta real (plato + formato):
- *    pan y aperitivo por persona, entrantes, cortes (los que más), principales, guarniciones, postres, vino por
+ *    pan y aperitivo por persona (la línea del recargo por comensal del local, como la añade Caja, con el
+ *    escandallo del plato «Pan y aperitivo», que la semilla enlaza al recargo), entrantes, cortes (los que más), principales, guarniciones, postres, vino por
  *    botella (Ribera y Rioja de crianza los que más; alguna mágnum), copas de vino y generosos en las mesas
  *    pequeñas, agua, cervezas, vermut a mediodía, cafés y copas por la noche. Los eventos llevan el menú de
  *    grupo con el descuento que deja el ticket en el presupuesto aceptado (a cuenta de la empresa si la hay).
@@ -31,8 +32,8 @@ import { randomUUID } from "node:crypto";
 import type { PrismaClient, Prisma } from "../../../src/generated/prisma/client";
 import { calcularJornadas } from "../../../src/modulos/personal/jornadas";
 import { horasTurno } from "../../../src/modulos/personal/fechas";
-import { cargarEscandallos, consumoDeVenta, costesProductos, type EscandalloVenta } from "../../../src/nucleo/consumo-ventas";
-import { guardarTickets, importesLinea, precioEnLocal, totalesTicket, type CobroNuevo, type FormaCobro, type LineaTicketNueva, type TicketNuevo } from "../../../src/modulos/caja/tickets";
+import { cargarEscandallos, consumoDeVenta, costesProductos, recargosDeVenta, type EscandalloVenta } from "../../../src/nucleo/consumo-ventas";
+import { guardarTickets, importesLinea, lineaRecargo, precioEnLocal, totalesTicket, type CobroNuevo, type FormaCobro, type LineaTicketNueva, type TicketNuevo } from "../../../src/modulos/caja/tickets";
 import type { ContextoPruebas } from "./contexto";
 import { grupoDe, pesoArticulo, POR_COMENSAL, type Grupo } from "./mezcla-ventas";
 import { pesosComida } from "./cocina";
@@ -224,6 +225,27 @@ export async function sembrar(prisma: PrismaClient, ctx: ContextoPruebas) {
         }
       }
     }
+    // Pan y aperitivo: el recargo por comensal del local (lo crea la parte de cocina con el precio de la carta),
+    // con el escandallo del plato «Pan y aperitivo» para que baje el pan, las aceitunas y el aceite
+    let recargo = (await recargosDeVenta(prisma, t, [centroId])).get(centroId);
+    if (recargo && pan && !recargo.platoId) {
+      await prisma.cartaRecargo.update({ where: { id: recargo.id }, data: { platoId: pan.platoId } });
+      recargo = { ...recargo, platoId: pan.platoId };
+    }
+    let sinPan = 0;
+    /** La línea del recargo de una mesa (como la añade Caja). Si no queda pan, va anulada con el motivo. */
+    const lineaPan = (personas: number, momento: Date): LineaSim | null => {
+      const l = recargo ? lineaRecargo(recargo, personas, { momento }) : null;
+      if (!l) return null;
+      const esc = recargo!.platoId ? escandallos.get(recargo!.platoId) : undefined;
+      const consumo = esc ? consumoDeVenta(esc, null, personas) : [];
+      if (stock.cabe(consumo, momento.getTime())) stock.vender(consumo);
+      else {
+        sinPan++;
+        l.anulada = { motivo: "No quedaba pan: no se sirve ni se cobra", por: gerente?.id ?? null, en: momento };
+      }
+      return { grupo: "pan", ...l };
+    };
     const elegidor = (g: Grupo) => {
       const lista = porGrupo.get(g) ?? [];
       const total = lista.reduce((s, x) => s + x.w, 0);
@@ -282,13 +304,8 @@ export async function sembrar(prisma: PrismaClient, ctx: ContextoPruebas) {
      */
     const simularMesa = (personas: number, comida: boolean, momento: Date, r: () => number): LineaSim[] => {
       const lineas: LineaSim[] = [];
-      if (pan) {
-        const consumo = consumoDeVenta(pan.esc, null, personas);
-        if (stock.cabe(consumo, momento.getTime())) {
-          stock.vender(consumo);
-          lineas.push({ grupo: "pan", platoId: pan.platoId, formatoId: null, cantidad: personas, precio: pan.precio, momento });
-        } else agotados++;
-      }
+      const lp = lineaPan(personas, momento);
+      if (lp) lineas.push(lp);
       // unidades de un grupo para la mesa: personas × por comensal × reparto comida/cena, con redondeo al azar
       const n = (g: Grupo, comidaX = 1, cenaX = 1) => {
         const x = personas * POR_COMENSAL[g] * (comida ? comidaX : cenaX) * (0.75 + r() * 0.5);
@@ -322,11 +339,8 @@ export async function sembrar(prisma: PrismaClient, ctx: ContextoPruebas) {
     /** Menú de grupo de un evento: platos de la carta para todos y descuento hasta el presupuesto aceptado. */
     const simularEvento = (personas: number, presupuesto: number, momento: Date, r: () => number): LineaSim[] => {
       const lineas: LineaSim[] = [];
-      const consumoPan = pan ? consumoDeVenta(pan.esc, null, personas) : [];
-      if (pan && stock.cabe(consumoPan, momento.getTime())) {
-        stock.vender(consumoPan);
-        lineas.push({ grupo: "pan", platoId: pan.platoId, formatoId: null, cantidad: personas, precio: pan.precio, momento });
-      }
+      const lp = lineaPan(personas, momento);
+      if (lp) lineas.push(lp);
       pedir(lineas, "entrante", Math.round(personas * 0.9), momento, r);
       pedir(lineas, "corte", Math.round(personas * 0.6), momento, r);
       pedir(lineas, "guarnicion", Math.round(personas * 0.5), momento, r);
@@ -334,17 +348,20 @@ export async function sembrar(prisma: PrismaClient, ctx: ContextoPruebas) {
       pedir(lineas, "vino", Math.ceil(personas / 2.5), momento, r);
       pedir(lineas, "agua", Math.ceil(personas / 2), momento, r);
       pedir(lineas, "cafe", Math.round(personas * 0.8), momento, r);
-      let bruto = lineas.reduce((s, l) => s + l.cantidad * l.precio!, 0);
+      // (la línea del pan anulada por falta de stock no cuenta)
+      const brutoVivas = () => lineas.filter((l) => !l.anulada).reduce((s, l) => s + l.cantidad * l.precio!, 0);
+      let bruto = brutoVivas();
       for (let i = 0; bruto < presupuesto && i < 20; i++) {
         pedir(lineas, "vino", 1, momento, r);
-        bruto = lineas.reduce((s, l) => s + l.cantidad * l.precio!, 0);
+        bruto = brutoVivas();
       }
       // el precio cerrado del menú: descuento repartido por las líneas para que el ticket sea el presupuesto
       const quitar = r2(Math.max(0, bruto - presupuesto));
+      const vivas = lineas.filter((l) => !l.anulada);
       let puesto = 0;
-      lineas.forEach((l, i) => {
+      vivas.forEach((l, i) => {
         const b = r2(l.cantidad * l.precio!);
-        l.descuento = i === lineas.length - 1 ? r2(quitar - puesto) : r2((b * quitar) / bruto);
+        l.descuento = i === vivas.length - 1 ? r2(quitar - puesto) : r2((b * quitar) / bruto);
         puesto = r2(puesto + l.descuento);
       });
       return lineas;
@@ -553,7 +570,7 @@ export async function sembrar(prisma: PrismaClient, ctx: ContextoPruebas) {
     const r = await guardarTickets(prisma, t, tickets, { usuarioId: gerente?.id ?? null, escandallos, costes });
     const lineas = tickets.reduce((s, x) => s + x.lineas.length, 0);
     console.log(
-      `  caja: ${tickets.length} tickets (${tickets.filter((x) => x.estado === "ANULADO").length} anulado), ${lineas} líneas, ${r.movimientos} movimientos de venta; ${agotados} veces se pidió algo agotado y se cambió por otro (${Math.round((Date.now() - inicio) / 100) / 10} s)`,
+      `  caja: ${tickets.length} tickets (${tickets.filter((x) => x.estado === "ANULADO").length} anulado), ${lineas} líneas, ${r.movimientos} movimientos de venta; ${agotados} veces se pidió algo agotado y se cambió por otro; ${sinPan} mesas sin pan por falta de stock (${Math.round((Date.now() - inicio) / 100) / 10} s)`,
     );
 
     // Clientes: el importe de cada visita es el de su ticket

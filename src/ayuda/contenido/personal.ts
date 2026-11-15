@@ -1015,7 +1015,7 @@ export const AYUDA_PERSONAL: AyudaArea = {
           {
             nombre: "Datos hasta",
             queEs: "Fecha hasta la que se pueden guardar sus datos (protección de datos).",
-            logica: "Un año desde el alta con consentimiento; 90 días sin él. Pasada la fecha el candidato deja de salir y sus datos se borran: solos, la próxima vez que se apunte un candidato, o con el botón «Borrar sus datos ahora» del aviso de arriba. Los contratados no se borran (ya tienen su ficha).",
+            logica: "Un año desde el alta con consentimiento; 90 días sin él. Pasada la fecha el candidato SIGUE en la lista (para poder llamarlo más adelante) con la etiqueta «Plazo vencido el …»: nada se borra solo. Si ha vuelto a darte permiso para guardar sus datos, pulsa «Ha dado permiso: un año más» (sale también 30 días antes de vencer) y se conservan un año desde hoy; queda registrado. Si no da permiso, borra sus datos con el botón del aviso de arriba. Los contratados no se borran (ya tienen su ficha). Lo que exige la ley de protección de datos, a confirmar con la gestoría.",
           },
           {
             nombre: "Estado, Nota y Cambiar",
@@ -1058,7 +1058,7 @@ export const AYUDA_PERSONAL: AyudaArea = {
     ],
     logica: [
       "Las ofertas y la bolsa se filtran por el centro elegido arriba (o todos tus centros). Solo se apuntan candidatos a ofertas abiertas de tus centros; para una oferta cubierta o cerrada, reábrela o usa la bolsa.",
-      "Aviso «N candidatos han pasado su fecha de borrado»: cuántos de tus centros ya no se pueden guardar. «Borrar sus datos ahora» los borra (necesita «Publicar ofertas, gestionar y contratar candidatos»); queda registrado cuántos, sin sus datos.",
+      "Aviso «N candidatos han pasado su plazo de conservación»: cuántos de tus centros han pasado su fecha. Siguen en las listas; antes de llamarlos hay que pedirles permiso de nuevo. «Borrar los datos de los que han pasado el plazo» los borra todos de una vez (necesita «Publicar ofertas, gestionar y contratar candidatos»); queda registrado cuántos, sin sus datos. Nunca se borran solos.",
     ],
     influye: [
       { texto: "Al contratar se crea la ficha de empleado", ruta: "/personal/empleados" },

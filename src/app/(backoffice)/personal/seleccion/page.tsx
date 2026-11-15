@@ -6,7 +6,7 @@ import { TablaDesplegable, DatosDetalle } from "@/ui/tabla-desplegable";
 import * as s from "@/modulos/personal/servicio";
 import * as a from "@/modulos/personal/acciones";
 import { TIPOS_CONTRATO, NOMBRE_CONTRATO, ESTADOS_CANDIDATO, NOMBRE_ESTADO_CANDIDATO } from "@/modulos/personal/esquemas";
-import { hoyMadrid } from "@/modulos/personal/fechas";
+import { hoyMadrid, sumarDias } from "@/modulos/personal/fechas";
 import { Mensajes, Volver, Acciones, EtiquetaCandidato, type Busqueda } from "../_componentes/comun";
 
 type Candidato = Awaited<ReturnType<typeof s.bolsaCandidatos>>[number];
@@ -21,6 +21,8 @@ export default async function Seleccion({ searchParams }: { searchParams: Busque
   const abiertas = ofertas.filter((o) => o.estado === "ABIERTA");
   const enProceso = ofertas.flatMap((o) => o.candidatos).filter((c) => ["ENTREVISTA", "PRUEBA", "OFERTA"].includes(c.estado));
   const hoy = hoyMadrid();
+  const en30 = sumarDias(hoy, 30);
+  const fechaDia = (d: Date) => d.toISOString().slice(0, 10);
 
   const accionesCandidato = (c: Candidato, centroDefecto?: string, puestoDefecto?: string | null) =>
     editar && c.estado !== "CONTRATADO" ? (
@@ -81,7 +83,26 @@ export default async function Seleccion({ searchParams }: { searchParams: Busque
         { titulo: "Contacto", celda: (c) => [c.telefono, c.email].filter(Boolean).join(" · ") },
         { titulo: "Origen", celda: (c) => c.origen ?? "—" },
         { titulo: "Estado", celda: (c) => <EtiquetaCandidato estado={c.estado} /> },
-        { titulo: "Datos hasta", celda: (c) => fecha(c.borrarEn) },
+        {
+          titulo: "Datos hasta",
+          celda: (c) => {
+            const vencido = c.borrarEn && c.estado !== "CONTRATADO" && fechaDia(c.borrarEn) < hoy;
+            return (
+              <div className="flex flex-col items-start gap-1">
+                {vencido ? <Etiqueta tono="aviso">Plazo vencido el {fecha(c.borrarEn)}</Etiqueta> : fecha(c.borrarEn)}
+                {editar && c.borrarEn && c.estado !== "CONTRATADO" && (vencido || fechaDia(c.borrarEn) <= en30) && (
+                  <form action={a.ampliarConservacionCandidatoAccion}>
+                    <Volver a={volver} />
+                    <input type="hidden" name="candidatoId" value={c.id} />
+                    <button type="submit" className="text-xs text-acento hover:underline" title="Pulsa solo si el candidato ha vuelto a darte permiso para guardar sus datos">
+                      Ha dado permiso: un año más
+                    </button>
+                  </form>
+                )}
+              </div>
+            );
+          },
+        },
         { titulo: "", celda: (c) => accionesCandidato(c, centroDefecto, puestoDefecto) },
       ]}
     />
@@ -93,13 +114,13 @@ export default async function Seleccion({ searchParams }: { searchParams: Busque
       <Mensajes sp={sp} />
       {caducados > 0 && (
         <div className="mb-4">
-          <Aviso tono="aviso" titulo={`${caducados} candidatos han pasado su fecha de borrado`}>
-            Ya no salen en las listas. Sus datos se borran solos la próxima vez que se apunte un candidato, o ahora con el botón.
+          <Aviso tono="aviso" titulo={`${caducados} candidatos han pasado su plazo de conservación`}>
+            Siguen en las listas para poder llamarlos más adelante: nada se borra solo. Antes de usar sus datos, pídeles permiso de nuevo y pulsa «Ha dado permiso: un año más»; si no lo dan, borra sus datos (protección de datos, a confirmar con la gestoría).
             {editar && (
               <form action={a.borrarCandidatosCaducadosAccion} className="mt-3">
                 <Volver a={volver} />
                 <Boton type="submit" variante="secundario">
-                  Borrar sus datos ahora
+                  Borrar los datos de los que han pasado el plazo
                 </Boton>
               </form>
             )}

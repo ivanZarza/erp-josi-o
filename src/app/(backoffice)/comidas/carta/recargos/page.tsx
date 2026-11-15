@@ -1,6 +1,6 @@
 import { exigir } from "@/kernel/contexto";
 import { euros, fechaHora, numeroCampo, porcentaje } from "@/kernel/formato";
-import { Boton, Cabecera, Entrada, Etiqueta, HuecoIntegracion } from "@/ui";
+import { Boton, Cabecera, Entrada, Etiqueta, Selector } from "@/ui";
 import { TablaDesplegable } from "@/ui/tabla-desplegable";
 import { listarRecargos } from "@/modulos/comidas/carta-servicio";
 import { fijarRecargo } from "@/modulos/comidas/carta-acciones";
@@ -17,12 +17,12 @@ export default async function Recargos({ searchParams }: { searchParams: Busqued
     <>
       <Cabecera
         titulo="Pan y aperitivo"
-        subtitulo="Recargo fijo por persona de cada local (entre 3,20 € y 5,50 € según la marca). Aquí solo se configura: todavía no se añade a ningún ticket ni a la caja; lo cobrará el TPV cuando esté conectado."
+        subtitulo="Recargo fijo por persona de cada local (entre 3,20 € y 5,50 € según la marca). Si está activo, Caja lo añade solo a cada ticket que se apunta: importe por persona × comensales, con su IVA."
       />
       <PestanasCarta activa={volver} />
       <AvisoError error={param(sp, "error")} />
       <TablaDesplegable
-        columnas={[{ titulo: "Local" }, { titulo: "Marca" }, { titulo: "Por persona", alinear: "derecha" }, { titulo: "IVA", alinear: "derecha", secundaria: true }, { titulo: "Estado" }]}
+        columnas={[{ titulo: "Local" }, { titulo: "Marca" }, { titulo: "Por persona", alinear: "derecha" }, { titulo: "IVA", alinear: "derecha", secundaria: true }, { titulo: "Escandallo", secundaria: true }, { titulo: "Estado" }]}
         vacio="No tienes locales."
         filas={filas.map((f) => ({
           id: f.centroId,
@@ -32,6 +32,7 @@ export default async function Recargos({ searchParams }: { searchParams: Busqued
             f.marca,
             f.importe != null ? euros(f.importe) : "—",
             porcentaje(f.iva),
+            f.plato ?? "Sin escandallo",
             f.importe == null ? <Etiqueta tono="aviso">Sin definir</Etiqueta> : f.activo ? <Etiqueta tono="ok">Activo</Etiqueta> : <Etiqueta>Desactivado</Etiqueta>,
           ],
           detalle: puedeEditar ? (
@@ -46,8 +47,19 @@ export default async function Recargos({ searchParams }: { searchParams: Busqued
                 <span className="mb-1 block font-medium">IVA %</span>
                 <Entrada name="iva" inputMode="decimal" defaultValue={numeroCampo(f.iva)} required className="w-20" />
               </label>
+              <label className="text-sm">
+                <span className="mb-1 block font-medium">Escandallo (plato de la carta)</span>
+                <Selector name="platoId" defaultValue={f.platoId ?? ""} className="w-64">
+                  <option value="">Sin escandallo (no baja stock)</option>
+                  {f.platos.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.nombre}
+                    </option>
+                  ))}
+                </Selector>
+              </label>
               <label className="flex min-h-10 items-center gap-2 text-sm">
-                <input type="checkbox" name="activo" defaultChecked={f.importe == null ? true : f.activo} /> Activo (se cobrará en este local)
+                <input type="checkbox" name="activo" defaultChecked={f.importe == null ? true : f.activo} /> Activo (se cobra en este local)
               </label>
               <Boton type="submit">Guardar</Boton>
               <span className="text-xs text-slate-500">Última modificación: {fechaHora(f.actualizado)}</span>
@@ -55,9 +67,6 @@ export default async function Recargos({ searchParams }: { searchParams: Busqued
           ) : undefined,
         }))}
       />
-      <div className="mt-6">
-        <HuecoIntegracion nombre="Pan y aperitivo en el TPV" descripcion="El programa de caja añadirá este importe por comensal a cada cuenta del local. Hasta entonces, el recargo no se cobra desde el ERP." />
-      </div>
     </>
   );
 }

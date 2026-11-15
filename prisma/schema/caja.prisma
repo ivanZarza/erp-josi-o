@@ -160,6 +160,8 @@ model Ticket {
 
 /// Línea del ticket: un plato o bebida de la carta en un formato (botella, copa, mágnum…).
 /// Sin platoId = concepto del TPV sin enlazar con la carta (no descuenta stock).
+/// Con recargoId = recargo por comensal del local (pan y aperitivo, CartaRecargo): cantidad = comensales; solo lleva
+/// platoId si el recargo tiene un plato con escandallo (entonces descuenta stock como un plato más).
 model TicketLinea {
   id              String    @id @default(cuid())
   ticketId        String
@@ -168,6 +170,7 @@ model TicketLinea {
   momento         DateTime // cuándo se pidió (y bajó el stock)
   platoId         String? // CartaPlato
   formatoId       String? // CartaPlatoFormato
+  recargoId       String? // CartaRecargo: línea de recargo por comensal (pan y aperitivo)
   concepto        String // «Entraña · ración», «Pago de Carraovejas · Copa»
   cantidad        Decimal   @db.Decimal(10, 3)
   precio          Decimal   @db.Decimal(10, 2) // PVP unitario con IVA

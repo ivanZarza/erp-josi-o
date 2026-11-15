@@ -447,6 +447,11 @@ export const AYUDA_COMIDAS: AyudaArea = {
           { nombre: "Estado", queEs: "Por servir, Servido · por confirmar, Recibido, Rechazado o Cancelado." },
           { nombre: "Importe", queEs: "Cantidad pedida (o servida, si ya se sirvió; ya recibido, lo servido más lo que llegó de más) × precio de tarifa de cada línea." },
           { nombre: "Albarán de salida", queEs: "Número ALB-S que se crea al servir." },
+          {
+            nombre: "Factura entre sociedades",
+            queEs: "Solo con Contabilidad contratada: en qué factura del obrador va el pedido (y su espejo en el local), «Pendiente de facturar» si ya está recibido y aún no se ha facturado, «Se factura cuando el local confirme la recepción», o «Sin factura» si el obrador y el local son de la misma sociedad (traspaso interno).",
+            logica: "Las facturas se preparan en Contabilidad → Facturas emitidas → Facturar pedidos del obrador: una por local y mes con los pedidos recibidos.",
+          },
           { nombre: "Servido", queEs: "Cuándo se sirvió." },
           { nombre: "Notas", queEs: "Notas del local, el motivo si se rechazó y la nota de la recepción." },
         ],
@@ -644,6 +649,7 @@ export const AYUDA_COMIDAS: AyudaArea = {
           },
           { nombre: "Enviada", queEs: "Cuándo y por dónde se envió." },
           { nombre: "Albaranes de entrada", queEs: "Números ALB-E de cada recepción." },
+          { nombre: "Factura del proveedor", queEs: "Solo con Contabilidad contratada y la compra recibida: en qué factura recibida está este albarán, o «Sin facturar todavía». Un albarán solo puede estar en una factura." },
           { nombre: "Contacto, Correo, Días de reparto", queEs: "Datos del proveedor (se cambian en Proveedores)." },
           {
             nombre: "Pedido mínimo",
@@ -1115,7 +1121,7 @@ export const AYUDA_COMIDAS: AyudaArea = {
         campos: [
           { nombre: "Platos y escandallos", queEs: "Esta pantalla." },
           { nombre: "Cartas", queEs: "Las cartas con sus secciones y qué platos lleva cada una." },
-          { nombre: "Pan y aperitivo", queEs: "Recargo por persona de cada local." },
+          { nombre: "Pan y aperitivo", queEs: "Recargo por persona de cada local (Caja lo cobra solo en cada ticket)." },
           { nombre: "Alérgenos de ingredientes", queEs: "Alérgenos de cada producto del catálogo." },
         ],
       },
@@ -1437,7 +1443,7 @@ export const AYUDA_COMIDAS: AyudaArea = {
     titulo: "Pan y aperitivo",
     area: "Comidas",
     paraQue:
-      "Importe fijo por persona que cobrará cada local por el pan y el aperitivo, con su IVA y si está activo. Por ahora solo se configura: no se añade a ningún ticket ni a la caja hasta que se conecte el TPV.",
+      "Importe fijo por persona que cobra cada local por el pan y el aperitivo, con su IVA, si está activo y, si se quiere, el plato con su escandallo. Si está activo, Caja lo añade solo a cada ticket que se apunta: importe por persona × comensales.",
     quien: "Ver: «Ver carta y escandallos». Cambiar: «Editar carta, alérgenos y escandallos» y acceso al local.",
     secciones: [
       {
@@ -1446,7 +1452,8 @@ export const AYUDA_COMIDAS: AyudaArea = {
           { nombre: "Local, Marca", queEs: "Locales abiertos que ves (o el elegido arriba)." },
           { nombre: "Por persona", queEs: "Importe con IVA por comensal; «—» si no se ha definido." },
           { nombre: "IVA", queEs: "IVA del recargo (10 % si no se ha definido)." },
-          { nombre: "Estado", queEs: "Activo, Desactivado o Sin definir (en amarillo)." },
+          { nombre: "Escandallo", queEs: "Plato de la carta cuyo escandallo es lo que se sirve (pan, aceitunas, aceite…), o «Sin escandallo»." },
+          { nombre: "Estado", queEs: "Activo, Desactivado o Sin definir (en amarillo). Solo los activos con importe se cobran en Caja." },
         ],
       },
       {
@@ -1454,12 +1461,25 @@ export const AYUDA_COMIDAS: AyudaArea = {
         campos: [
           { nombre: "Importe por persona (IVA incluido)", queEs: "Obligatorio, no negativo. Con coma decimal: 3,20." },
           { nombre: "IVA %", queEs: "De 0 a 21." },
-          { nombre: "Activo (se cobrará en este local)", queEs: "Si está desmarcado, el local no lo cobrará cuando el TPV lo aplique." },
+          {
+            nombre: "Escandallo (plato de la carta)",
+            queEs: "Opcional. Un plato de comidas de la marca del local (o del propio local) con el escandallo de lo que se sirve por persona.",
+            logica: "Con plato, cada línea de pan y aperitivo baja el stock de su escandallo por comensal y tiene coste teórico; ese plato deja de salir en la lista de líneas de Caja (para no cobrarlo dos veces). Sin plato, no baja stock y su coste es 0.",
+          },
+          {
+            nombre: "Activo (se cobra en este local)",
+            queEs: "Si está marcado, Caja añade la línea a cada ticket nuevo del local; si está desmarcado, no se cobra.",
+            logica: "Los tickets ya apuntados no cambian: el cambio de importe o de estado vale para los siguientes.",
+          },
           { nombre: "Guardar", queEs: "Guarda y anota quién lo cambió. Debajo, la fecha de la última modificación." },
         ],
       },
     ],
-    logica: ["Por ahora este dato solo se guarda aquí: ni la caja ni los tickets del ERP lo aplican. Lo cobrará el TPV cuando esté conectado (hueco «Pan y aperitivo en el TPV», pendiente)."],
+    logica: [
+      "Caja → Tickets añade la línea «Pan y aperitivo» = importe × comensales al apuntar un ticket; se ajusta si cambian los comensales de un ticket abierto y se puede quitar con un motivo (la línea queda anulada y auditada).",
+      "En los tickets importados del TPV no se añade: manda el TPV. Si el ticket ya la trae, se reconoce y no se duplica; si no, se avisa.",
+      "Cuenta como venta (jornada, ticket medio, Cuadro de mando) y sale en su propia fila en Caja → Venta por plato.",
+    ],
   },
 
   "/comidas/carta/alergenos": {

@@ -10,6 +10,7 @@ import { listarProductos } from "@/nucleo/productos";
 import { num } from "@/nucleo/comun-almacen";
 import { almacenesDeCentros } from "@/nucleo/stock";
 import { proveedoresDeArea } from "@/modulos/proveedores/servicio";
+import { facturaDeCompra } from "@/modulos/contabilidad/servicio";
 import { accionCrearCompra, accionEditarCompra, accionEnviarCompra, accionRecibirCompra, accionCancelarCompra, accionCerrarCompra } from "../acciones";
 import { SelectorCantidades, type ProductoSeleccionable } from "../selector-cantidades";
 import { EtiquetaCompra, Mensajes, Ocultos, SelectorAlmacen, rutaVolver, textosArea, uno, unidad, veCentro, paraCampo, type PropsPagina, type PropsPaginaId } from "../comun";
@@ -245,6 +246,9 @@ export async function PaginaCompra({ area, searchParams, params }: PropsPaginaId
   const puedeCrear = ctx.puede(`${t.m}:compras:crear`);
   const puedeRecibir = ctx.puede(`${t.m}:compras:recibir`) && (abierta || c.estado === "RECIBIDO_PARCIAL");
   const almacenes = puedeRecibir ? await almacenesDeCentros(prisma, [c.centroId]) : [];
+  // factura recibida en la que está este albarán (Contabilidad)
+  const recibida = c.estado === "RECIBIDO" || c.estado === "RECIBIDO_PARCIAL";
+  const factura = recibida && ctx.tieneModulo("contabilidad") ? await facturaDeCompra(ctx.tenant.id, c.id) : null;
 
   const texto = textoWhatsApp({
     numero: c.numero,
@@ -291,6 +295,7 @@ export async function PaginaCompra({ area, searchParams, params }: PropsPaginaId
                 : [{ etiqueta: "Importe", valor: euros(importeCompra(c)) }]),
               { etiqueta: "Enviada", valor: c.enviadoEn ? `${fechaHora(c.enviadoEn)} por ${VIA[c.enviadoPor ?? ""] ?? c.enviadoPor}` : "—" },
               { etiqueta: "Albaranes de entrada", valor: c.albaran ?? "—" },
+              ...(recibida && ctx.tieneModulo("contabilidad") ? [{ etiqueta: "Factura del proveedor", valor: factura ? `En la factura recibida ${factura.numero}` : "Sin facturar todavía (Contabilidad → Registrar factura)" }] : []),
               { etiqueta: "Contacto", valor: [c.proveedor.contacto, c.proveedor.telefono].filter(Boolean).join(" · ") || "—" },
               { etiqueta: "Correo", valor: c.proveedor.email ?? "—" },
               { etiqueta: "Días de reparto", valor: c.proveedor.diasReparto ?? "—" },

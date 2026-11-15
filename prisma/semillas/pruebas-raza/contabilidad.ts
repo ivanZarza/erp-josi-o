@@ -18,7 +18,10 @@
  *     con su pago o pendientes.
  *  4. Facturas emitidas: anticipos (señal) y facturas finales de eventos, y la factura mensual entre
  *     sociedades del obrador (sociedad del OB) al local (IHA) por los pedidos internos, con su espejo
- *     como factura recibida en la sociedad del local.
+ *     como factura recibida en la sociedad del local: la genera la MISMA función que el botón
+ *     «Facturar pedidos del obrador» (generarFacturasObrador, src/modulos/contabilidad/facturacion-obrador.ts),
+ *     una por mes ya cerrado, y después se apunta su número oficial y su cobro.
+ *  Cada factura de mercancía queda enlazada a sus albaranes (FacturaRecibidaAlbaran: uno o varios).
  *  5. Pagos y cobros (PagoCobro) de todo lo pagado o cobrado.
  *
  * ⚠ Cifras de gastos, números de factura y CIF de clientes INVENTADOS. Las facturas de mercancía salen
@@ -28,6 +31,7 @@
  */
 import type { Prisma, PrismaClient, FormaPagoContable, EstadoFacturaRecibida } from "../../../src/generated/prisma/client";
 import type { ContextoPruebas } from "./contexto";
+import { generarFacturasObrador, type Dependencias } from "../../../src/modulos/contabilidad/facturacion-obrador";
 
 // ===========================================================================
 // Utilidades
@@ -166,7 +170,8 @@ interface FacturaFR {
   vencimiento: Date | null;
   forma: FormaPagoContable;
   lineas: LineaFR[];
-  pedidoCompraId?: string | null;
+  /** Albaranes (compras recibidas) que factura: uno (por albarán) o varios (semanal, quincenal, mensual). */
+  albaranIds: string[];
   notas?: string | null;
   // decisiones de estado (si no, se deciden por fechas)
   estado?: EstadoFacturaRecibida;
@@ -219,9 +224,6 @@ export async function sembrar(prisma: PrismaClient, ctx: ContextoPruebas) {
   const socLocal = centros.find((c) => c.id === local)?.sociedadId;
   const socOB = centros.find((c) => c.id === ob)?.sociedadId;
   if (!socLocal || !socOB) throw new Error("Contabilidad de Raza Pruebas: RZ-PRU u OB sin sociedad");
-  const sociedades = await prisma.sociedad.findMany({ where: { id: { in: [socLocal, socOB] } } });
-  const sLocal = sociedades.find((s) => s.id === socLocal)!;
-  const sOB = sociedades.find((s) => s.id === socOB)!;
   const entreSociedades = socLocal !== socOB;
 
   // Categorías: las 14 básicas (por si no están) y la de Seguridad Social de empresa
@@ -300,7 +302,7 @@ export async function sembrar(prisma: PrismaClient, ctx: ContextoPruebas) {
       vencimiento: mas(g.fecha, g.cond.dias),
       forma: g.cond.forma,
       lineas: Array.from(lineas.values()).sort((a, b) => a.concepto.localeCompare(b.concepto, "es")),
-      pedidoCompraId: g.cond.cada === "A" ? c0.id : null,
+      albaranIds: g.compras.map((c) => c.id),
       notas: `${albaranes.length === 1 ? "Albarán" : "Albaranes"}: ${albaranes.join(", ")}`,
     });
   }
@@ -334,6 +336,7 @@ export async function sembrar(prisma: PrismaClient, ctx: ContextoPruebas) {
     facturas.push({
       ...lozano,
       lineas: lozano.lineas.map((l) => ({ ...l })),
+      albaranIds: [], // la copia no puede enlazar los mismos albaranes: la revisión la cruza por fechas y avisa de duplicada
       numeroProveedor: lozano.numeroProveedor.replace(/[-/]/g, ""),
       origen: "LECTURA_IA",
       notas: `${lozano.notas} · Leída del correo de facturas (reenvío del proveedor)`,
@@ -342,7 +345,7 @@ export async function sembrar(prisma: PrismaClient, ctx: ContextoPruebas) {
   }
   // d) Albarán recibido a medias en el obrador: la factura cobra lo pedido
   const parcial = compras.find((c) => c.centroId === ob && c.estado === "RECIBIDO_PARCIAL");
-  const fParcial = parcial && facturas.find((f) => f.pedidoCompraId === parcial.id);
+  const fParcial = parcial && facturas.find((f) => f.albaranIds.length === 1 && f.albaranIds[0] === parcial.id);
   if (parcial && fParcial) {
     fParcial.lineas = parcial.lineas.map((l) => ({ concepto: l.producto.nombre, cantidad: Number(l.cantidad), precio: r4(Number(l.precio)), tipoIva: Number(l.producto.iva), categoria: "MERC-BEB", productoId: l.productoId }));
     fParcial.origen = "LECTURA_IA";
@@ -359,7 +362,7 @@ export async function sembrar(prisma: PrismaClient, ctx: ContextoPruebas) {
       fecha: mas(lonjaVieja.fecha, 3),
       vencimiento: mas(hoy, 1),
       lineas: [{ ...l, concepto: `Abono: ${l.concepto} devuelto (no llegó en buen estado)`, cantidad: -devuelto }],
-      pedidoCompraId: null,
+      albaranIds: [],
       estado: "VALIDADA",
       notas: `Abono de la factura ${lonjaVieja.numeroProveedor}. Se descuenta en el próximo pago al proveedor.`,
     });
@@ -415,7 +418,7 @@ export async function sembrar(prisma: PrismaClient, ctx: ContextoPruebas) {
     if (fecha > hoy || fecha < mas(inicio, -20)) return;
     facturas.push({
       centro: "L", sociedadId: socLocal, centroId: local, proveedorId: null, proveedorNombre: proveedor, proveedorCif: cif, numeroProveedor: numero, categoria,
-      fecha, vencimiento: mas(fecha, dias), forma, notas: notas ?? null,
+      fecha, vencimiento: mas(fecha, dias), forma, notas: notas ?? null, albaranIds: [],
       lineas: lineas.map(([concepto, cantidad, precio, tipoIva]) => ({ concepto, cantidad, precio, tipoIva, categoria })),
     });
   };
@@ -574,51 +577,6 @@ export async function sembrar(prisma: PrismaClient, ctx: ContextoPruebas) {
     }
   }
 
-  // Facturas entre sociedades: obrador (sociedad del OB) → local (IHA), mensuales, por los pedidos internos recibidos
-  const pedidosInternos = await prisma.pedidoInterno.findMany({
-    where: { tenantId: t, origenId: ob, destinoId: local, estado: { in: ["RECIBIDO", "SERVIDO"] }, servidoEn: { not: null } },
-    include: { lineas: { include: { producto: { select: { nombre: true, iva: true, area: true } } } } },
-  });
-  const porMes = new Map<string, typeof pedidosInternos>();
-  for (const p of pedidosInternos) {
-    const k = isoMadrid(p.servidoEn!).slice(0, 7);
-    porMes.set(k, [...(porMes.get(k) ?? []), p]);
-  }
-  let numeroOB = 120;
-  for (const [mes, pedidos] of Array.from(porMes.entries()).sort()) {
-    const [a, m1] = mes.split("-").map(Number);
-    const fecha = finDeMes(a, m1 - 1);
-    if (fecha > hoy || !entreSociedades) continue; // el mes en curso se factura al cerrarlo
-    const lineas = new Map<string, LineaFR>();
-    for (const p of pedidos)
-      for (const l of p.lineas) {
-        const cantidad = Number(l.recibida ?? l.servida ?? 0);
-        if (cantidad <= 0) continue;
-        const precio = r4(Number(l.precio ?? 0));
-        const k = `${l.productoId}|${precio}`;
-        const x = lineas.get(k) ?? { concepto: l.producto.nombre, cantidad: 0, precio, tipoIva: Number(l.producto.iva), categoria: l.producto.area === "BEBIDAS" ? "MERC-BEB" : "MERC-COM", productoId: l.productoId };
-        x.cantidad = Math.round((x.cantidad + cantidad) * 1000) / 1000;
-        lineas.set(k, x);
-      }
-    const ls = Array.from(lineas.values()).sort((x, y) => x.categoria.localeCompare(y.categoria) || x.concepto.localeCompare(y.concepto, "es"));
-    const numero = `OB-F26/${String(++numeroOB).padStart(4, "0")}`;
-    const vence = mas(fecha, 30);
-    const cobrada = vence <= hoy;
-    const albaranes = pedidos.map((p) => p.albaran ?? p.numero).sort().join(", ");
-    const nota = `Pedidos internos de ${MESES[m1 - 1]} (comida a tarifa del obrador, coste + 12 %; bebida a coste). Albaranes: ${albaranes}. Precio entre sociedades vinculadas: a comprobar con la gestoría.`;
-    emitidas.push({
-      sociedadId: socOB, centroId: ob, origen: "ENTRE_SOCIEDADES", clienteNombre: sLocal.razonSocial, clienteCif: sLocal.cif, sociedadDestinoId: socLocal, fecha, vencimiento: vence,
-      estado: cobrada ? "COBRADA" : "EMITIDA_FUERA", serie: "OB-F26", numeroOficial: numero, cobradaEn: cobrada ? vence : null, forma: "TRANSFERENCIA", notas: nota,
-      lineas: ls.map((l) => ({ concepto: l.concepto, cantidad: l.cantidad, precio: l.precio, tipoIva: l.tipoIva })),
-    });
-    // Espejo: la misma factura como recibida en la sociedad del local
-    facturas.push({
-      centro: "L", sociedadId: socLocal, centroId: local, proveedorId: null, proveedorNombre: sOB.razonSocial, proveedorCif: sOB.cif === "PENDIENTE" ? null : sOB.cif, numeroProveedor: numero,
-      categoria: "MERC-COM", fecha, vencimiento: vence, forma: "TRANSFERENCIA", lineas: ls, notas: `Factura del obrador (entre sociedades del grupo). ${nota}`,
-      estado: cobrada ? "PAGADA" : "VALIDADA", pagadaEn: cobrada ? vence : null,
-    });
-  }
-
   // =========================================================================
   // 5. Estados, números y escritura
   // =========================================================================
@@ -626,6 +584,7 @@ export async function sembrar(prisma: PrismaClient, ctx: ContextoPruebas) {
   const numerosFR = await reservarNumeros(prisma, t, "FR", facturas.length);
   const filasFR: Prisma.FacturaRecibidaCreateManyInput[] = [];
   const filasFRL: Prisma.FacturaRecibidaLineaCreateManyInput[] = [];
+  const filasFRA: Prisma.FacturaRecibidaAlbaranCreateManyInput[] = [];
   const pagos: Prisma.PagoCobroCreateManyInput[] = [];
   const resumen = { recibidas: 0, pendientes: 0, validadas: 0, pagadas: 0, vencidas: 0, base: 0 };
 
@@ -661,11 +620,12 @@ export async function sembrar(prisma: PrismaClient, ctx: ContextoPruebas) {
     filasFR.push({
       id, tenantId: t, numero: numerosFR[i], numeroProveedor: f.numeroProveedor, proveedorId: f.proveedorId, proveedorNombre: f.proveedorNombre, proveedorCif: f.proveedorCif,
       sociedadId: f.sociedadId, centroId: f.centroId, categoriaId: cat[f.categoria] ?? null, fecha: f.fecha, vencimiento: f.vencimiento, base, cuotaIva, total, estado, origen,
-      pedidoCompraId: f.pedidoCompraId ?? null, notas: f.notas ?? null, creadoPor: f.centro === "L" ? gerente : usr("economato@erp.local") ?? admin,
+      pedidoCompraId: null, notas: f.notas ?? null, creadoPor: f.centro === "L" ? gerente : usr("economato@erp.local") ?? admin,
       validadaPor: estado === "PENDIENTE" ? null : admin, validadaEn: estado === "PENDIENTE" ? null : mas(f.fecha, 3), pagadaEn,
       createdAt: mas(f.fecha, 1), updatedAt: pagadaEn ?? mas(f.fecha, estado === "PENDIENTE" ? 1 : 3),
     });
     filasFRL.push(...ls);
+    for (const pedidoCompraId of f.albaranIds) filasFRA.push({ tenantId: t, facturaId: id, pedidoCompraId });
   });
 
   // Gastos
@@ -714,15 +674,58 @@ export async function sembrar(prisma: PrismaClient, ctx: ContextoPruebas) {
 
   await enLotes(filasFR, 500, (l) => prisma.facturaRecibida.createMany({ data: l }));
   await enLotes(filasFRL, 2000, (l) => prisma.facturaRecibidaLinea.createMany({ data: l }));
+  await enLotes(filasFRA, 2000, (l) => prisma.facturaRecibidaAlbaran.createMany({ data: l }));
   await enLotes(filasG, 500, (l) => prisma.gastoContable.createMany({ data: l }));
   await enLotes(filasFE, 500, (l) => prisma.facturaEmitida.createMany({ data: l }));
   await enLotes(filasFEL, 2000, (l) => prisma.facturaEmitidaLinea.createMany({ data: l }));
   await enLotes(pagos, 1000, (l) => prisma.pagoCobro.createMany({ data: l }));
+
+  // ---------- Facturas entre sociedades del obrador al local (con la función del ERP) ----------
+  // Una por mes ya cerrado con pedidos recibidos de OB a RZ-PRU; el mes en curso se factura al cerrarlo.
+  const entre = { facturas: 0, mismaSociedad: 0 };
+  if (admin) {
+    const deps: Dependencias = {
+      numerar: async (tx, tenantId, serie) => (await reservarNumeros(tx as PrismaClient, tenantId, serie, 1))[0],
+      auditar: async (tx, a) => {
+        await tx.auditoria.create({ data: { tenantId: a.tenantId, usuarioId: a.usuarioId, entidad: a.entidad, entidadId: a.entidadId, accion: a.accion, antes: (a.antes ?? undefined) as object | undefined, despues: (a.despues ?? undefined) as object | undefined } });
+      },
+    };
+    const servidos = await prisma.pedidoInterno.findMany({ where: { tenantId: t, origenId: ob, destinoId: local, estado: "RECIBIDO", servidoEn: { not: null } }, select: { servidoEn: true } });
+    const mesesPedidos = Array.from(new Set(servidos.map((p) => isoMadrid(p.servidoEn!).slice(0, 7)))).sort();
+    let numeroOB = 120;
+    for (const mes of mesesPedidos) {
+      const [a, m1] = mes.split("-").map(Number);
+      if (finDeMes(a, m1 - 1) >= hoy) continue; // mes sin cerrar
+      const r = await prisma.$transaction((tx) => generarFacturasObrador(tx, t, admin, mes, [ob], deps, { destinoIds: [local], ahora: ctx.hoy }), { timeout: 60_000 });
+      entre.mismaSociedad += r.mismaSociedad;
+      for (const g of r.generadas) {
+        entre.facturas++;
+        // después: emitida en el programa certificado (número oficial) y, si ya venció, cobrada y pagada por el local
+        const emitida = await prisma.facturaEmitida.findUniqueOrThrow({ where: { id: g.emitidaId } });
+        const numeroOficial = `OB-F26/${String(++numeroOB).padStart(4, "0")}`;
+        const vence = emitida.vencimiento!;
+        const cobrada = vence <= hoy;
+        await prisma.facturaEmitida.update({ where: { id: g.emitidaId }, data: { estado: cobrada ? "COBRADA" : "EMITIDA_FUERA", numeroOficial, programaEmisor: PROGRAMA, cobradaEn: cobrada ? vence : null } });
+        await prisma.facturaRecibida.update({
+          where: { id: g.espejoId },
+          data: { numeroProveedor: numeroOficial, estado: cobrada ? "PAGADA" : "VALIDADA", validadaPor: admin, validadaEn: mas(emitida.fecha, 3), pagadaEn: cobrada ? vence : null },
+        });
+        if (cobrada)
+          await prisma.pagoCobro.createMany({
+            data: [
+              { tenantId: t, sociedadId: emitida.sociedadId, tipo: "COBRO", fecha: vence, importe: emitida.total, forma: "TRANSFERENCIA", facturaEmitidaId: g.emitidaId, referencia: `Cobro ${numeroOficial}`, usuarioId: admin },
+              { tenantId: t, sociedadId: socLocal, tipo: "PAGO", fecha: vence, importe: emitida.total, forma: "TRANSFERENCIA", facturaRecibidaId: g.espejoId, referencia: `Pago ${numeroOficial}`, usuarioId: admin },
+            ],
+          });
+      }
+    }
+  }
 
   console.log(
     `  contabilidad: ${resumen.recibidas} facturas recibidas (${resumen.pendientes} por revisar, ${resumen.validadas} validadas, ${resumen.pagadas} pagadas, ${resumen.vencidas} vencidas sin pagar; ${r2(resumen.base)} € de base), ` +
       `${filasG.length} gastos, ${filasFE.length} facturas emitidas, ${pagos.length} pagos y cobros`,
   );
   console.log(`  contabilidad: casos de revisión: ${casos.join(" · ")}`);
+  console.log(`  contabilidad: ${entre.facturas} facturas del obrador al local generadas con generarFacturasObrador${entre.mismaSociedad ? ` (${entre.mismaSociedad} meses de la misma sociedad, sin factura)` : ""}${entreSociedades ? "" : " (OB y RZ-PRU son de la misma sociedad: sin factura)"}`);
   if (huecosEventos.length) console.log(`  contabilidad: eventos sin facturar: ${huecosEventos.join(" · ")}`);
 }

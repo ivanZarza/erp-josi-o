@@ -96,16 +96,16 @@ model CartaPlato {
   nombreEn           String?
   descripcion        String?
   descripcionEn      String?
-  precio             Decimal  @db.Decimal(10, 2) // PVP con IVA de la marca (cada local puede cambiarlo)
-  iva                Decimal  @default(10) @db.Decimal(5, 2)
+  precio             Decimal   @db.Decimal(10, 2) // PVP con IVA de la marca (cada local puede cambiarlo)
+  iva                Decimal   @default(10) @db.Decimal(5, 2)
   alergenos          String[]
   trazas             String[]
-  alergenosRevisados Boolean  @default(false) // revisados por cocina (los 14 son obligatorios)
+  alergenosRevisados Boolean   @default(false) // revisados por cocina (los 14 son obligatorios)
   etiquetas          String[] // sin gluten, vegetariano…
   fotoUrl            String?
-  activo             Boolean  @default(true)
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  activo             Boolean   @default(true)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   ingredientes CartaPlatoIngrediente[]
   precios      CartaPlatoPrecio[]
@@ -157,7 +157,7 @@ model CartaPlatoPrecio {
   @@unique([platoId, centroId])
 }
 
-/// Recargo fijo por persona (pan y aperitivo) en cada local
+/// Recargo fijo por persona (pan y aperitivo) en cada local. Caja lo añade solo a cada ticket (importe × comensales).
 model CartaRecargo {
   id        String   @id @default(cuid())
   tenantId  String
@@ -166,6 +166,7 @@ model CartaRecargo {
   importe   Decimal  @db.Decimal(6, 2) // por persona, IVA incluido
   iva       Decimal  @default(10) @db.Decimal(5, 2)
   activo    Boolean  @default(true)
+  platoId   String? // CartaPlato con el escandallo de lo que se sirve (opcional): si está, la línea del ticket descuenta stock
   updatedAt DateTime @updatedAt
 
   @@unique([tenantId, centroId, concepto])

@@ -227,3 +227,29 @@ export async function platosVendibles(tx: Tx, tenantId: string, centroId: string
       }
   return lista;
 }
+
+// ---------------------------------------------------------------------------------------------
+// Recargo por comensal (pan y aperitivo)
+// ---------------------------------------------------------------------------------------------
+
+/** Concepto del recargo por comensal que se configura en Comidas → Carta → Pan y aperitivo. */
+export const CONCEPTO_PAN = "Pan y aperitivo";
+
+/** Recargo por comensal que cobra un local (importe por persona con IVA incluido). */
+export interface RecargoVenta {
+  id: string;
+  centroId: string;
+  concepto: string;
+  importe: number;
+  iva: number;
+  /** Plato con el escandallo de lo que se sirve (si lo hay, la línea descuenta stock). */
+  platoId: string | null;
+}
+
+/** Recargos activos (con importe) de unos locales, por local. Una consulta. */
+export async function recargosDeVenta(tx: Tx, tenantId: string, centroIds: string[]): Promise<Map<string, RecargoVenta>> {
+  const ids = Array.from(new Set(centroIds));
+  if (ids.length === 0) return new Map();
+  const filas = await tx.cartaRecargo.findMany({ where: { tenantId, centroId: { in: ids }, concepto: CONCEPTO_PAN, activo: true, importe: { gt: 0 } } });
+  return new Map(filas.map((r) => [r.centroId, { id: r.id, centroId: r.centroId, concepto: r.concepto, importe: Number(r.importe), iva: Number(r.iva), platoId: r.platoId }]));
+}

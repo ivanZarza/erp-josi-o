@@ -21,8 +21,9 @@ import {
   crearCategoriasBasicas,
   crearCategoria,
   alternarCategoria,
+  facturarPedidosObrador,
 } from "./servicio";
-import { lineasDeFormulario, objetoDeFormulario } from "./esquemas";
+import { lineasDeFormulario, objetoDeFormulario, FacturarObradorEsquema } from "./esquemas";
 
 type Resultado = string | { mensaje: string; ruta: string } | void;
 
@@ -59,7 +60,7 @@ const volver = (form: FormData, porDefecto: string) => {
 export async function accionCrearFacturaRecibida(form: FormData) {
   const ctx = await exigir("contabilidad", "contabilidad:facturas:editar");
   await ejecutar("/contabilidad/recibidas/nueva", async () => {
-    const f = await crearFacturaRecibida(ctx, { ...objetoDeFormulario(form), lineas: lineasDeFormulario(form) });
+    const f = await crearFacturaRecibida(ctx, { ...objetoDeFormulario(form), albaranIds: form.getAll("albaranIds").map(String), lineas: lineasDeFormulario(form) });
     return { ruta: "/contabilidad/recibidas", mensaje: `Factura ${f.numero} registrada, pendiente de revisar.` };
   });
 }
@@ -119,6 +120,19 @@ export async function accionAnularFacturaEmitida(form: FormData) {
   await ejecutar(volver(form, "/contabilidad/emitidas"), async () => {
     await anularFacturaEmitida(ctx, id(form));
     return "Factura preparada anulada.";
+  });
+}
+
+export async function accionFacturarPedidosObrador(form: FormData) {
+  const ctx = await exigir("contabilidad", "contabilidad:facturas:editar");
+  const mes = String(form.get("mes") ?? "");
+  await ejecutar(`/contabilidad/emitidas/obrador?mes=${encodeURIComponent(mes)}`, async () => {
+    const d = FacturarObradorEsquema.parse({ mes, destinoIds: form.getAll("destinoIds").map(String) });
+    const r = await facturarPedidosObrador(ctx, d.mes, d.destinoIds.length ? d.destinoIds : undefined);
+    const partes = [r.generadas.length ? `Preparadas ${r.generadas.length} ${r.generadas.length === 1 ? "factura" : "facturas"} (${r.generadas.map((g) => `${g.referencia} a ${g.destino}`).join(", ")}) con su espejo en el local.` : "No había nada nuevo que facturar."];
+    if (r.mismaSociedad) partes.push(`${r.mismaSociedad} ${r.mismaSociedad === 1 ? "local es" : "locales son"} de la misma sociedad que el obrador: traspaso interno, sin factura.`);
+    if (r.conErrores.length) partes.push(`Sin facturar por un problema: ${r.conErrores.join(" · ")}`);
+    return partes.join(" ");
   });
 }
 

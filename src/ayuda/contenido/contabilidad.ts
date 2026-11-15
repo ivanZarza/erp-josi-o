@@ -122,7 +122,7 @@ export const AYUDA_CONTABILIDAD: AyudaArea = {
     titulo: "Facturas recibidas",
     area: AREA,
     paraQue:
-      "Lista las facturas de proveedores de cada sociedad. Se registran, alguien las revisa y valida, y después se marcan como pagadas. Además, el programa avisa de posibles facturas duplicadas y de las que no cuadran con los albaranes de compra.",
+      "Lista las facturas de proveedores de cada sociedad. Se registran, alguien las revisa y valida, y después se marcan como pagadas. Además, cada factura se cuadra con sus albaranes de compra (uno o varios: una factura semanal o mensual junta los de su periodo) y el programa avisa de posibles duplicadas y de lo que no cuadra.",
     quien:
       "Ver: permiso «Ver contabilidad». Registrar, validar, pagar y anular: «Registrar y validar facturas». " + AMBITO,
     secciones: [
@@ -150,7 +150,7 @@ export const AYUDA_CONTABILIDAD: AyudaArea = {
           { nombre: "Total", queEs: "Importe con IVA." },
           {
             nombre: "Estado",
-            queEs: "Pendiente de revisar, Validada, Pagada o Anulada; y «¿Duplicada?» o «No cuadra» si tiene avisos.",
+            queEs: "Pendiente de revisar, Validada, Pagada o Anulada; y «¿Duplicada?», «No cuadra» (importes o productos distintos de los albaranes) o «Revisar» (solo avisos, por ejemplo un albarán del periodo sin facturar) si tiene avisos.",
             logica: "La fila sale en rojo si está vencida sin pagar y en naranja si está pendiente de revisar o tiene avisos.",
           },
         ],
@@ -162,13 +162,18 @@ export const AYUDA_CONTABILIDAD: AyudaArea = {
             nombre: "Aviso «Revisar antes de validar o pagar»",
             queEs: "Solo en facturas pendientes o validadas que tienen algo raro.",
             logica:
-              "Posible duplicada: otra factura no anulada del mismo proveedor y sociedad con el mismo número (sin contar guiones, barras ni espacios) o con el mismo total y fecha a menos de 3 días. No cuadra con los albaranes: en facturas con líneas enlazadas a productos (las que se registran eligiendo un albarán y dejando las líneas vacías), con proveedor y centro, se comparan con las compras recibidas de ese proveedor y centro desde su factura anterior (o 40 días si no hay anterior, o solo su albarán si está enlazada a uno). Avisa si el precio difiere más del 0,5 %, si un producto no está en ningún albarán o si la cantidad facturada no es la recibida, y calcula cuánto hay de más o de menos sin IVA. Si la factura está enlazada a un albarán pero las líneas se escribieron a mano (sin producto), compara el total sin IVA con lo recibido en el albarán (tolerancia del 0,5 %).",
+              "Posible duplicada: otra factura no anulada del mismo proveedor y sociedad con el mismo número (sin contar guiones, barras ni espacios) o con el mismo total y fecha a menos de 3 días. Con albaranes enlazados: «No cuadra» si el total sin IVA no es lo recibido en sus albaranes (recibido × precio de cada línea) o si, línea a línea por producto, el precio difiere más del 0,5 % de los del albarán, la cantidad facturada no es la recibida, un producto facturado no está en sus albaranes o un producto recibido no está facturado; avisa además si la base de un tipo de IVA no coincide, si un albarán del mismo proveedor y centro del periodo (desde el día siguiente a su factura anterior hasta la fecha de esta) no está en ninguna factura (¿falta en esta?) y si un albarán está también en otra factura. Sin albaranes enlazados (facturas antiguas o de alta sin albaranes): se cruza por fechas con las compras del proveedor y centro desde su factura anterior (o 40 días) solo para los productos facturados, y avisa si esos albaranes ya están en otra factura. Diferencias de menos de 5 céntimos o del 0,5 % se dan por buenas. Los abonos no se cruzan. No hay tarifa pactada con los proveedores en el ERP: el precio se compara con el del albarán.",
+          },
+          {
+            nombre: "Cuadre con sus albaranes",
+            queEs: "Tabla de los albaranes de la factura (albarán, compra, día de recepción, importe sin IVA y si está también en otra factura); si están enlazados, base por tipo de IVA y total sin IVA de la factura frente a los albaranes con la diferencia; y línea a línea por producto: cantidad facturada y recibida, precio de la factura y del albarán (medios) y diferencia en euros. Debajo, los albaranes del periodo sin factura.",
+            logica: "Las diferencias de 5 céntimos o más salen en rojo. «Por fechas» quiere decir que la factura no tiene albaranes enlazados y se compara con los del proveedor desde su factura anterior.",
           },
           { nombre: "Número interno", queEs: "Número que da el ERP (serie FR), correlativo." },
           { nombre: "CIF del proveedor", queEs: "CIF del proveedor." },
           { nombre: "Centro", queEs: "Centro al que se carga, o «De la sociedad (sin centro)»." },
           { nombre: "Categoría", queEs: "Categoría principal de la factura. Las antiguas sin categoría lo dicen: sus líneas sin categoría propia no suman en el Cuadro." },
-          { nombre: "Albarán enlazado", queEs: "Si la factura se registró con su albarán: entonces se cruza solo con él; si no, por fechas con los albaranes del proveedor." },
+          { nombre: "Albaranes", queEs: "Cuántos albaranes están enlazados a la factura (se cuadra con ellos), si es la factura del obrador (va con sus pedidos internos) o si no tiene ninguno (se cruza por fechas)." },
           { nombre: "Base", queEs: "Total sin IVA." },
           { nombre: "IVA", queEs: "Cuota de IVA." },
           { nombre: "Origen", queEs: "Alta a mano, Leída con IA o Factura electrónica." },
@@ -196,7 +201,7 @@ export const AYUDA_CONTABILIDAD: AyudaArea = {
           {
             nombre: "Anular",
             queEs: "Solo en facturas pendientes o validadas.",
-            logica: "Una factura pagada no se anula: habría que registrar un abono. La anulada no cuenta en sumas, exportación ni Cuadro de mando.",
+            logica: "Una factura pagada no se anula: habría que registrar un abono. La anulada no cuenta en sumas, exportación ni Cuadro de mando, y sus albaranes quedan libres para otra factura. El espejo de una factura del obrador no se anula aquí: se anula la factura emitida y se anulan las dos.",
           },
         ],
       },
@@ -217,9 +222,28 @@ export const AYUDA_CONTABILIDAD: AyudaArea = {
   "/contabilidad/recibidas/nueva": {
     titulo: "Registrar factura recibida",
     area: AREA,
-    paraQue: "Alta a mano de una factura de proveedor. Queda «Pendiente de revisar» hasta que alguien la valide.",
+    paraQue: "Alta a mano de una factura de proveedor, con los albaranes que factura (uno o varios). Queda «Pendiente de revisar» hasta que alguien la valide.",
     quien: "Permiso «Registrar y validar facturas». Solo puedes registrar en las sociedades de tus centros.",
     secciones: [
+      {
+        titulo: "1. Albaranes que factura (opcional)",
+        campos: [
+          { nombre: "Proveedor", queEs: "Proveedor de la factura, para ver sus albaranes sin facturar." },
+          { nombre: "Centro", queEs: "Centro que recibió los albaranes, o «Todos los de la sociedad»." },
+          { nombre: "Fecha de la factura", queEs: "Hasta qué día cubre la factura (se copia abajo)." },
+          {
+            nombre: "Ver sus albaranes sin factura",
+            queEs: "Enseña las compras recibidas (enteras o en parte) de ese proveedor en tus centros, de los últimos 120 días, que no están en ninguna factura.",
+            logica: "Salen marcadas las del periodo: recibidas después de la última factura (sin abonos) del proveedor en ese centro y hasta la fecha de la factura. Puedes marcar y desmarcar.",
+          },
+          {
+            nombre: "Tabla de albaranes",
+            queEs: "Casilla para facturarlo, Albarán (ALB-E y, si se apuntó, el número del proveedor), Recibido, Centro, Estado (Recibido o Recibido en parte) e importe Sin IVA (recibido × precio).",
+            logica: "Todos tienen que ser del mismo proveedor y de centros de la sociedad elegida; si eliges centro, todos de ese centro (si lo dejas vacío y son de un solo centro, se pone ese). Cada albarán solo puede estar en una factura: si otro ya lo facturó, sale un error con su número. Si dejas las líneas vacías, se copian las de los albaranes marcados (un producto al mismo precio en varias entregas va en una línea, con la cantidad recibida, el precio y el IVA del producto).",
+            influye: "La factura queda enlazada a esos albaranes y la lista de facturas recibidas la cuadra con ellos; la ficha de cada compra dice en qué factura está.",
+          },
+        ],
+      },
       {
         titulo: "Datos de la factura",
         campos: [
@@ -242,14 +266,9 @@ export const AYUDA_CONTABILIDAD: AyudaArea = {
             queEs: "El número que pone en la factura. Obligatorio.",
             logica: "Si ya hay otra factura no anulada de esa sociedad con el mismo número y el mismo proveedor, no deja registrarla.",
           },
-          { nombre: "Fecha de la factura", queEs: "Fecha que pone la factura. Por defecto, hoy." },
+          { nombre: "Fecha de la factura", queEs: "Fecha que pone la factura. Por defecto, hoy (o la elegida arriba)." },
           { nombre: "Vencimiento", queEs: "Día en que hay que pagarla. Si se deja vacío, sale en Vencimientos como «Sin fecha»." },
-          {
-            nombre: "Albarán que factura (opcional)",
-            queEs: "Compra recibida (de los centros de tu selección, últimos 90 días) que aún no está enlazada a ninguna factura.",
-            logica: "Tiene que ser del proveedor elegido (si eliges uno) y del centro elegido (si eliges uno); si no eliges, se toman los del albarán. Un albarán solo puede estar en una factura. Si dejas las líneas vacías, se copian las del albarán (producto, cantidad recibida, precio e IVA del producto).",
-            influye: "Con el albarán, la revisión «No cuadra» compara la factura con él.",
-          },
+
           {
             nombre: "Categoría principal",
             queEs: "Categoría contable de la factura (mercancía, suministros, alquiler…). Obligatoria.",
@@ -325,6 +344,10 @@ export const AYUDA_CONTABILIDAD: AyudaArea = {
             queEs:
               "Referencia interna, Número oficial (o «Sin emitir»), Programa emisor, Tipo (Evento, Catering, Entre sociedades del grupo u Otro), CIF del cliente, Sociedad del grupo que recibe, Centro, Vencimiento, Base, IVA, Cobrada (fecha) y Notas.",
           },
+          {
+            nombre: "Pedidos internos que factura y Espejo en el local",
+            queEs: "Solo en las facturas entre sociedades: los pedidos del obrador (con su albarán de salida) que van en la factura y la factura recibida que se creó en la sociedad del local.",
+          },
           { nombre: "Tabla de líneas", queEs: "Concepto, Cantidad, Precio (sin IVA), IVA (%) y Base de cada línea." },
         ],
       },
@@ -336,7 +359,7 @@ export const AYUDA_CONTABILIDAD: AyudaArea = {
           {
             nombre: "Apuntar como emitida",
             queEs: "Solo en facturas preparadas o en borrador. Pasa a «Emitida en programa certificado».",
-            influye: "Desde ese momento cuenta como pendiente de cobrar y sale en Vencimientos y en el archivo para la gestoría.",
+            influye: "Desde ese momento cuenta como pendiente de cobrar y sale en Vencimientos y en el archivo para la gestoría. En una factura del obrador, el número oficial pasa también a su espejo en el local (como número del proveedor).",
           },
           ...CAMPOS_PAGO("cobró"),
           {
@@ -346,8 +369,9 @@ export const AYUDA_CONTABILIDAD: AyudaArea = {
           {
             nombre: "Anular",
             queEs: "Solo en facturas preparadas o en borrador.",
-            logica: "Una factura ya emitida en el programa certificado no se anula aquí: se rectifica en ese programa.",
+            logica: "Una factura ya emitida en el programa certificado no se anula aquí: se rectifica en ese programa. Al anular una factura del obrador se anula también su espejo en el local (si el local ya lo pagó, no se puede) y sus pedidos vuelven a estar por facturar.",
           },
+          { nombre: "Facturar pedidos del obrador", queEs: "Abre la pantalla que prepara las facturas entre sociedades del obrador a los locales de un mes." },
         ],
       },
     ],
@@ -362,6 +386,70 @@ export const AYUDA_CONTABILIDAD: AyudaArea = {
     ],
   },
 
+  "/contabilidad/emitidas/obrador": {
+    titulo: "Facturar pedidos del obrador",
+    area: AREA,
+    paraQue:
+      "Prepara la factura entre sociedades del obrador (o almacén central) a cada local de otra sociedad con los pedidos internos del mes: una por local y mes, a la tarifa del obrador, con su espejo como factura recibida en el local.",
+    quien: "Permiso «Registrar y validar facturas». Salen los pedidos de los obradores y almacenes de tus centros.",
+    secciones: [
+      {
+        titulo: "Mes",
+        campos: [
+          {
+            nombre: "Mes (según el día en que se sirvió)",
+            queEs: "Mes que se factura. Por defecto, el actual.",
+            logica: "Un pedido es del mes del día (hora de Madrid) en que el obrador lo sirvió. Fecha de la factura: el último día del mes o, si el mes no ha acabado, hoy.",
+          },
+          { nombre: "Ver lo que se va a facturar", queEs: "Enseña la vista previa del mes elegido. No guarda nada." },
+        ],
+      },
+      {
+        titulo: "Una tarjeta por obrador y local",
+        campos: [
+          {
+            nombre: "Pedidos",
+            queEs: "Pedido, Albarán de salida, día en que se sirvió, Diferencias al recibir (líneas con falta o sobra) e importe Sin IVA.",
+            logica: "Solo entran los pedidos RECIBIDOS (el local confirmó lo que le llegó) que no están ya en otra factura.",
+          },
+          {
+            nombre: "Líneas",
+            queEs: "Producto, Cantidad, Precio, IVA y Base: los pedidos juntos, un producto al mismo precio en una sola línea.",
+            logica: "Cantidad = lo servido más lo que llegó de más (la misma regla que el importe del pedido). Lo que faltó al recibir también se factura: salió del obrador y en el local quedó como merma. Precio = el de la línea del pedido (la tarifa del obrador para ese local al servirlo). IVA = el del producto. Debajo, la base y el IVA por tipo y el total.",
+          },
+          {
+            nombre: "Misma sociedad: sin factura",
+            queEs: "El obrador y el local son de la misma sociedad: es un traspaso interno y no lleva factura.",
+            influye: "Cuenta como venta del obrador (resumen del Obrador) y como mercancía del local (Cuadro de mando), sin factura.",
+          },
+          { nombre: "No se puede facturar", queEs: "Algún producto con un IVA que no es 21, 10, 4 o 0 %, o un centro sin sociedad asignada. Corrígelo y vuelve a cargar." },
+          { nombre: "Facturar", queEs: "Casilla para facturar ese local (marcada por defecto)." },
+        ],
+      },
+      {
+        titulo: "Botón y listas de abajo",
+        campos: [
+          {
+            nombre: "Preparar las facturas marcadas",
+            queEs: "Crea, por cada local marcado, la factura emitida «Preparada (sin emitir)» (referencia PRE-…) en la sociedad del obrador y su espejo como factura recibida «Pendiente de revisar» en la sociedad del local.",
+            logica: "Vence a 30 días. El espejo lleva como número del proveedor la referencia PRE-… hasta que se apunte el número oficial, y categoría de mercancía de comida o de bebida en cada línea. Cada pedido queda enlazado a su factura y no puede entrar en otra: volver a pulsar el mismo mes solo factura los pedidos nuevos.",
+            influye: "Las facturas salen en Facturas emitidas y Facturas recibidas; la ficha del pedido dice a qué factura va. El Cuadro de mando no suma las facturas de mercancía (la mercancía del local sale del stock al coste medio o de lo vendido), así que el espejo no se cuenta dos veces.",
+          },
+          { nombre: "Servidos sin confirmar por el local", queEs: "Pedidos del mes servidos que el local aún no ha confirmado: no entran hasta que los confirme (entonces, en otra factura del mismo mes)." },
+          { nombre: "Ya facturado de este mes", queEs: "Facturas ya hechas del mes con pedidos de estos obradores: referencia o número oficial, obrador, cliente, número de pedidos, total y estado." },
+        ],
+      },
+    ],
+    logica: [
+      "Decisiones a confirmar por Iván: una factura por obrador → local y mes; solo pedidos recibidos; la falta al recibir se factura (merma del local) y la sobra también; vencimiento a 30 días; el IVA es el del producto (a comprobar con la gestoría, igual que el precio entre sociedades vinculadas).",
+    ],
+    influye: [
+      { texto: "Factura emitida para emitir en el programa certificado", ruta: "/contabilidad/emitidas" },
+      { texto: "Espejo en el local, para revisar y pagar", ruta: "/contabilidad/recibidas" },
+    ],
+    comoSeUsa: ["Arriba, elige el obrador o «Todos mis centros»: con un local elegido no sale nada, porque factura el obrador.", "Al acabar el mes, elige el mes y revisa la vista previa.", "Pulsa «Preparar las facturas marcadas».", "Emite cada factura en el programa certificado y apunta su número oficial en Facturas emitidas."],
+  },
+
   "/contabilidad/emitidas/nueva": {
     titulo: "Preparar factura emitida",
     area: AREA,
@@ -374,7 +462,7 @@ export const AYUDA_CONTABILIDAD: AyudaArea = {
         campos: [
           { nombre: "Sociedad que factura", queEs: "Sociedad del grupo que emite la factura. Obligatorio." },
           { nombre: "Centro (opcional)", queEs: "Centro al que corresponde.", logica: "Tiene que ser uno de tus centros y de la sociedad elegida." },
-          { nombre: "Tipo", queEs: "Evento (por defecto), Catering, Entre sociedades del grupo u Otro." },
+          { nombre: "Tipo", queEs: "Evento (por defecto), Catering, Entre sociedades del grupo u Otro.", logica: "Las facturas del obrador a los locales no se preparan aquí a mano: se generan con «Facturar pedidos del obrador» (Facturas emitidas), que las enlaza a sus pedidos y crea el espejo en el local." },
           {
             nombre: "Sociedad del grupo que recibe",
             queEs: "Solo si es entre sociedades del grupo.",

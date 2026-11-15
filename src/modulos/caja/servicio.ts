@@ -13,7 +13,7 @@ import { centrosFiltro, type Contexto } from "@/kernel/contexto";
 import { auditar } from "@/kernel/eventos";
 import { siguienteNumero } from "@/kernel/numeracion";
 import type { Prisma } from "@/generated/prisma/client";
-import { cargarEscandallos, platosVendibles } from "@/nucleo/consumo-ventas";
+import { cargarEscandallos, platosVendibles, recargosDeVenta } from "@/nucleo/consumo-ventas";
 import { normalizarNombre } from "@/nucleo/regla-almacen";
 import { ImportacionTpvEsquema, leerCsvTpv, leerFechaTpv, type TicketTpv } from "@/integraciones/tpv/formato";
 import {
@@ -24,12 +24,13 @@ import {
   AnadirLineasEsquema,
   CobrarEsquema,
   AnularEsquema,
+  ComensalesEsquema,
   AperturaEsquema,
   MovimientoCajaEsquema,
   ImportarTpvEsquema,
 } from "./esquemas";
 import { listarEmpleados } from "@/modulos/personal/servicio";
-import { ErrorTicket, guardarTickets, anadirLineas, cobrarTicket, anularLinea, anularTicket, diaDeNegocio, type TicketNuevo, type CobroNuevo, type LineaTicketNueva } from "./tickets";
+import { ErrorTicket, guardarTickets, anadirLineas, cobrarTicket, anularLinea, anularTicket, cambiarComensales, diaDeNegocio, importesLinea, lineaRecargo, totalesTicket, type TicketNuevo, type CobroNuevo, type LineaTicketNueva } from "./tickets";
 
 /** Error que se enseña tal cual al usuario. */
 export class ErrorCaja extends Error {}
@@ -350,11 +351,22 @@ export async function resumenTickets(ctx: Contexto, f: FiltroTickets) {
   };
 }
 
-/** Platos y bebidas que se pueden vender en un local (para el formulario de tickets). */
+/**
+ * Platos y bebidas que se pueden vender en un local (para el formulario de tickets). Sin el plato del
+ * recargo por comensal (pan y aperitivo), que se añade solo.
+ */
 export async function cartaDeVenta(ctx: Contexto, centroId: string) {
   comprobarCentro(ctx, centroId);
   const prisma = await db();
-  return platosVendibles(prisma, ctx.tenant.id, centroId);
+  const [carta, recargo] = await Promise.all([platosVendibles(prisma, ctx.tenant.id, centroId), recargoDelLocal(ctx, centroId)]);
+  return recargo?.platoId ? carta.filter((p) => p.platoId !== recargo.platoId) : carta;
+}
+
+/** Recargo por comensal (pan y aperitivo) que cobra un local, o null si no lo cobra (desactivado o sin definir). */
+export async function recargoDelLocal(ctx: Contexto, centroId: string) {
+  comprobarCentro(ctx, centroId);
+  const prisma = await db();
+  return (await recargosDeVenta(prisma, ctx.tenant.id, [centroId])).get(centroId) ?? null;
 }
 
 function cobrosDe(total: number, forma: CobroNuevo["forma"], propina: number | undefined, forma2?: CobroNuevo["forma"], importe2?: number): CobroNuevo[] {
@@ -374,17 +386,24 @@ export async function registrarTicket(ctx: Contexto, entrada: unknown) {
   comprobarCentro(ctx, d.centroId);
   const prisma = await db();
   const ahora = new Date();
-  // precios para aplicar el descuento por línea (con los de la carta del local)
-  const carta = await platosVendibles(prisma, ctx.tenant.id, d.centroId);
+  // precios para aplicar el descuento por línea (con los de la carta del local) y el recargo por comensal
+  const [carta, recargos] = await Promise.all([platosVendibles(prisma, ctx.tenant.id, d.centroId), recargosDeVenta(prisma, ctx.tenant.id, [d.centroId])]);
+  const recargo = recargos.get(d.centroId);
+  const quitarPan = !!recargo && d.comensales > 0 && d.sinRecargo;
+  if (quitarPan && (d.motivoSinRecargo ?? "").length < 3) throw new ErrorCaja(`Explica por qué la mesa no toma «${recargo!.concepto}».`);
   const porPlato = new Map(carta.map((p) => [p.platoId, p]));
   const lineas: LineaTicketNueva[] = d.lineas.map((l) => {
     const p = porPlato.get(l.platoId);
     if (!p) throw new ErrorCaja("Hay un plato que no está en la carta de este local.");
+    if (recargo?.platoId === l.platoId) throw new ErrorCaja(`«${recargo.concepto}» se añade solo por comensal: no lo pongas como línea.`);
     const precio = l.formatoId ? (p.formatos.find((f) => f.id === l.formatoId)?.precio ?? p.precio) : p.precio;
     const descuento = d.descuentoPct && !l.invitacion ? redondear((l.cantidad * precio * d.descuentoPct) / 100) : 0;
     return { platoId: l.platoId, formatoId: l.formatoId, cantidad: l.cantidad, precio, descuento, invitacion: l.invitacion, momento: ahora };
   });
-  const total = redondear(lineas.reduce((s, l) => s + (l.invitacion ? 0 : redondear(l.cantidad * l.precio!) - (l.descuento ?? 0)), 0));
+  // pan y aperitivo: importe por persona × comensales, con el descuento de la cuenta; anulado si la mesa no lo toma
+  const pan = recargo ? lineaRecargo(recargo, d.comensales, { momento: ahora, descuentoPct: d.descuentoPct, quitar: quitarPan ? { motivo: d.motivoSinRecargo!, por: ctx.usuario.id, en: ahora } : null }) : null;
+  if (pan) lineas.unshift(pan);
+  const total = totalesTicket(lineas.map((l) => importesLinea({ cantidad: l.cantidad, precio: l.precio!, iva: l.iva ?? 10, descuento: l.descuento ?? 0, invitacion: !!l.invitacion, anulada: !!l.anulada }))).total;
   return prisma.$transaction(
     async (tx) => {
       const numero = await numeroTicket(tx, ctx.tenant.id);
@@ -405,8 +424,8 @@ export async function registrarTicket(ctx: Contexto, entrada: unknown) {
         creadoPor: ctx.usuario.id,
       };
       const r = await guardarTickets(tx, ctx.tenant.id, [t], { usuarioId: ctx.usuario.id });
-      await auditar(tx, { tenantId: ctx.tenant.id, usuarioId: ctx.usuario.id, entidad: "Ticket", entidadId: r.ids[0], accion: "crear", despues: { numero, estado: d.estado, total, lineas: d.lineas.length } });
-      return { numero, jornadasSustituidas: r.jornadasSustituidas };
+      await auditar(tx, { tenantId: ctx.tenant.id, usuarioId: ctx.usuario.id, entidad: "Ticket", entidadId: r.ids[0], accion: "crear", despues: { numero, estado: d.estado, total, lineas: d.lineas.length, ...(pan ? { recargo: { concepto: pan.concepto, comensales: pan.cantidad, importe: redondear(pan.cantidad * pan.precio!), quitado: pan.anulada?.motivo ?? null } } : {}) } });
+      return { numero, jornadasSustituidas: r.jornadasSustituidas, recargo: pan ? { concepto: pan.concepto!, importe: redondear(pan.cantidad * pan.precio! - (pan.descuento ?? 0)), quitado: !!pan.anulada } : null };
     },
     { timeout: 30_000 },
   );
@@ -429,6 +448,18 @@ export async function cobrarTicketManual(ctx: Contexto, entrada: unknown) {
   await prisma.$transaction(async (tx) => {
     await cobrarTicket(tx, ctx.tenant.id, d.id, cobrosDe(Number(t.total), d.forma, d.propina, d.forma2, d.importe2));
     await auditar(tx, { tenantId: ctx.tenant.id, usuarioId: ctx.usuario.id, entidad: "Ticket", entidadId: t.id, accion: "cobrar", despues: { forma: d.forma, propina: d.propina, forma2: d.forma2, importe2: d.importe2 } });
+  });
+}
+
+/** Cambia los comensales de un ticket abierto; la línea de pan y aperitivo se ajusta sola (tickets.ts). */
+export async function cambiarComensalesTicket(ctx: Contexto, entrada: unknown) {
+  const d = ComensalesEsquema.parse(entrada);
+  const prisma = await db();
+  await comprobarTicket(ctx, d.id);
+  return prisma.$transaction(async (tx) => {
+    const r = await cambiarComensales(tx, ctx.tenant.id, d.id, d.comensales, ctx.usuario.id);
+    await auditar(tx, { tenantId: ctx.tenant.id, usuarioId: ctx.usuario.id, entidad: "Ticket", entidadId: d.id, accion: "cambiar comensales", antes: { comensales: r.antes }, despues: { comensales: d.comensales, recargo: r.recargo } });
+    return r;
   });
 }
 
@@ -466,19 +497,33 @@ export { ErrorTicket };
 
 // ---------- importar ventas del TPV (hueco preparado, sin TPV conectado) ----------
 
+/** ¿Es una línea de pan y aperitivo? Por el nombre del recargo o por «pan» y «aperitivo» (sin tildes ni mayúsculas). */
+function esLineaPan(nombre: string | undefined, concepto: string): boolean {
+  if (!nombre) return false;
+  const n = normalizarNombre(nombre);
+  return n === normalizarNombre(concepto) || (/\bpan\b/.test(n) && n.includes("aperitivo"));
+}
+
 /**
  * Importa tickets en el formato propio (src/integraciones/tpv/formato.ts). Enlaza cada línea con un plato
  * de la carta del local por nombre (sin tildes ni mayúsculas) y el formato por su nombre; lo que no se
  * enlaza entra como concepto sin plato (no baja stock) y se avisa. No importa dos veces el mismo id.
+ * Pan y aperitivo: el TPV manda. Si el ticket trae su línea, se guarda como la línea del recargo (con el
+ * precio del TPV; baja stock si el recargo tiene escandallo); si no la trae, NO se añade (no se inventan
+ * ventas en lo importado) y se avisa de cuántos tickets con comensales vienen sin ella.
  */
 export async function importarVentasTpv(ctx: Contexto, centroId: string, tickets: TicketTpv[]) {
   comprobarCentro(ctx, centroId);
   const prisma = await db();
-  const [carta, centro, ya] = await Promise.all([
+  const [carta, centro, ya, recargos] = await Promise.all([
     platosVendibles(prisma, ctx.tenant.id, centroId),
     prisma.centro.findUniqueOrThrow({ where: { id: centroId }, select: { horaCorte: true } }),
     prisma.ticket.findMany({ where: { tenantId: ctx.tenant.id, centroId, externoId: { in: tickets.map((t) => t.id) } }, select: { externoId: true } }),
+    recargosDeVenta(prisma, ctx.tenant.id, [centroId]),
   ]);
+  const recargo = recargos.get(centroId);
+  const sinPan: string[] = [];
+  const panDistinto: string[] = [];
   const yaImportados = new Set(ya.map((t) => t.externoId));
   const porNombre = new Map(carta.map((p) => [normalizarNombre(p.nombre), p]));
   const porId = new Map(carta.map((p) => [p.platoId, p]));
@@ -493,6 +538,10 @@ export async function importarVentasTpv(ctx: Contexto, centroId: string, tickets
     try {
       const abiertoEn = leerFechaTpv(t.abierto);
       const lineas: LineaTicketNueva[] = t.lineas.map((l) => {
+        const anulada = l.anulada ? { motivo: l.motivoAnulacion || "Anulada en el TPV", en: l.hora ? leerFechaTpv(l.hora) : undefined } : null;
+        const momento = l.hora ? leerFechaTpv(l.hora) : abiertoEn;
+        if (recargo && ((recargo.platoId && l.platoId === recargo.platoId) || esLineaPan(l.plato, recargo.concepto)))
+          return { platoId: recargo.platoId, formatoId: null, recargoId: recargo.id, concepto: recargo.concepto, cantidad: l.cantidad, precio: l.precio ?? recargo.importe, iva: recargo.iva, descuento: l.descuento, invitacion: l.invitacion, anulada, momento };
         const p = (l.platoId && porId.get(l.platoId)) || (l.plato ? porNombre.get(normalizarNombre(l.plato)) : undefined);
         const f = p && l.formato ? p.formatos.find((x) => normalizarNombre(x.nombre) === normalizarNombre(l.formato!)) : p?.formatos[0];
         if (!p || (l.formato && p.formatos.length && !f)) sinEnlace.add(`${l.plato ?? l.platoId}${l.formato ? ` · ${l.formato}` : ""}`);
@@ -506,10 +555,15 @@ export async function importarVentasTpv(ctx: Contexto, centroId: string, tickets
           precio: l.precio,
           descuento: l.descuento,
           invitacion: l.invitacion,
-          anulada: l.anulada ? { motivo: l.motivoAnulacion || "Anulada en el TPV", en: l.hora ? leerFechaTpv(l.hora) : undefined } : null,
-          momento: l.hora ? leerFechaTpv(l.hora) : abiertoEn,
+          anulada,
+          momento,
         };
       });
+      if (recargo && t.estado !== "anulado" && t.comensales > 0) {
+        const pan = lineas.filter((l) => l.recargoId && !l.anulada).reduce((s, l) => s + l.cantidad, 0);
+        if (pan === 0) sinPan.push(t.numero || t.id);
+        else if (pan !== t.comensales) panDistinto.push(`${t.numero || t.id} (${pan} para ${t.comensales} comensales)`);
+      }
       nuevos.push({
         centroId,
         numero: `TPV-${t.numero || t.id}`,
@@ -531,6 +585,10 @@ export async function importarVentasTpv(ctx: Contexto, centroId: string, tickets
       avisos.push(`Ticket ${t.id}: ${(e as Error).message}`);
     }
   }
+  const lista = (xs: string[]) => `${xs.slice(0, 8).join(", ")}${xs.length > 8 ? "…" : ""}`;
+  if (recargo && sinPan.length)
+    avisos.push(`${sinPan.length} tickets con comensales vienen sin «${recargo.concepto}» (${lista(sinPan)}): no se añade a lo importado (manda el TPV); revisa si el TPV lo está cobrando.`);
+  if (recargo && panDistinto.length) avisos.push(`${panDistinto.length} tickets traen «${recargo.concepto}» para otro número de comensales: ${lista(panDistinto)}.`);
   if (nuevos.length === 0) return { importados: 0, avisos, sinEnlace: Array.from(sinEnlace) };
   await prisma.$transaction(
     async (tx) => {
@@ -609,6 +667,8 @@ export interface FilaVentaPlato {
   formatoId: string | null;
   concepto: string;
   area: "COMIDAS" | "BEBIDAS" | null;
+  /** Recargo por comensal (pan y aperitivo): fila propia; unidades = comensales que lo pagan. */
+  recargo: boolean;
   unidades: number;
   invitadas: number;
   importe: number; // sin IVA
@@ -617,27 +677,33 @@ export interface FilaVentaPlato {
   porDia: Map<string, { unidades: number; invitadas: number; importe: number; coste: number }>;
 }
 
-/** Lo vendido por plato y formato en un periodo (tickets cobrados, sin líneas anuladas). */
+/**
+ * Lo vendido por plato y formato en un periodo (tickets cobrados, sin líneas anuladas). El pan y aperitivo
+ * (líneas de recargo) sale en su fila propia aunque tenga plato de escandallo.
+ */
 export async function ventaPorPlato(ctx: Contexto, desdeISO: string, hastaISO: string) {
   const prisma = await db();
   const ids = centrosCaja(ctx).map((c) => c.id);
   if (ids.length === 0) return [];
-  const filas = await prisma.$queryRaw<{ fecha: Date; platoId: string | null; formatoId: string | null; concepto: string; invitacion: boolean; unidades: unknown; importe: unknown; coste: unknown }[]>`
-    SELECT t.fecha, l."platoId", l."formatoId", MAX(l.concepto) AS concepto, l.invitacion,
+  const filas = await prisma.$queryRaw<{ fecha: Date; platoId: string | null; formatoId: string | null; recargoId: string | null; concepto: string; invitacion: boolean; unidades: unknown; importe: unknown; coste: unknown }[]>`
+    SELECT t.fecha, l."platoId", l."formatoId", l."recargoId", MAX(l.concepto) AS concepto, l.invitacion,
            SUM(l.cantidad) AS unidades, SUM(l.base) AS importe, SUM(l."costeTeorico") AS coste
     FROM "TicketLinea" l JOIN "Ticket" t ON t.id = l."ticketId"
     WHERE t."tenantId" = ${ctx.tenant.id} AND t."centroId" = ANY(${ids}) AND t.estado::text = 'COBRADO' AND NOT l.anulada
       AND t.fecha >= ${aFecha(desdeISO)} AND t.fecha <= ${aFecha(hastaISO)}
-    GROUP BY t.fecha, l."platoId", l."formatoId", l.invitacion`;
+    GROUP BY t.fecha, l."platoId", l."formatoId", l."recargoId", l.invitacion`;
   const escandallos = await cargarEscandallos(prisma, ctx.tenant.id, filas.map((f) => f.platoId).filter((x): x is string => !!x));
   const mapa = new Map<string, FilaVentaPlato>();
   for (const f of filas) {
-    const clave = `${f.platoId ?? f.concepto}|${f.formatoId ?? ""}`;
+    // el recargo, una fila por concepto (todos los locales juntos), aunque cambie su plato de escandallo
+    const clave = f.recargoId ? `recargo|${f.concepto}` : `${f.platoId ?? f.concepto}|${f.formatoId ?? ""}`;
     const esc = f.platoId ? escandallos.get(f.platoId) : undefined;
     let v = mapa.get(clave);
     if (!v) {
       const formato = esc && f.formatoId ? esc.formatos.find((x) => x.id === f.formatoId)?.nombre : undefined;
-      v = { clave, platoId: f.platoId, formatoId: f.formatoId, concepto: esc ? `${esc.nombre}${formato ? ` · ${formato}` : ""}` : f.concepto, area: esc?.area ?? null, unidades: 0, invitadas: 0, importe: 0, coste: 0, porDia: new Map() };
+      v = f.recargoId
+        ? { clave, platoId: null, formatoId: null, concepto: f.concepto, area: "COMIDAS", recargo: true, unidades: 0, invitadas: 0, importe: 0, coste: 0, porDia: new Map() }
+        : { clave, platoId: f.platoId, formatoId: f.formatoId, concepto: esc ? `${esc.nombre}${formato ? ` · ${formato}` : ""}` : f.concepto, area: esc?.area ?? null, recargo: false, unidades: 0, invitadas: 0, importe: 0, coste: 0, porDia: new Map() };
       mapa.set(clave, v);
     }
     const u = Number(f.unidades);

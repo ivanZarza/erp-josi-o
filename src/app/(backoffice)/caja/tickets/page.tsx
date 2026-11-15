@@ -2,8 +2,8 @@ import { exigir } from "@/kernel/contexto";
 import { euros, fecha, fechaHora, numero } from "@/kernel/formato";
 import { Cabecera, Tarjeta, Campo, Entrada, Selector, AreaTexto, Boton, BotonEnlace, Cifra, Rejilla, Etiqueta, HuecoIntegracion, Vacio, Aviso } from "@/ui";
 import { TablaDesplegable, DatosDetalle } from "@/ui/tabla-desplegable";
-import { listarTickets, resumenTickets, cartaDeVenta, centrosCaja, hoyISO, sumarDias, nombresUsuarios } from "@/modulos/caja/servicio";
-import { accionRegistrarTicket, accionAnadirLineas, accionCobrarTicket, accionAnularLinea, accionAnularTicket, accionImportarTpv } from "@/modulos/caja/acciones";
+import { listarTickets, resumenTickets, cartaDeVenta, recargoDelLocal, centrosCaja, hoyISO, sumarDias, nombresUsuarios } from "@/modulos/caja/servicio";
+import { accionRegistrarTicket, accionAnadirLineas, accionCobrarTicket, accionAnularLinea, accionAnularTicket, accionImportarTpv, accionCambiarComensales } from "@/modulos/caja/acciones";
 import { FORMAS_COBRO, NOMBRE_FORMA_COBRO, LINEAS_FORMULARIO } from "@/modulos/caja/esquemas";
 import { empleadosDelCentro, nombreCompleto } from "@/modulos/personal/servicio";
 import type { PlatoVendible } from "@/nucleo/consumo-ventas";
@@ -117,11 +117,12 @@ export default async function Tickets({ searchParams }: { searchParams: Parametr
   const centroValido = centros.some((c) => c.id === centroForm);
   // el local elegido sirve para apuntar tickets Y filtra la lista (sin local elegido: todos los de tu selección)
   const filtro = { desde, hasta, estado, q, centroId: centroValido ? centroForm : undefined };
-  const [tickets, resumen, carta, empleados] = await Promise.all([
+  const [tickets, resumen, carta, empleados, recargo] = await Promise.all([
     listarTickets(ctx, filtro),
     resumenTickets(ctx, filtro),
     puedeCrear && centroValido ? cartaDeVenta(ctx, centroForm) : Promise.resolve([] as PlatoVendible[]),
     puedeCrear && centroValido && ctx.tieneModulo("personal") ? empleadosDelCentro(ctx, centroForm).catch(() => []) : Promise.resolve([]),
+    puedeCrear && centroValido ? recargoDelLocal(ctx, centroForm) : Promise.resolve(null),
   ]);
   const usuarios = await nombresUsuarios(ctx, tickets.flatMap((t) => [t.anuladoPor, ...t.lineas.map((l) => l.anuladaPor)]));
   const camareros = new Map(empleados.map((e) => [e.id, nombreCompleto(e)]));
@@ -192,6 +193,17 @@ export default async function Tickets({ searchParams }: { searchParams: Parametr
                   </Selector>
                 </Campo>
               </div>
+              {recargo ? (
+                <div className="flex flex-wrap items-end gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
+                  <p className="basis-full text-slate-700">
+                    <strong>{recargo.concepto}</strong>: se añade solo, {euros(recargo.importe)} por comensal (IVA incluido){recargo.platoId ? " y baja el stock por su escandallo" : ""}. Si la mesa no lo toma, márcalo y explica por qué (queda la línea anulada con el motivo).
+                  </p>
+                  <label className="flex min-h-10 items-center gap-2">
+                    <input type="checkbox" name="sinRecargo" /> La mesa no toma {recargo.concepto.toLowerCase()}
+                  </label>
+                  <Entrada name="motivoSinRecargo" placeholder="Motivo" className="w-72" aria-label="Motivo" />
+                </div>
+              ) : null}
               <div>
                 <p className="mb-2 text-sm font-medium">Líneas (plato o bebida, formato y cantidad)</p>
                 <FilasLineas carta={carta} filas={LINEAS_FORMULARIO} />
@@ -342,7 +354,8 @@ export default async function Tickets({ searchParams }: { searchParams: Parametr
                             {l.concepto}
                             {l.invitacion && <span className="ml-1 text-xs text-sky-700 no-underline">(invitación)</span>}
                             {Number(l.descuento) > 0 && <span className="ml-1 text-xs text-slate-500">(−{euros(l.descuento)})</span>}
-                            {!l.platoId && <span className="ml-1 text-xs text-amber-700">(sin enlazar con la carta)</span>}
+                            {l.recargoId && <span className="ml-1 text-xs text-slate-500">(por comensal)</span>}
+                            {!l.platoId && !l.recargoId && <span className="ml-1 text-xs text-amber-700">(sin enlazar con la carta)</span>}
                             {l.anulada && (
                               <span className="block text-xs no-underline">
                                 Anulada: {l.motivoAnulacion ?? "—"}
@@ -372,6 +385,18 @@ export default async function Tickets({ searchParams }: { searchParams: Parametr
                     </tbody>
                   </table>
                 </div>
+                {abierto && puedeCrear && (
+                  <form action={accionCambiarComensales} className="flex flex-wrap items-end gap-2">
+                    <input type="hidden" name="volver" value={volver} />
+                    <input type="hidden" name="id" value={t.id} />
+                    <Campo etiqueta="Comensales" ayuda="El pan y aperitivo se ajusta solo">
+                      <Entrada name="comensales" inputMode="numeric" defaultValue={String(t.comensales)} required className="w-24 text-right" />
+                    </Campo>
+                    <Boton type="submit" variante="secundario">
+                      Cambiar comensales
+                    </Boton>
+                  </form>
+                )}
                 {abierto && puedeCrear && (
                   <div className="grid gap-4 lg:grid-cols-2">
                     <form action={accionAnadirLineas} className="space-y-2 rounded-lg border border-slate-200 p-3">

@@ -26,7 +26,7 @@ export const AYUDA_CAJA: AyudaArea = {
           {
             nombre: "Venta del periodo",
             queEs: "Venta neta (sin IVA) de todas las jornadas entre «Desde» y «Hasta».",
-            logica: "Si no cambias las fechas, son los últimos 30 días hasta hoy.",
+            logica: "Si no cambias las fechas, son los últimos 30 días hasta hoy. En los locales con tickets incluye el pan y aperitivo cobrado (es una línea más del ticket); también el ticket medio y la venta por comensal.",
           },
           {
             nombre: "Ticket medio",
@@ -185,7 +185,23 @@ export const AYUDA_CAJA: AyudaArea = {
             logica: "Si el local no tiene ninguna carta activa, sale un aviso: hay que crearla en Comidas o Bebidas.",
           },
           { nombre: "Mesa", queEs: "Opcional. Número o nombre de la mesa." },
-          { nombre: "Comensales", queEs: "Personas de la mesa. Obligatorio; por defecto 2." },
+          {
+            nombre: "Comensales",
+            queEs: "Personas de la mesa. Obligatorio; por defecto 2.",
+            influye: "Si el local cobra pan y aperitivo, el ticket lleva una línea «Pan y aperitivo» = importe por persona × comensales. Con 0 comensales (barra) no se añade.",
+          },
+          {
+            nombre: "Pan y aperitivo (recuadro gris)",
+            queEs:
+              "Solo sale si el local tiene el recargo activo en Comidas → Carta → Pan y aperitivo. Dice el importe por persona (IVA incluido) y si baja stock. No se elige: se añade solo como primera línea del ticket, con su IVA.",
+            logica:
+              "Importe = precio por persona × comensales; el «Descuento a la cuenta (%)» también le toca. Si el recargo tiene un plato de escandallo, baja el stock de ese plato por cada comensal y tiene coste; si no, no baja stock y su coste es 0. El plato del escandallo no sale en la lista de líneas (no se puede cobrar dos veces).",
+          },
+          {
+            nombre: "La mesa no toma pan y aperitivo / Motivo",
+            queEs: "Márcalo si esa mesa no lo quiere y explica por qué (al menos 3 letras).",
+            logica: "La línea se guarda igualmente, pero anulada, con el motivo, quién y cuándo: no se cobra, no baja stock y cuenta en «Anulaciones».",
+          },
           {
             nombre: "Camarero",
             queEs: "Quién atiende la mesa.",
@@ -223,7 +239,7 @@ export const AYUDA_CAJA: AyudaArea = {
           { nombre: "Notas", queEs: "Comentario libre." },
           {
             nombre: "Guardar ticket",
-            queEs: "Guarda el ticket con su número correlativo (serie TCK) y baja el stock de lo pedido.",
+            queEs: "Guarda el ticket con su número correlativo (serie TCK), con la línea de pan y aperitivo si toca, y baja el stock de lo pedido.",
             logica: "Un ticket cobrado tiene que cuadrar: suma de cobros = total del ticket. Queda en el registro de cambios.",
             influye: "Recalcula la jornada de ese día en Ventas, y con ella el Cuadro de mando y el arqueo de caja.",
           },
@@ -244,7 +260,7 @@ export const AYUDA_CAJA: AyudaArea = {
             nombre: "Importar tickets",
             queEs: "Mete los tickets en el local elegido.",
             logica:
-              "Cada línea se enlaza con un plato de la carta del local por su nombre (sin tener en cuenta tildes ni mayúsculas) y el formato por su nombre. Lo que no se enlaza entra como «(sin enlazar)»: no baja stock ni tiene coste, y necesita traer precio (si no, ese ticket no se importa). Un ticket que ya se importó (mismo identificador) no se vuelve a meter. Los tickets importados llevan el número «TPV-…» y la etiqueta TPV. Las líneas que llegan anuladas no bajan stock. El día de negocio sale de la hora de apertura y la hora de corte del local.",
+              "Cada línea se enlaza con un plato de la carta del local por su nombre (sin tener en cuenta tildes ni mayúsculas) y el formato por su nombre. Lo que no se enlaza entra como «(sin enlazar)»: no baja stock ni tiene coste, y necesita traer precio (si no, ese ticket no se importa). Un ticket que ya se importó (mismo identificador) no se vuelve a meter. Los tickets importados llevan el número «TPV-…» y la etiqueta TPV. Las líneas que llegan anuladas no bajan stock. El día de negocio sale de la hora de apertura y la hora de corte del local. Pan y aperitivo: si el ticket trae una línea con ese nombre (o con «pan» y «aperitivo», o el plato del escandallo), se guarda como la línea del recargo, con el precio del TPV, sin duplicarla. Si no la trae, NO se añade (no se inventan ventas en lo importado): sale un aviso con los tickets con comensales que vienen sin ella, y otro si la trae para un número distinto de comensales.",
             influye: "Baja el stock de lo enlazado y recalcula las jornadas de los días importados.",
           },
         ],
@@ -306,7 +322,7 @@ export const AYUDA_CAJA: AyudaArea = {
           {
             nombre: "Tabla de líneas (Línea, Cant., Precio, Total, Coste)",
             queEs:
-              "Cada plato o bebida con su cantidad, precio unitario con IVA, total con IVA y coste teórico. Se marca «(invitación)», el descuento, «(sin enlazar con la carta)» si no baja stock, y las anuladas tachadas con su motivo, quién y cuándo.",
+              "Cada plato o bebida con su cantidad, precio unitario con IVA, total con IVA y coste teórico. Se marca «(invitación)», el descuento, «(por comensal)» en la línea de pan y aperitivo, «(sin enlazar con la carta)» si no baja stock, y las anuladas tachadas con su motivo, quién y cuándo.",
           },
         ],
       },
@@ -316,8 +332,16 @@ export const AYUDA_CAJA: AyudaArea = {
           {
             nombre: "Anular (en cada línea)",
             queEs: "Solo en tickets abiertos y con permiso de anular. Hay que escribir el motivo (al menos 3 letras).",
-            logica: "La línea deja de cobrarse y su coste pasa a 0. En un ticket ya cobrado no se anulan líneas sueltas: se anula el ticket entero y se vuelve a apuntar.",
+            logica:
+              "La línea deja de cobrarse y su coste pasa a 0. En un ticket ya cobrado no se anulan líneas sueltas: se anula el ticket entero y se vuelve a apuntar. Sirve también para la línea de pan y aperitivo de una mesa que no lo toma; después, aunque cambien los comensales, no se vuelve a añadir.",
             influye: "Devuelve al almacén el stock que había bajado y recalcula el ticket y la jornada.",
+          },
+          {
+            nombre: "Comensales / Cambiar comensales",
+            queEs: "Solo en tickets abiertos: cambia las personas de la mesa (número entero, 0 o más).",
+            logica:
+              "La línea de pan y aperitivo se ajusta sola: pasa a tener tantas unidades como comensales (el descuento que llevara se reparte igual por persona). Con 0 comensales se anula sola («Sin comensales: no se cobra»). Si el ticket no la tenía y el local la cobra, se añade, salvo que la mesa la hubiera rechazado (línea anulada a mano). En un ticket cobrado no se cambian: se anula y se vuelve a apuntar.",
+            influye: "Si el pan tiene escandallo, baja o devuelve el stock de la diferencia. Recalcula el ticket y la jornada; queda en el registro de cambios.",
           },
           {
             nombre: "Añadir líneas / Añadir",
@@ -519,7 +543,7 @@ export const AYUDA_CAJA: AyudaArea = {
           {
             nombre: "Área",
             queEs: "«Comidas y bebidas», «Comidas» o «Bebidas».",
-            logica: "Las líneas sin enlazar con la carta no tienen área: solo salen con «Comidas y bebidas».",
+            logica: "Las líneas sin enlazar con la carta no tienen área: solo salen con «Comidas y bebidas». El pan y aperitivo cuenta como «Comidas».",
           },
           { nombre: "Detalle de cada plato", queEs: "Si el detalle de cada fila se agrupa «Por meses» o «Por días»." },
         ],
@@ -539,7 +563,11 @@ export const AYUDA_CAJA: AyudaArea = {
       {
         titulo: "Venta por plato: tabla",
         campos: [
-          { nombre: "Plato · formato", queEs: "Plato (o bebida, marcada «(bebida)») y formato. Cada formato va en su fila." },
+          {
+            nombre: "Plato · formato",
+            queEs: "Plato (o bebida, marcada «(bebida)») y formato. Cada formato va en su fila. El pan y aperitivo va en una fila propia marcada «(por comensal)»: sus unidades son los comensales que lo han pagado.",
+            logica: "Su coste es el del plato de escandallo del recargo si lo tiene; si no, 0.",
+          },
           { nombre: "Unidades", queEs: "Unidades cobradas, sin las invitadas." },
           { nombre: "Venta", queEs: "Venta sin IVA." },
           {

@@ -82,6 +82,8 @@ export const esquemaRecargo = z.object({
   importe: numero("Importe no válido").pipe(z.number().min(0, { error: "El importe no puede ser negativo" })),
   iva: numero("IVA no válido").pipe(z.number().min(0).max(21)),
   activo: casilla,
+  /** Plato con el escandallo de lo que se sirve (opcional): con él, cada cobro baja el stock. */
+  platoId: textoOpcional,
 });
 
 /** Formato de venta: cantidad = parte del escandallo (o unidades del producto elegido); o centilitros si el vino tiene capacidad. */

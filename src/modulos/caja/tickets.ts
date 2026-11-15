@@ -3,11 +3,14 @@
  * jornada de venta calculada desde los tickets. Sin "server-only": lo usan la pantalla de Caja (a través
  * de servicio.ts), la importación del TPV y la semilla de Raza Pruebas, con la MISMA lógica.
  * Las líneas descuentan stock con descontarStockVentas (src/nucleo/consumo-ventas.ts).
+ * Recargo por comensal (pan y aperitivo, CartaRecargo de Comidas): una línea propia con recargoId y
+ * cantidad = comensales (lineaRecargo); se ajusta al cambiar los comensales (cambiarComensales) y se anula
+ * como cualquier línea. Solo baja stock si el recargo tiene un plato con escandallo.
  * Ver docs/specs/modulos/caja/README.md.
  */
 import type { Prisma } from "../../generated/prisma/client";
 import type { Tx } from "../../nucleo/motor-movimientos";
-import { cargarEscandallos, costesProductos, consumoDeVenta, descontarStockVentas, type EscandalloVenta, type LineaVendida } from "../../nucleo/consumo-ventas";
+import { cargarEscandallos, costesProductos, consumoDeVenta, descontarStockVentas, recargosDeVenta, type EscandalloVenta, type LineaVendida, type RecargoVenta } from "../../nucleo/consumo-ventas";
 import { insertarPorLotes, UMBRAL_LOTE_RAPIDO } from "../../nucleo/insertar-lotes";
 import { euros } from "../../kernel/formato";
 
@@ -19,6 +22,8 @@ export type Origen = "MANUAL" | "TPV";
 
 export interface LineaTicketNueva {
   platoId?: string | null;
+  /** Línea de recargo por comensal (pan y aperitivo): id del CartaRecargo. Mejor con lineaRecargo(). */
+  recargoId?: string | null;
   formatoId?: string | null;
   /** Texto del ticket; si no se da, nombre del plato y del formato. */
   concepto?: string;
@@ -150,6 +155,39 @@ export function conceptoLinea(esc: EscandalloVenta, formatoId: string | null | u
 }
 
 // ---------------------------------------------------------------------------------------------
+// Recargo por comensal (pan y aperitivo)
+// ---------------------------------------------------------------------------------------------
+
+/** Motivo con el que se anula sola la línea del recargo cuando el ticket se queda sin comensales. */
+export const MOTIVO_SIN_COMENSALES = "Sin comensales: no se cobra";
+
+/**
+ * Línea del recargo por comensal de un ticket nuevo: importe por persona × comensales, con su IVA.
+ * Sin comensales (barra) no hay línea. `quitar`: la mesa no lo toma (la línea queda anulada con el motivo,
+ * para que se vea y quede auditado). `descuentoPct`: el descuento a la cuenta también le toca.
+ */
+export function lineaRecargo(
+  recargo: RecargoVenta,
+  comensales: number,
+  opciones: { momento?: Date; descuentoPct?: number; quitar?: { motivo: string; por?: string | null; en?: Date } | null } = {},
+): LineaTicketNueva | null {
+  if (!(comensales > 0)) return null;
+  const pct = opciones.descuentoPct ?? 0;
+  return {
+    platoId: recargo.platoId,
+    formatoId: null,
+    recargoId: recargo.id,
+    concepto: recargo.concepto,
+    cantidad: comensales,
+    precio: recargo.importe,
+    iva: recargo.iva,
+    descuento: pct > 0 ? r2((comensales * recargo.importe * pct) / 100) : 0,
+    anulada: opciones.quitar ?? null,
+    momento: opciones.momento,
+  };
+}
+
+// ---------------------------------------------------------------------------------------------
 // Guardar tickets (uno o miles)
 // ---------------------------------------------------------------------------------------------
 
@@ -206,7 +244,7 @@ export async function guardarTickets(tx: Tx, tenantId: string, tickets: TicketNu
       const esc = l.platoId ? escandallos.get(l.platoId) : undefined;
       if (l.platoId && !esc) throw new ErrorTicket("Hay una línea con un plato que no existe.");
       const aj = esc ? ajuste.get(`${esc.platoId}|${t.centroId}`) : undefined;
-      if (esc && aj && !aj.disponible && t.origen !== "TPV") throw new ErrorTicket(`«${esc.nombre}» no se sirve en este local.`);
+      if (esc && aj && !aj.disponible && t.origen !== "TPV" && !l.recargoId) throw new ErrorTicket(`«${esc.nombre}» no se sirve en este local.`);
       if (!esc && l.precio === undefined) throw new ErrorTicket("Una línea sin plato de la carta necesita precio.");
       const precio = l.precio ?? precioEnLocal(esc!, l.formatoId, aj?.precio != null ? Number(aj.precio) : null);
       const iva = l.iva ?? esc?.iva ?? 10;
@@ -229,6 +267,7 @@ export async function guardarTickets(tx: Tx, tenantId: string, tickets: TicketNu
         momento,
         platoId: esc?.platoId ?? null,
         formatoId: esc && l.formatoId ? l.formatoId : null,
+        recargoId: l.recargoId ?? null,
         concepto: l.concepto ?? (esc ? conceptoLinea(esc, l.formatoId) : "Sin concepto"),
         cantidad: r3(l.cantidad),
         precio,
@@ -290,7 +329,7 @@ export async function guardarTickets(tx: Tx, tenantId: string, tickets: TicketNu
     await insertarPorLotes(
       tx,
       "TicketLinea",
-      [["id", "text"], ["ticketId", "text"], ["orden", "int"], ["momento", "timestamp"], ["platoId", "text"], ["formatoId", "text"], ["concepto", "text"], ["cantidad", "numeric"], ["precio", "numeric"], ["iva", "numeric"], ["descuento", "numeric"], ["invitacion", "boolean"], ["total", "numeric"], ["base", "numeric"], ["costeTeorico", "numeric"], ["anulada", "boolean"], ["motivoAnulacion", "text"], ["anuladaPor", "text"], ["anuladaEn", "timestamp"]],
+      [["id", "text"], ["ticketId", "text"], ["orden", "int"], ["momento", "timestamp"], ["platoId", "text"], ["formatoId", "text"], ["recargoId", "text"], ["concepto", "text"], ["cantidad", "numeric"], ["precio", "numeric"], ["iva", "numeric"], ["descuento", "numeric"], ["invitacion", "boolean"], ["total", "numeric"], ["base", "numeric"], ["costeTeorico", "numeric"], ["anulada", "boolean"], ["motivoAnulacion", "text"], ["anuladaPor", "text"], ["anuladaEn", "timestamp"]],
       filasLinea as Record<string, unknown>[],
     );
   await lotes(filasCobro, 3000, (l) => tx.ticketCobro.createMany({ data: l }));
@@ -340,7 +379,9 @@ export async function anadirLineas(tx: Tx, tenantId: string, ticketId: string, l
   const t = await ticketDe(tx, tenantId, ticketId);
   if (t.estado !== "ABIERTO") throw new ErrorTicket("Solo se pueden añadir líneas a un ticket abierto.");
   const platoIds = lineas.map((l) => l.platoId).filter((x): x is string => !!x);
-  const [escandallos, ajustes] = await Promise.all([cargarEscandallos(tx, tenantId, platoIds), tx.cartaPlatoPrecio.findMany({ where: { platoId: { in: platoIds }, centroId: t.centroId } })]);
+  const [escandallos, ajustes, recargos] = await Promise.all([cargarEscandallos(tx, tenantId, platoIds), tx.cartaPlatoPrecio.findMany({ where: { platoId: { in: platoIds }, centroId: t.centroId } }), recargosDeVenta(tx, tenantId, [t.centroId])]);
+  const recargo = recargos.get(t.centroId);
+  if (recargo?.platoId && platoIds.includes(recargo.platoId)) throw new ErrorTicket(`«${recargo.concepto}» se cobra solo por comensal: cambia los comensales del ticket.`);
   const ajuste = new Map(ajustes.map((a) => [a.platoId, a]));
   const vendidas: LineaVendida[] = [];
   const filas: Prisma.TicketLineaCreateManyInput[] = [];
@@ -414,6 +455,65 @@ export async function anularTicket(tx: Tx, tenantId: string, ticketId: string, m
   await actualizarTotales(tx, t.id);
   await recalcularJornadas(tx, tenantId, [{ centroId: t.centroId, fecha: t.fecha.toISOString().slice(0, 10) }]);
   return t;
+}
+
+/**
+ * Cambia los comensales de un ticket abierto y ajusta la línea del recargo por comensal:
+ * - si la hay (sin anular): pasa a tener tantas unidades como comensales (el stock, si tiene escandallo,
+ *   baja o vuelve por la diferencia); con 0 comensales se anula sola (MOTIVO_SIN_COMENSALES);
+ * - si no la hay y el local cobra el recargo: se añade, salvo que la mesa lo rechazara (línea anulada a mano).
+ */
+export async function cambiarComensales(tx: Tx, tenantId: string, ticketId: string, comensales: number, usuarioId?: string | null) {
+  if (!Number.isInteger(comensales) || comensales < 0) throw new ErrorTicket("Los comensales no son válidos.");
+  const t = await ticketDe(tx, tenantId, ticketId);
+  if (t.estado !== "ABIERTO") throw new ErrorTicket("Solo se cambian los comensales de un ticket abierto. Si ya está cobrado, anula el ticket entero y vuelve a hacerlo.");
+  const antes = t.comensales;
+  const ahora = new Date();
+  const motivoStock = `Comensales ${antes} → ${comensales}: ticket ${t.numero}${t.mesa ? ` · mesa ${t.mesa}` : ""}`;
+  const deRecargo = t.lineas.filter((l) => l.recargoId);
+  const viva = deRecargo.find((l) => !l.anulada);
+  const rechazado = deRecargo.some((l) => l.anulada && l.motivoAnulacion !== MOTIVO_SIN_COMENSALES);
+  let recargo: "ajustado" | "añadido" | "quitado" | "rechazado" | "sin recargo" | "igual" = "igual";
+  await tx.ticket.update({ where: { id: t.id }, data: { comensales } });
+  if (viva) {
+    const n = Number(viva.cantidad);
+    if (comensales === 0) {
+      if (viva.platoId)
+        await descontarStockVentas(tx, tenantId, [{ centroId: t.centroId, platoId: viva.platoId, formatoId: null, cantidad: n, sentido: "anulacion", fecha: ahora, documento: t.numero, documentoId: t.id, motivo: motivoStock, usuarioId }]);
+      await tx.ticketLinea.update({ where: { id: viva.id }, data: { anulada: true, motivoAnulacion: MOTIVO_SIN_COMENSALES, anuladaPor: usuarioId ?? null, anuladaEn: ahora, total: 0, base: 0, costeTeorico: 0 } });
+      recargo = "quitado";
+    } else if (comensales !== n) {
+      const dif = comensales - n;
+      let coste = n > 0 ? (Number(viva.costeTeorico) / n) * comensales : 0;
+      if (viva.platoId) {
+        const r = await descontarStockVentas(tx, tenantId, [{ centroId: t.centroId, platoId: viva.platoId, formatoId: null, cantidad: Math.abs(dif), sentido: dif > 0 ? "venta" : "anulacion", fecha: ahora, documento: t.numero, documentoId: t.id, motivo: motivoStock, usuarioId }]);
+        coste = dif > 0 ? Number(viva.costeTeorico) + r.costes[0] : coste;
+      }
+      // el descuento (importe) se reparte igual por persona
+      const descuento = n > 0 ? r2((Number(viva.descuento) * comensales) / n) : 0;
+      const imp = importesLinea({ cantidad: comensales, precio: Number(viva.precio), iva: Number(viva.iva), descuento, invitacion: viva.invitacion, anulada: false });
+      await tx.ticketLinea.update({ where: { id: viva.id }, data: { cantidad: comensales, descuento, total: imp.total, base: imp.base, costeTeorico: r4(coste) } });
+      recargo = "ajustado";
+    }
+  } else if (comensales > 0) {
+    const r = (await recargosDeVenta(tx, tenantId, [t.centroId])).get(t.centroId);
+    if (!r) recargo = "sin recargo";
+    else if (rechazado) recargo = "rechazado";
+    else {
+      const l = lineaRecargo(r, comensales, { momento: ahora })!;
+      const imp = importesLinea({ cantidad: l.cantidad, precio: l.precio!, iva: l.iva!, descuento: 0, invitacion: false, anulada: false });
+      let coste = 0;
+      if (l.platoId)
+        coste = (await descontarStockVentas(tx, tenantId, [{ centroId: t.centroId, platoId: l.platoId, formatoId: null, cantidad: l.cantidad, sentido: "venta", fecha: ahora, documento: t.numero, documentoId: t.id, motivo: motivoStock, usuarioId }])).costes[0];
+      await tx.ticketLinea.create({
+        data: { id: nuevoId(), ticketId: t.id, orden: t.lineas.length + 1, momento: ahora, platoId: l.platoId ?? null, recargoId: l.recargoId!, concepto: l.concepto!, cantidad: l.cantidad, precio: l.precio!, iva: l.iva!, total: imp.total, base: imp.base, costeTeorico: r4(coste) },
+      });
+      recargo = "añadido";
+    }
+  }
+  await actualizarTotales(tx, t.id);
+  await recalcularJornadas(tx, tenantId, [{ centroId: t.centroId, fecha: t.fecha.toISOString().slice(0, 10) }]);
+  return { ticket: t, antes, recargo };
 }
 
 // ---------------------------------------------------------------------------------------------

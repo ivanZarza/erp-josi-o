@@ -2,7 +2,7 @@ import { exigir } from "@/kernel/contexto";
 import { euros, fecha, numero } from "@/kernel/formato";
 import { Cabecera, BotonEnlace, Campo, Selector, Entrada, Boton, Etiqueta, Aviso, HuecoIntegracion, Tabla } from "@/ui";
 import { TablaDesplegable, DatosDetalle } from "@/ui/tabla-desplegable";
-import { listarFacturasEmitidas, sociedadesVisibles, diccionarios, hoyISO } from "@/modulos/contabilidad/servicio";
+import { listarFacturasEmitidas, sociedadesVisibles, diccionarios, hoyISO, detalleEntreSociedades } from "@/modulos/contabilidad/servicio";
 import { accionMarcarEmitidaFuera, accionCobrarFacturaEmitida, accionAnularFacturaEmitida } from "@/modulos/contabilidad/acciones";
 import { Avisos, Filtros, FiltroSociedad, FiltroMes, FormularioPago, BotonAccion, ESTADO_EMITIDA, param, type ParametrosBusqueda } from "../_comun";
 
@@ -15,6 +15,7 @@ export default async function FacturasEmitidas({ searchParams }: { searchParams:
   const [facturas, sociedades, d] = await Promise.all([listarFacturasEmitidas(ctx, filtro), sociedadesVisibles(ctx), diccionarios(ctx)]);
   const puedeEditar = ctx.puede("contabilidad:facturas:editar");
   const hoy = hoyISO();
+  const entre = await detalleEntreSociedades(ctx.tenant.id, facturas.filter((f) => f.origen === "ENTRE_SOCIEDADES").map((f) => f.id));
   const volver = `/contabilidad/emitidas?${new URLSearchParams(Object.entries(filtro).filter(([, v]) => v) as [string, string][]).toString()}`;
 
   return (
@@ -22,7 +23,16 @@ export default async function FacturasEmitidas({ searchParams }: { searchParams:
       <Cabecera
         titulo="Facturas emitidas"
         subtitulo="Eventos, catering y ventas entre sociedades del grupo."
-        acciones={puedeEditar ? <BotonEnlace href="/contabilidad/emitidas/nueva">Preparar factura</BotonEnlace> : undefined}
+        acciones={
+          puedeEditar ? (
+            <div className="flex flex-wrap gap-2">
+              <BotonEnlace href="/contabilidad/emitidas/obrador" variante="secundario">
+                Facturar pedidos del obrador
+              </BotonEnlace>
+              <BotonEnlace href="/contabilidad/emitidas/nueva">Preparar factura</BotonEnlace>
+            </div>
+          ) : undefined
+        }
       />
       <Avisos sp={sp} />
       <div className="mb-4 space-y-3">
@@ -80,6 +90,15 @@ export default async function FacturasEmitidas({ searchParams }: { searchParams:
                   { etiqueta: "Base", valor: euros(f.base) },
                   { etiqueta: "IVA", valor: euros(f.cuotaIva) },
                   { etiqueta: "Cobrada", valor: f.cobradaEn ? fecha(f.cobradaEn) : "—" },
+                  ...(f.origen === "ENTRE_SOCIEDADES"
+                    ? [
+                        {
+                          etiqueta: "Pedidos internos que factura",
+                          valor: f.pedidos.length ? f.pedidos.map((x) => { const p = entre.pedidos.get(x.pedidoInternoId); return p ? `${p.numero}${p.albaran ? ` (${p.albaran})` : ""}` : "—"; }).join(", ") : "Ninguno enlazado (preparada a mano)",
+                        },
+                        { etiqueta: "Espejo en el local", valor: entre.espejos.get(f.id) ? `Factura recibida ${entre.espejos.get(f.id)!.numero}` : "—" },
+                      ]
+                    : []),
                   { etiqueta: "Notas", valor: f.notas ?? "—" },
                 ]}
               />

@@ -31,10 +31,12 @@ export const FacturaRecibidaEsquema = z.object({
   vencimiento: fechaOpcional,
   // obligatoria: sin categoría la factura no se puede llevar ni al Cuadro de mando ni a la cuenta de la gestoría
   categoriaId: z.string({ message: "Elige la categoría de la factura (se usa en las líneas que no tengan la suya)" }).min(1, "Elige la categoría de la factura (se usa en las líneas que no tengan la suya)"),
-  // compra recibida (albarán) que factura: permite cruzarla aunque las líneas no lleven producto
+  // albaranes (compras recibidas) que factura: una factura semanal o mensual junta varios; cada albarán en una sola factura
+  albaranIds: z.array(z.string().min(1)).default([]),
+  // antiguo: un solo albarán (se sigue aceptando)
   pedidoCompraId: opcional,
   notas: opcional,
-  // vacías = se copian las líneas del albarán enlazado (con su producto)
+  // vacías = se copian las líneas de los albaranes enlazados (con su producto)
   lineas: z.array(LineaFacturaEsquema),
 });
 export type FacturaRecibidaDatos = z.infer<typeof FacturaRecibidaEsquema>;
@@ -89,6 +91,12 @@ export const CategoriaEsquema = z.object({
   cuentaGestoria: opcional,
 });
 export type CategoriaDatos = z.infer<typeof CategoriaEsquema>;
+
+export const FacturarObradorEsquema = z.object({
+  mes: z.string().regex(/^\d{4}-\d{2}$/, "Mes no válido"),
+  // vacío = todos los locales con pedidos por facturar
+  destinoIds: z.array(z.string().min(1)).default([]),
+});
 
 export const ExportarEsquema = z.object({
   sociedadId: z.string().min(1, "Elige la sociedad"),
