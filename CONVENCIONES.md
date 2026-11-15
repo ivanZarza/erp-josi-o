@@ -41,6 +41,10 @@ prisma/semillas/<id>.ts    datos de ejemplo del módulo
 - Estados: si no hay datos, `Vacio` con qué hacer. Iconos de `lucide-react`. Nada de emojis.
 - Donde irá una integración externa, pon `<HuecoIntegracion nombre="…" descripcion="…" />` y deja que los datos se metan a mano.
 
+## Ayuda de cada pantalla (obligatorio)
+- Cada pantalla tiene su ayuda en `src/ayuda/contenido/<area>.ts` (tipos en `src/ayuda/tipos.ts`; clave = ruta con parámetros entre corchetes). Si creas o cambias una pantalla, crea o actualiza su ayuda: para qué sirve, quién, cada campo, columna, cifra, filtro y botón (qué es, cómo se calcula, en qué influye). Escríbela leyendo el código, no de memoria.
+- `npm run ayuda:comprobar` tiene que terminar sin avisos.
+
 ## Comprobar tu trabajo
 - `npm run db:generate` y `npm run db:push` usan un candado para no pisarse entre módulos:
   `flock /tmp/erp-prisma.lock npx prisma generate` y `flock /tmp/erp-prisma.lock npx prisma db push`
