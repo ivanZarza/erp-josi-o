@@ -7,6 +7,7 @@
  */
 import type { PrismaClient } from "../../src/generated/prisma/client";
 import type { ContextoSemilla } from "./index";
+import { hoyMadrid } from "../../src/kernel/fechas";
 
 const DIA_MS = 24 * 60 * 60 * 1000;
 
@@ -114,9 +115,6 @@ async function siguiente(prisma: PrismaClient, tenantId: string, serie: string, 
   return `${serie}-${String(c.valor).padStart(digitos, "0")}`;
 }
 
-function hoyMadrid(): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Madrid" }).format(new Date());
-}
 
 export async function sembrar(prisma: PrismaClient, ctx: ContextoSemilla): Promise<void> {
   const t = ctx.tenantId;

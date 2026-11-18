@@ -1,4 +1,5 @@
 import "server-only";
+import { hoyMadrid } from "@/kernel/fechas";
 /**
  * Lógica de Contabilidad. Todo va por sociedad (lo fiscal) y, si se sabe, por centro (lo de gestión).
  * El ERP NO lleva la contabilidad oficial ni emite facturas certificadas (Verifactu, P-23):
@@ -39,7 +40,7 @@ export function aFecha(iso: string): Date {
 
 /** Hoy en Madrid como «AAAA-MM-DD». */
 export function hoyISO(): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Madrid", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  return hoyMadrid();
 }
 
 /** «2026-11» → primer día del mes y primer día del mes siguiente (UTC). */

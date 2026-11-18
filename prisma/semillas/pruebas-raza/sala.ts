@@ -17,6 +17,7 @@
 import { randomUUID } from "node:crypto";
 import type { Prisma, PrismaClient } from "../../../src/generated/prisma/client";
 import type { ContextoPruebas } from "./contexto";
+import { diaMadrid, instanteMadrid, partesMadrid } from "../../../src/kernel/fechas";
 
 // ---------------------------------------------------------------- utilidades
 
@@ -32,7 +33,7 @@ function azar(semilla: number) {
   };
 }
 
-const textoDia = (d: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Madrid", year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
+const textoDia = (d: Date) => diaMadrid(d);
 const fechaDia = (s: string) => new Date(`${s}T00:00:00.000Z`);
 const sumarDias = (s: string, n: number) => new Date(fechaDia(s).getTime() + n * DIA_MS).toISOString().slice(0, 10);
 /** 1 = lunes … 7 = domingo */
@@ -41,16 +42,9 @@ const aMin = (h: string) => Number(h.slice(0, 2)) * 60 + Number(h.slice(3, 5));
 const deMin = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 const redondear = (n: number, dec = 2) => Math.round(n * 10 ** dec) / 10 ** dec;
 
-/** Minutos de diferencia de Madrid con UTC en ese instante (60 en invierno, 120 en verano). */
-function desfaseMadrid(d: Date) {
-  const v = new Intl.DateTimeFormat("en-US", { timeZone: "Europe/Madrid", timeZoneName: "shortOffset" }).formatToParts(d).find((p) => p.type === "timeZoneName")?.value ?? "GMT+1";
-  const m = v.match(/GMT([+-]\d+)/);
-  return m ? Number(m[1]) * 60 : 60;
-}
 /** Instante real de «día a la hora tal» en Madrid (admite minutos > 24 h para pasar de medianoche). */
 function enMadrid(dia: string, minutos: number) {
-  const base = fechaDia(dia).getTime() + minutos * 60_000;
-  return new Date(base - desfaseMadrid(new Date(base)) * 60_000);
+  return instanteMadrid(dia, "00:00", minutos);
 }
 
 async function enLotes<T>(filas: T[], crear: (lote: T[]) => Promise<unknown>, tam = 1000) {
@@ -231,7 +225,7 @@ async function sembrarReservasYClientes(prisma: PrismaClient, ctx: ContextoPrueb
   const elegir = <T,>(l: T[]) => l[Math.floor(r() * l.length)];
   const ahora = ctx.hoy;
   const hoy = textoDia(ahora);
-  const ahoraMin = aMin(new Intl.DateTimeFormat("es-ES", { timeZone: "Europe/Madrid", hour: "2-digit", minute: "2-digit", hour12: false }).format(ahora));
+  const ahoraMin = partesMadrid(ahora).minutos;
   const marcaRaza = ctx.marcas.RAZA ?? null;
 
   // ------------------------------------------------------------ plano

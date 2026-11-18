@@ -5,12 +5,13 @@
  */
 import type { PrismaClient } from "../../src/generated/prisma/client";
 import type { ContextoSemilla } from "./index";
+import { hoyMadrid } from "../../src/kernel/fechas";
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
 export async function sembrar(prisma: PrismaClient, ctx: ContextoSemilla) {
   const t = ctx.tenantId;
-  const hoyISO = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Madrid", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  const hoyISO = hoyMadrid();
   const [anio, mes] = hoyISO.split("-").map(Number);
   if ((await prisma.presupuestoCentro.count({ where: { tenantId: t, anio, mes } })) > 0) return;
   const diasMes = new Date(Date.UTC(anio, mes, 0)).getUTCDate();

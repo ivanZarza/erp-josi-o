@@ -8,7 +8,8 @@
  *   la hora de corte (05:00 por defecto): un fichaje a las 01:30 cuenta para el día anterior.
  */
 
-export const ZONA = "Europe/Madrid";
+import { diaMadrid, instanteMadrid, jornadaMadrid, partesMadrid } from "../../kernel/fechas";
+
 export const HORA_CORTE = "05:00";
 
 /** "2026-11-09" → Date a medianoche UTC (para campos @db.Date). */
@@ -63,17 +64,12 @@ export function nombreMes(mes: string): string {
   return `${NOMBRES_MES[m - 1]} de ${a}`;
 }
 
-/** Partes de un instante en hora de Madrid. */
-export function partesMadrid(d: Date): { dia: string; hora: string; minutos: number } {
-  const p = new Intl.DateTimeFormat("en-CA", { timeZone: ZONA, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(d);
-  const v = (t: string) => p.find((x) => x.type === t)?.value ?? "00";
-  const hora = `${v("hour")}:${v("minute")}`;
-  return { dia: `${v("year")}-${v("month")}-${v("day")}`, hora, minutos: aMinutos(hora) };
-}
+/** Partes de un instante en hora de Madrid (común: src/kernel/fechas.ts). */
+export { partesMadrid };
 
-/** Hoy en Madrid, "2026-11-08". */
+/** Hoy en Madrid, "2026-11-08" (o el día de Madrid del instante que se pase). */
 export function hoyMadrid(ahora = new Date()): string {
-  return partesMadrid(ahora).dia;
+  return diaMadrid(ahora);
 }
 
 /** "HH:MM" → minutos desde las 00:00. */
@@ -111,21 +107,8 @@ export function horasTurno(t: Turno): number {
   return Math.max(0, min) / 60;
 }
 
-/** Desfase de Madrid respecto a UTC (minutos) en un instante. */
-function desfaseMadrid(instante: number): number {
-  const p = partesMadrid(new Date(instante));
-  const [a, m, d] = p.dia.split("-").map(Number);
-  const local = Date.UTC(a, m - 1, d, Math.floor(p.minutos / 60), p.minutos % 60);
-  return Math.round((local - Math.floor(instante / 60_000) * 60_000) / 60_000);
-}
-
-/** Instante real de un día + hora de Madrid. minutosExtra permite pasar de las 24:00. */
-export function instanteMadrid(dia: string, hhmm: string, minutosExtra = 0): Date {
-  const [a, m, d] = dia.split("-").map(Number);
-  const supuesto = Date.UTC(a, m - 1, d) + (aMinutos(hhmm) + minutosExtra) * 60_000;
-  const desfase = desfaseMadrid(supuesto - 60 * 60_000 * 2);
-  return new Date(supuesto - desfase * 60_000);
-}
+/** Instante real de un día + hora de Madrid (común: src/kernel/fechas.ts). */
+export { instanteMadrid };
 
 /** Inicio y fin reales de un turno de un día (el fin del último tramo, cruzando medianoche si hace falta). */
 export function limitesTurno(dia: string, t: Turno): { inicio: Date; fin: Date } {
@@ -143,8 +126,7 @@ export function limitesTurno(dia: string, t: Turno): { inicio: Date; fin: Date }
 
 /** Día de jornada al que pertenece un fichaje (resta la hora de corte). */
 export function jornadaDe(momento: Date, horaCorte = HORA_CORTE): string {
-  const p = partesMadrid(momento);
-  return p.minutos < aMinutos(horaCorte) ? sumarDias(p.dia, -1) : p.dia;
+  return jornadaMadrid(momento, horaCorte);
 }
 
 /** "2026-11-09" válido */

@@ -5,6 +5,7 @@ import { auditar } from "@/kernel/eventos";
 import { centrosFiltro, type Contexto } from "@/kernel/contexto";
 import { Prisma, type PrismaClient } from "@/generated/prisma/client";
 import type { DatosCliente } from "./esquemas";
+import { fecha as fechaTexto } from "@/kernel/formato";
 
 /**
  * Lógica del módulo Clientes. Otros módulos (Reservas, Eventos) usan solo lo que se exporta aquí:
@@ -231,7 +232,7 @@ export async function exportarClientesCsv(ctx: Contexto): Promise<string> {
     include: { consentimientos: true },
     orderBy: { nombre: "asc" },
   });
-  const f = (d: Date | null) => (d ? new Intl.DateTimeFormat("es-ES", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "Europe/Madrid" }).format(d) : "");
+  const f = (d: Date | null) => (d ? fechaTexto(d) : "");
   const celda = (v: unknown) => {
     const s = v === null || v === undefined ? "" : String(v);
     return /[";\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;

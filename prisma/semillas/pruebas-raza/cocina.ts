@@ -24,6 +24,7 @@ import type { Prisma, PrismaClient, TipoMovimiento } from "../../../src/generate
 import { cantidadBruta, unirAlergenos } from "../../../src/modulos/comidas/carta-alergenos";
 import { PREFIJO, type ContextoPruebas, type PlatoCarta } from "./contexto";
 import { CUBIERTOS, previsionPorComensal } from "./mezcla-ventas";
+import { diaMadrid } from "../../../src/kernel/fechas";
 
 // ===========================================================================
 // 1. Proveedores de comida (inventados)
@@ -526,7 +527,7 @@ function hash(s: string): number {
 }
 
 function fechaMadrid(d: Date): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Madrid" }).format(d);
+  return diaMadrid(d);
 }
 
 /** «Semana 45 · 2026» (semana ISO), como nombrePorDefecto del motor de inventarios. */

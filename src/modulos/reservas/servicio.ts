@@ -1,5 +1,5 @@
 import "server-only";
-import { hoyMadrid } from "@/kernel/fechas";
+import { hoyMadrid, partesMadrid } from "@/kernel/fechas";
 import { db } from "@/kernel/db";
 import { emitir } from "@/kernel/eventos";
 import { centrosFiltro, type Contexto } from "@/kernel/contexto";
@@ -70,7 +70,7 @@ export const deMin = (m: number) => `${String(Math.floor(m / 60) % 24).padStart(
 
 export { hoyMadrid } from "@/kernel/fechas";
 export function horaMadrid(): string {
-  return new Intl.DateTimeFormat("es-ES", { timeZone: "Europe/Madrid", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date());
+  return partesMadrid(new Date()).hora;
 }
 export const fechaDia = (s: string) => new Date(`${s}T00:00:00.000Z`);
 export const diaTexto = (d: Date) => d.toISOString().slice(0, 10);

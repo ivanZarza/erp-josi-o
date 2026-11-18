@@ -1,4 +1,5 @@
 import "server-only";
+import { jornadaMadrid } from "@/kernel/fechas";
 /**
  * Calidad: listas APPCC, temperaturas, incidencias y mantenimiento preventivo.
  * Ver docs/specs/modulos/calidad/README.md
@@ -42,11 +43,7 @@ function sumarDias(dia: string, n: number): string {
  * antes de esa hora sigue contando el día anterior.
  */
 export function jornadaHoy(horaCorte: string = HORA_CORTE, ahora = new Date()): string {
-  const partes = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Madrid", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(ahora);
-  const v = (t: string) => partes.find((p) => p.type === t)?.value ?? "00";
-  const dia = `${v("year")}-${v("month")}-${v("day")}`;
-  const [hc, mc] = (/^\d{1,2}:\d{2}$/.test(horaCorte) ? horaCorte : HORA_CORTE).split(":").map(Number);
-  return Number(v("hour")) * 60 + Number(v("minute")) < hc * 60 + mc ? sumarDias(dia, -1) : dia;
+  return jornadaMadrid(ahora, horaCorte);
 }
 
 /** Hora de corte de cada centro (Centro.horaCorte, del núcleo). */

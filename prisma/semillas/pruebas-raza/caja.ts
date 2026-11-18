@@ -38,6 +38,7 @@ import type { ContextoPruebas } from "./contexto";
 import { grupoDe, pesoArticulo, POR_COMENSAL, type Grupo } from "./mezcla-ventas";
 import { pesosComida } from "./cocina";
 import { pesosBebidas } from "./bebidas";
+import { diaMadrid } from "../../../src/kernel/fechas";
 
 // ---------------------------------------------------------------------------------------------
 // Utilidades
@@ -65,7 +66,7 @@ function aleatorio(semilla: number) {
 }
 
 function fechaMadrid(d: Date): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Madrid", year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
+  return diaMadrid(d);
 }
 const aFecha = (iso: string) => new Date(`${iso}T00:00:00.000Z`);
 const iso = (d: Date) => d.toISOString().slice(0, 10);

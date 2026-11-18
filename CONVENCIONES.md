@@ -7,6 +7,7 @@ Léelas antes de tocar nada. Las especificaciones completas están en `/home/iva
 ## Idioma
 - **Todo en español**: textos de pantalla, nombres de funciones y variables de negocio, comentarios. (Las palabras reservadas de TypeScript/React, en inglés, claro).
 - Números y fechas SIEMPRE con `src/kernel/formato.ts` (`euros`, `numero`, `fecha`, `fechaHora`, `porcentaje`). Nunca `toFixed` ni `toLocaleString` sueltos.
+- **Hora de Madrid SIEMPRE con `src/kernel/fechas.ts`** (`hoyMadrid`, `diaMadrid`, `partesMadrid`, `jornadaMadrid` con hora de corte, `inicioDiaMadrid`, `instanteMadrid`). Nunca `Intl.DateTimeFormat` con `Europe/Madrid` en un módulo: el servidor de Cloudflare va en hora universal.
 
 ## Estructura
 ```

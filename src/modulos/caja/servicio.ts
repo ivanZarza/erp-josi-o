@@ -1,4 +1,5 @@
 import "server-only";
+import { hoyMadrid } from "@/kernel/fechas";
 /**
  * Lógica de Caja y ventas. Las ventas mandan en el TPV (docs/specs/general/07_integraciones.md §7).
  * - Tickets con líneas (importados del TPV o apuntados en la pantalla): cada línea descuenta stock por
@@ -45,7 +46,7 @@ export function aFecha(iso: string): Date {
 }
 
 export function hoyISO(): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Madrid", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  return hoyMadrid();
 }
 
 export function sumarDias(iso: string, dias: number): string {

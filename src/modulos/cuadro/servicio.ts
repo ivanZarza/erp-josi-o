@@ -1,5 +1,5 @@
 import "server-only";
-import { hoyMadrid, inicioDiaMadrid } from "@/kernel/fechas";
+import { diaMadrid, hoyMadrid, inicioDiaMadrid } from "@/kernel/fechas";
 /**
  * Lógica del Cuadro de mando. Funciona aunque falten otros módulos: cada fuente se usa solo si su
  * módulo está contratado (ctx.tieneModulo); si no, la cifra sale como «sin datos» (null), nunca inventada.
@@ -286,7 +286,7 @@ function porcentajeTexto(parte: number, total: number): string {
 
 /** Fecha y hora real → día (Madrid) a medianoche UTC. */
 function fechaMadrid(d: Date): Date {
-  return aFecha(new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Madrid", year: "numeric", month: "2-digit", day: "2-digit" }).format(d));
+  return aFecha(diaMadrid(d));
 }
 
 export interface Presupuesto {

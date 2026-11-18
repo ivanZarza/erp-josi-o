@@ -11,6 +11,7 @@
 import type { PrismaClient } from "../../src/generated/prisma/client";
 import type { ContextoSemilla } from "./index";
 import { cantidadBruta, redondear, unirAlergenos } from "../../src/modulos/comidas/carta-alergenos";
+import { hoyMadrid } from "../../src/kernel/fechas";
 
 type Fila = [referencia: string, nombre: string, familia: string, unidad: string, coste: number, iva: number, alergenos: string[], trazas?: string[]];
 
@@ -289,9 +290,6 @@ async function siguiente(prisma: PrismaClient, tenantId: string, serie: string, 
   return `${serie}-${String(c.valor).padStart(digitos, "0")}`;
 }
 
-function hoyMadrid(): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Madrid" }).format(new Date());
-}
 
 export async function sembrar(prisma: PrismaClient, ctx: ContextoSemilla): Promise<void> {
   const t = ctx.tenantId;

@@ -6,6 +6,7 @@
  */
 import type { PrismaClient } from "../../src/generated/prisma/client";
 import type { ContextoSemilla } from "./index";
+import { hoyMadrid } from "../../src/kernel/fechas";
 
 /** Generador pseudoaleatorio con semilla fija: mismos datos de ejemplo en cada carga. */
 function aleatorio(semilla: number) {
@@ -18,7 +19,7 @@ function aleatorio(semilla: number) {
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
 function hoyISO(): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Madrid", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  return hoyMadrid();
 }
 
 // EJEMPLO: venta neta media diaria (sin IVA) y gasto medio por comensal de cada local. Inventado.

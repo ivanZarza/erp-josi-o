@@ -5,6 +5,7 @@
  * las reservas se enlazan con ellos.
  */
 import type { Sembrar } from "./index";
+import { hoyMadrid } from "../../src/kernel/fechas";
 
 type Mesa = { nombre: string; min: number; max: number; x: number; y: number; forma?: "CUADRADA" | "REDONDA" | "RECTANGULAR"; combinable?: boolean; especial?: string; internet?: boolean };
 type Espacio = { nombre: string; tipo: "SALA" | "TERRAZA" | "RESERVADO" | "BARRA"; aforo: number; ancho: number; alto: number; mesas: Mesa[] };
@@ -71,9 +72,6 @@ const PLANOS: Record<string, { grupoMaximo: number; espacios: Espacio[] }> = {
 
 const NOMBRES_SUELTOS = ["Familia Ortega", "Beatriz Calvo", "Óscar Peña", "Nuria Vidal", "Tomás Herrero", "Rocío Lozano", "Íñigo Arias", "Pilar Cano", "Gonzalo Prieto", "Lorena Méndez"];
 
-function hoyMadrid(dias = 0) {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Madrid", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(Date.now() + dias * 86_400_000));
-}
 const aMin = (h: string) => Number(h.slice(0, 2)) * 60 + Number(h.slice(3, 5));
 
 export const sembrar: Sembrar = async (prisma, ctx) => {

@@ -32,6 +32,7 @@
 import type { Prisma, PrismaClient, FormaPagoContable, EstadoFacturaRecibida } from "../../../src/generated/prisma/client";
 import type { ContextoPruebas } from "./contexto";
 import { generarFacturasObrador, type Dependencias } from "../../../src/modulos/contabilidad/facturacion-obrador";
+import { diaMadrid } from "../../../src/kernel/fechas";
 
 // ===========================================================================
 // Utilidades
@@ -43,7 +44,7 @@ const r4 = (n: number) => Math.round((n + Number.EPSILON) * 10000) / 10000;
 
 /** Día en Madrid «AAAA-MM-DD» de una fecha y hora real. */
 function isoMadrid(d: Date): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Madrid", year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
+  return diaMadrid(d);
 }
 /** «AAAA-MM-DD» → medianoche UTC (columnas @db.Date). */
 const aFecha = (iso: string) => new Date(`${iso}T00:00:00.000Z`);

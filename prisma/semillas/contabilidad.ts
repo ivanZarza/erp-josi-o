@@ -7,10 +7,11 @@
  */
 import type { PrismaClient } from "../../src/generated/prisma/client";
 import type { ContextoSemilla } from "./index";
+import { hoyMadrid } from "../../src/kernel/fechas";
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 function hoyISO(): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Madrid", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  return hoyMadrid();
 }
 const dia = (base: Date, dias: number) => new Date(base.getTime() + dias * 86400000);
 

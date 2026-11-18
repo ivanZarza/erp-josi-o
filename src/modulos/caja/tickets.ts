@@ -9,6 +9,7 @@
  * Ver docs/specs/modulos/caja/README.md.
  */
 import type { Prisma } from "../../generated/prisma/client";
+import { jornadaMadrid, partesMadrid } from "@/kernel/fechas";
 import type { Tx } from "../../nucleo/motor-movimientos";
 import { cargarEscandallos, costesProductos, consumoDeVenta, descontarStockVentas, recargosDeVenta, type EscandalloVenta, type LineaVendida, type RecargoVenta } from "../../nucleo/consumo-ventas";
 import { insertarPorLotes, UMBRAL_LOTE_RAPIDO } from "../../nucleo/insertar-lotes";
@@ -76,20 +77,15 @@ export const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
 const r4 = (n: number) => Math.round(n * 10000) / 10000;
 
-const formatoMadrid = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Madrid", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
-
-/** Fecha y hora de Madrid de un instante: { dia: «AAAA-MM-DD», minutos desde medianoche }. */
+/** Fecha y hora de Madrid de un instante: { dia: «AAAA-MM-DD», minutos desde medianoche } (común: src/kernel/fechas.ts). */
 export function horaMadrid(d: Date): { dia: string; minutos: number } {
-  const p = Object.fromEntries(formatoMadrid.formatToParts(d).map((x) => [x.type, x.value]));
-  return { dia: `${p.year}-${p.month}-${p.day}`, minutos: Number(p.hour) * 60 + Number(p.minute) };
+  const { dia, minutos } = partesMadrid(d);
+  return { dia, minutos };
 }
 
 /** Día de negocio de un instante: antes de la hora de corte cuenta para el día anterior. */
 export function diaDeNegocio(d: Date, horaCorte = "05:00"): string {
-  const [h, m] = horaCorte.split(":").map(Number);
-  const { dia, minutos } = horaMadrid(d);
-  if (minutos >= h * 60 + (m || 0)) return dia;
-  return new Date(Date.parse(`${dia}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
+  return jornadaMadrid(d, horaCorte);
 }
 
 /** Comida hasta las 17:00 (hora de Madrid); cena desde entonces (y hasta la hora de corte). */

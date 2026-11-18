@@ -32,6 +32,7 @@
  * (hora de Madrid) o ISO.
  */
 import { z } from "zod";
+import { partesMadrid } from "@/kernel/fechas";
 
 export const FORMAS_TPV = ["EFECTIVO", "TARJETA", "BIZUM", "VALE", "CREDITO", "OTRA"] as const;
 
@@ -77,8 +78,7 @@ export function leerFechaTpv(texto: string): Date {
     // hora de Madrid sin zona: se prueba con +01:00 y +02:00 y se queda la que da esa hora en Madrid
     for (const z of ["+01:00", "+02:00"]) {
       const d = new Date(`${m[1]}T${m[2].padStart(2, "0")}:${m[3]}:${m[4] ?? "00"}${z}`);
-      const h = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Madrid", hour: "2-digit", hourCycle: "h23" }).format(d);
-      if (Number(h) === Number(m[2])) return d;
+      if (Math.floor(partesMadrid(d).minutos / 60) === Number(m[2])) return d;
     }
   }
   const d = new Date(s);
